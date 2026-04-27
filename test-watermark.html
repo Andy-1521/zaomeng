@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>去除水印功能诊断</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: #eee;
+        }
+        .test-section {
+            background: #16213e;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            border: 1px solid #0f3460;
+        }
+        .test-title {
+            color: #e94560;
+            font-size: 1.2em;
+            margin-bottom: 15px;
+        }
+        .result {
+            background: #0f3460;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .success { color: #4ade80; }
+        .error { color: #ef4444; }
+        .info { color: #60a5fa; }
+        button {
+            background: #e94560;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #ff6b6b; }
+        button:disabled { background: #666; cursor: not-allowed; }
+        input[type="file"] {
+            background: #0f3460;
+            padding: 10px;
+            border: 1px solid #e94560;
+            border-radius: 4px;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 去除水印功能诊断工具</h1>
+
+    <!-- 检查1：用户登录状态 -->
+    <div class="test-section">
+        <div class="test-title">1. 检查用户登录状态</div>
+        <button onclick="checkUserLogin()">检查登录状态</button>
+        <div id="userResult" class="result">点击按钮开始检查...</div>
+    </div>
+
+    <!-- 检查2：图片上传功能 -->
+    <div class="test-section">
+        <div class="test-title">2. 测试图片上传功能</div>
+        <input type="file" id="testImage" accept="image/*">
+        <button onclick="testUpload()">测试上传</button>
+        <div id="uploadResult" class="result">选择图片并点击测试上传...</div>
+    </div>
+
+    <!-- 检查2.5：API密钥权限检查 -->
+    <div class="test-section">
+        <div class="test-title">2.5 检查RunningHub API密钥权限</div>
+        <button onclick="checkApiKeyPermission()">检查API密钥权限</button>
+        <div id="apiKeyResult" class="result">点击按钮检查API密钥权限状态...</div>
+    </div>
+
+    <!-- 检查3：RunningHub API -->
+    <div class="test-section">
+        <div class="test-title">3. 测试RunningHub去水印API</div>
+        <input type="text" id="imageUrlInput" placeholder="输入图片URL（从上一步获取）" style="width: 100%; padding: 10px; margin: 10px 0; background: #0f3460; border: 1px solid #e94560; color: white;">
+        <button onclick="testRemoveWatermark()">测试去水印</button>
+        <div id="watermarkResult" class="result">输入图片URL并点击测试去水印...</div>
+    </div>
+
+    <!-- 检查4：完整流程 -->
+    <div class="test-section">
+        <div class="test-title">4. 测试完整流程</div>
+        <input type="file" id="completeTestImage" accept="image/*">
+        <button onclick="testCompleteFlow()">测试完整流程</button>
+        <div id="completeResult" class="result">选择图片并点击测试完整流程...</div>
+    </div>
+
+    <script>
+        let currentUserId = null;
+        let uploadedImageUrl = null;
+
+        async function log(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            const timestamp = new Date().toLocaleTimeString();
+            const prefix = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
+            element.innerHTML += `\n[${timestamp}] ${prefix} ${message}`;
+            element.scrollTop = element.scrollHeight;
+        }
+
+        function clearLog(elementId) {
+            document.getElementById(elementId).innerHTML = '';
+        }
+
+        // 检查1：用户登录状态
+        function checkUserLogin() {
+            clearLog('userResult');
+            log('userResult', '开始检查用户登录状态...', 'info');
+
+            const userData = localStorage.getItem('user');
+            if (!userData) {
+                log('userResult', '❌ 用户未登录！localStorage中没有user数据', 'error');
+                log('userResult', '提示：请先登录网站', 'info');
+                return;
+            }
+
+            try {
+                const user = JSON.parse(userData);
+                log('userResult', `✅ 用户已登录`, 'success');
+                log('userResult', `用户ID: ${user.id}`, 'info');
+                log('userResult', `用户名: ${user.username || '未知'}`, 'info');
+                log('userResult', `积分: ${user.points || 0}`, 'info');
+                currentUserId = user.id;
+            } catch (error) {
+                log('userResult', `❌ 解析用户数据失败: ${error.message}`, 'error');
+            }
+        }
+
+        // 检查2：图片上传功能
+        async function testUpload() {
+            clearLog('uploadResult');
+            log('uploadResult', '开始测试图片上传...', 'info');
+
+            const fileInput = document.getElementById('testImage');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                log('uploadResult', '❌ 请先选择图片', 'error');
+                return;
+            }
+
+            log('uploadResult', `文件名: ${file.name}`, 'info');
+            log('uploadResult', `文件大小: ${file.size} bytes`, 'info');
+            log('uploadResult', `文件类型: ${file.type}`, 'info');
+
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('folder', 'test');
+
+                log('uploadResult', '正在上传到对象存储...', 'info');
+                const response = await fetch('/api/upload/file', {
+                    method: 'POST',
+                    credentials: 'include',
+                    body: formData
+                });
+
+                const data = await response.json();
+                log('uploadResult', `HTTP状态: ${response.status} ${response.statusText}`, 'info');
+                log('uploadResult', `响应数据: ${JSON.stringify(data, null, 2)}`, 'info');
+
+                if (!response.ok || !data.success) {
+                    log('uploadResult', `❌ 上传失败: ${data.message || '未知错误'}`, 'error');
+                    return;
+                }
+
+                uploadedImageUrl = data.data.url;
+                log('uploadResult', `✅ 上传成功！`, 'success');
+                log('uploadResult', `图片URL: ${uploadedImageUrl}`, 'info');
+                document.getElementById('imageUrlInput').value = uploadedImageUrl;
+            } catch (error) {
+                log('uploadResult', `❌ 上传异常: ${error.message}`, 'error');
+                console.error('上传错误:', error);
+            }
+        }
+
+        // 检查2.5：API密钥权限
+        async function checkApiKeyPermission() {
+            clearLog('apiKeyResult');
+            log('apiKeyResult', '开始检查RunningHub API密钥权限...', 'info');
+
+            try {
+                log('apiKeyResult', '正在调用账号状态查询API...', 'info');
+                const startTime = Date.now();
+
+                const response = await fetch('https://www.runninghub.cn/uc/openapi/accountStatus', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Host': 'www.runninghub.cn',
+                    },
+                    body: JSON.stringify({
+                        apiKey: 'f95a3b89ec9d4f06a0498d27aefac4d2'
+                    })
+                });
+
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                log('apiKeyResult', `HTTP状态: ${response.status} ${response.statusText} (耗时: ${elapsed}秒)`, 'info');
+
+                const responseText = await response.text();
+                log('apiKeyResult', `原始响应: ${responseText.substring(0, 500)}...`, 'info');
+
+                let data;
+                try {
+                    data = JSON.parse(responseText);
+                    log('apiKeyResult', `解析后的数据: ${JSON.stringify(data, null, 2)}`, 'info');
+                } catch (e) {
+                    log('apiKeyResult', `❌ 响应JSON解析失败`, 'error');
+                    return;
+                }
+
+                if (data.msg === 'success') {
+                    log('apiKeyResult', `✅ API密钥有效！`, 'success');
+                    log('apiKeyResult', `剩余金币: ${data.data.remainCoins}`, 'info');
+                    log('apiKeyResult', `当前任务数: ${data.data.currentTaskCounts}`, 'info');
+                    log('apiKeyResult', `账户余额: ${data.data.remainMoney} ${data.data.currency}`, 'info');
+                    
+                    if (parseInt(data.data.currentTaskCounts) >= 3) {
+                        log('apiKeyResult', `⚠️ 当前任务数已达到限制（3个），请等待任务完成`, 'info');
+                    } else {
+                        log('apiKeyResult', `✅ 可以开始新任务`, 'success');
+                    }
+                } else if (data.msg === 'APIKEY_UNSUPPORTED_FREE_USER') {
+                    log('apiKeyResult', `❌ API密钥权限不足！`, 'error');
+                    log('apiKeyResult', `错误类型: APIKEY_UNSUPPORTED_FREE_USER`, 'error');
+                    log('apiKeyResult', `原因: 当前API密钥为免费用户，不支持去水印功能`, 'error');
+                    log('apiKeyResult', `解决方案: 需要升级为付费API密钥，或联系管理员`, 'info');
+                } else {
+                    log('apiKeyResult', `❌ API密钥验证失败: ${data.msg}`, 'error');
+                }
+            } catch (error) {
+                log('apiKeyResult', `❌ 检查API密钥异常: ${error.message}`, 'error');
+                console.error('API密钥检查错误:', error);
+            }
+        }
+
+        // 检查3：RunningHub去水印API
+        async function testRemoveWatermark() {
+            clearLog('watermarkResult');
+            log('watermarkResult', '开始测试RunningHub去水印API...', 'info');
+
+            if (!currentUserId) {
+                log('watermarkResult', '❌ 用户未登录，请先执行检查1', 'error');
+                return;
+            }
+
+            const imageUrl = document.getElementById('imageUrlInput').value;
+            if (!imageUrl) {
+                log('watermarkResult', '❌ 请输入图片URL', 'error');
+                return;
+            }
+
+            log('watermarkResult', `图片URL: ${imageUrl}`, 'info');
+
+            try {
+                log('watermarkResult', '正在调用去水印API...', 'info');
+                const startTime = Date.now();
+
+                const response = await fetch('/api/remove-watermark/run', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        userId: currentUserId,
+                        imageUrl: imageUrl
+                    })
+                });
+
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                log('watermarkResult', `HTTP状态: ${response.status} ${response.statusText} (耗时: ${elapsed}秒)`, 'info');
+
+                const responseText = await response.text();
+                log('watermarkResult', `原始响应: ${responseText.substring(0, 500)}...`, 'info');
+
+                let data;
+                try {
+                    data = JSON.parse(responseText);
+                    log('watermarkResult', `解析后的数据: ${JSON.stringify(data, null, 2)}`, 'info');
+                } catch (e) {
+                    log('watermarkResult', `❌ 响应JSON解析失败`, 'error');
+                    return;
+                }
+
+                if (!response.ok || !data.success) {
+                    log('watermarkResult', `❌ 去水印失败: ${data.message || '未知错误'}`, 'error');
+                    if (data.debug) {
+                        log('watermarkResult', `调试信息: ${JSON.stringify(data.debug)}`, 'info');
+                    }
+                    return;
+                }
+
+                log('watermarkResult', `✅ 去水印成功！`, 'success');
+                log('watermarkResult', `订单号: ${data.data.orderId}`, 'info');
+                log('watermarkResult', `结果URL: ${data.data.resultUrl}`, 'info');
+                log('watermarkResult', `总耗时: ${elapsed}秒`, 'info');
+
+                // 显示结果图片
+                log('watermarkResult', `\n📸 结果图片预览:`, 'info');
+                log('watermarkResult', `<img src="${data.data.resultUrl}" style="max-width: 100%; border-radius: 8px; margin-top: 10px;">`, 'info');
+            } catch (error) {
+                log('watermarkResult', `❌ 去水印异常: ${error.message}`, 'error');
+                console.error('去水印错误:', error);
+            }
+        }
+
+        // 检查4：完整流程
+        async function testCompleteFlow() {
+            clearLog('completeResult');
+            log('completeResult', '开始测试完整流程...', 'info');
+
+            const fileInput = document.getElementById('completeTestImage');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                log('completeResult', '❌ 请先选择图片', 'error');
+                return;
+            }
+
+            if (!currentUserId) {
+                log('completeResult', '❌ 用户未登录，请先执行检查1', 'error');
+                return;
+            }
+
+            try {
+                // 步骤1：上传图片
+                log('completeResult', '步骤1: 上传图片...', 'info');
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('folder', 'test');
+
+                const uploadResponse = await fetch('/api/upload/file', {
+                    method: 'POST',
+                    credentials: 'include',
+                    body: formData
+                });
+
+                const uploadData = await uploadResponse.json();
+                if (!uploadResponse.ok || !uploadData.success) {
+                    log('completeResult', `❌ 上传失败: ${uploadData.message}`, 'error');
+                    return;
+                }
+
+                log('completeResult', `✅ 上传成功: ${uploadData.data.url}`, 'success');
+
+                // 步骤2：去水印
+                log('completeResult', '步骤2: 调用去水印API...', 'info');
+                const startTime = Date.now();
+
+                const watermarkResponse = await fetch('/api/remove-watermark/run', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        userId: currentUserId,
+                        imageUrl: uploadData.data.url
+                    })
+                });
+
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                const watermarkData = await watermarkResponse.json();
+
+                log('completeResult', `HTTP状态: ${watermarkResponse.status} (耗时: ${elapsed}秒)`, 'info');
+
+                if (!watermarkResponse.ok || !watermarkData.success) {
+                    log('completeResult', `❌ 去水印失败: ${watermarkData.message}`, 'error');
+                    return;
+                }
+
+                log('completeResult', `✅ 完整流程测试成功！`, 'success');
+                log('completeResult', `订单号: ${watermarkData.data.orderId}`, 'info');
+                log('completeResult', `结果URL: ${watermarkData.data.resultUrl}`, 'info');
+                log('completeResult', `总耗时: ${elapsed}秒`, 'info');
+                log('completeResult', `\n📸 结果图片:`, 'info');
+                log('completeResult', `<img src="${watermarkData.data.resultUrl}" style="max-width: 100%; border-radius: 8px; margin-top: 10px;">`, 'info');
+            } catch (error) {
+                log('completeResult', `❌ 完整流程异常: ${error.message}`, 'error');
+                console.error('完整流程错误:', error);
+            }
+        }
+    </script>
+</body>
+</html>
