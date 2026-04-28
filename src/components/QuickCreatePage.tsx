@@ -1,10 +1,19 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { showToast } from '@/lib/toast';
 import AutoRemoveBackgroundPage from '@/components/AutoRemoveBackgroundPage';
 import RemoveWatermarkPage from '@/components/RemoveWatermarkPage';
 import ImageUpsamplingPage from '@/components/ImageUpsamplingPage';
+
+type PluginCapturePayload = {
+  imageUrl: string;
+  pageUrl?: string;
+  pageTitle?: string;
+  sourceHost?: string;
+  capturedAt?: number;
+  imageType?: 'main' | 'detail';
+};
 
 // 自动抠图图标组件
 const RemoveBackgroundIcon = () => (
@@ -78,6 +87,9 @@ export default function QuickCreatePage() {
   const [isUploading, setIsUploading] = useState(false);
   const [selectedUploadImages, setSelectedUploadImages] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isExtensionInstalled, setIsExtensionInstalled] = useState(false);
+  const [isPluginCapturing, setIsPluginCapturing] = useState(false);
+  const [pluginStatus, setPluginStatus] = useState('未检测到插件');
 
   const templates: Template[] = [
     {
@@ -174,9 +186,11 @@ export default function QuickCreatePage() {
 
       if (data.success) {
         setExtractedImages(data.images);
-        showToast(data.message, 'success');
+        showToast(data.message || `成功提取 ${data.images?.length || 0} 张主图`, 'success');
       } else if (data.needLogin || data.error?.includes('登录') || data.error?.includes('login')) {
-        showToast('该商品需要登录才能查看，请尝试直接复制图片链接', 'error');
+        showToast('该商品需要登录才能查看，请尝试直接上传商品主图', 'error');
+      } else if (data.error?.includes('风控') || data.error?.includes('拦截') || data.title?.includes('Access denied')) {
+        showToast('该商品链接当前被平台风控拦截，建议直接上传商品主图', 'error');
       } else {
         showToast(data.error || '提取失败，请稍后重试', 'error');
       }
@@ -331,7 +345,184 @@ export default function QuickCreatePage() {
     setSelectedImages(new Set());
     setUploadedImages([]);
     setSelectedUploadImages(new Set());
+    setPluginStatus(isExtensionInstalled ? '插件已连接' : '未检测到插件');
   };
+
+  const installGuide = [
+    '打开 chrome://extensions/',
+    '开启右上角开发者模式',
+    '点击“加载已解压的扩展程序”',
+    '选择 browser-extension/zaomeng-capture 目录',
+  ];
+
+  const detectExtension = useCallback(() => {
+    setPluginStatus('正在检测插件...');
+    setIsExtensionInstalled(false);
+
+    const timeout = window.setTimeout(() => {
+      setPluginStatus('未检测到插件，请确认插件已安装并刷新当前网站页面');
+    }, 1500);
+
+    const handler = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data as { source?: string; type?: string };
+      if (data?.source !== 'zaomeng-extension' || data.type !== 'ZAOMENG_EXTENSION_READY') return;
+
+      clearTimeout(timeout);
+      setIsExtensionInstalled(true);
+      setPluginStatus('插件已连接，可前往淘宝/天猫页面悬浮采图');
+      window.removeEventListener('message', handler);
+    };
+
+    window.addEventListener('message', handler);
+    window.postMessage({ source: 'zaomeng-web', type: 'ZAOMENG_EXTENSION_PING' }, window.location.origin);
+  }, []);
+
+  const handlePluginCapture = useCallback(async (payload: PluginCapturePayload | null) => {
+    if (!payload?.imageUrl) {
+      return;
+    }
+
+    setIsPluginCapturing(true);
+    setPluginStatus('正在接收插件采集图片...');
+
+    try {
+      const response = await fetch('/api/plugin/capture-image', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.success || !data.data?.uploadedUrl) {
+        throw new Error(data.error || data.message || '插件采集失败');
+      }
+
+      setUploadedImages((prev) => {
+        if (prev.includes(data.data.uploadedUrl)) {
+          return prev;
+        }
+        return [data.data.uploadedUrl, ...prev];
+      });
+
+      setPluginStatus('插件采集成功，图片已进入当前账号，可在下方继续选择');
+      showToast('插件采集成功，图片已加入当前账号', 'success');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '插件采集失败';
+      setPluginStatus(errorMessage);
+      showToast(errorMessage, 'error');
+    } finally {
+      setIsPluginCapturing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handlePluginMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data as { source?: string; type?: string; payload?: PluginCapturePayload | null };
+      if (data?.source !== 'zaomeng-extension') return;
+
+      if (data.type === 'ZAOMENG_EXTENSION_READY') {
+        setIsExtensionInstalled(true);
+        setPluginStatus('插件已连接，可前往淘宝/天猫页面悬浮采图');
+      }
+
+      if (data.type === 'ZAOMENG_CAPTURE_IMAGE') {
+        if (data.payload) {
+          void handlePluginCapture(data.payload || null);
+        }
+      }
+
+      if (data.type === 'ZAOMENG_LATEST_CAPTURE') {
+        const payload = data.payload || null;
+        if (payload?.imageUrl) {
+          setPluginStatus('插件已连接，可继续采集商品图片');
+        }
+      }
+    };
+
+    window.addEventListener('message', handlePluginMessage);
+    return () => window.removeEventListener('message', handlePluginMessage);
+  }, [handlePluginCapture]);
+
+  useEffect(() => {
+    if (showTemplateExtraction) {
+      window.postMessage({ source: 'zaomeng-web', type: 'ZAOMENG_EXTENSION_PING' }, window.location.origin);
+    }
+  }, [showTemplateExtraction]);
+
+  const renderCapturedImages = () => {
+    if (uploadedImages.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-medium text-white">
+            已采集/上传 ({uploadedImages.length}张)
+          </h3>
+          <button
+            onClick={toggleUploadSelectAll}
+            className="text-sm text-purple-400 hover:text-purple-300 transition-colors"
+          >
+            {selectedUploadImages.size === uploadedImages.length ? '取消全选' : '全选'}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 mb-6">
+          {uploadedImages.map((url, index) => (
+            <div
+              key={index}
+              onClick={() => toggleUploadImageSelection(url)}
+              className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all group ${
+                selectedUploadImages.has(url)
+                  ? 'border-purple-500 ring-2 ring-purple-500/50'
+                  : 'border-transparent hover:border-white/30'
+              }`}
+            >
+              <img
+                src={url}
+                alt={`采集图片 ${index + 1}`}
+                className="w-full h-full object-cover"
+              />
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeUploadedImage(url);
+                }}
+                className="absolute top-1 left-1 w-6 h-6 bg-red-500/80 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+              {selectedUploadImages.has(url) && (
+                <div className="absolute top-1 right-1 w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center">
+                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <button
+          onClick={handleConfirmUploadSelection}
+          disabled={selectedUploadImages.size === 0}
+          className={`w-full py-3 rounded-lg font-medium transition-all ${
+            selectedUploadImages.size === 0
+              ? 'bg-white/10 text-white/40 cursor-not-allowed'
+              : 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white'
+          }`}
+        >
+          确认选择 ({selectedUploadImages.size}张)
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="flex-1 px-6 py-8 overflow-y-auto">
@@ -456,79 +647,50 @@ export default function QuickCreatePage() {
                   </div>
                 </div>
 
-                {/* 已上传图片 */}
-                {uploadedImages.length > 0 && (
-                  <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-medium text-white">
-                        已上传 ({uploadedImages.length}张)
-                      </h3>
-                      <button
-                        onClick={toggleUploadSelectAll}
-                        className="text-sm text-purple-400 hover:text-purple-300 transition-colors"
-                      >
-                        {selectedUploadImages.size === uploadedImages.length ? '取消全选' : '全选'}
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 mb-6">
-                      {uploadedImages.map((url, index) => (
-                        <div
-                          key={index}
-                          onClick={() => toggleUploadImageSelection(url)}
-                          className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all group ${
-                            selectedUploadImages.has(url)
-                              ? 'border-purple-500 ring-2 ring-purple-500/50'
-                              : 'border-transparent hover:border-white/30'
-                          }`}
-                        >
-                          <img
-                            src={url}
-                            alt={`上传图片 ${index + 1}`}
-                            className="w-full h-full object-cover"
-                          />
-                          {/* 删除按钮 */}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              removeUploadedImage(url);
-                            }}
-                            className="absolute top-1 left-1 w-6 h-6 bg-red-500/80 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                          {selectedUploadImages.has(url) && (
-                            <div className="absolute top-1 right-1 w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center">
-                              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                              </svg>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-
-                    <button
-                      onClick={handleConfirmUploadSelection}
-                      disabled={selectedUploadImages.size === 0}
-                      className={`w-full py-3 rounded-lg font-medium transition-all ${
-                        selectedUploadImages.size === 0
-                          ? 'bg-white/10 text-white/40 cursor-not-allowed'
-                          : 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white'
-                      }`}
-                    >
-                      确认选择 ({selectedUploadImages.size}张)
-                    </button>
-                  </div>
-                )}
+                {renderCapturedImages()}
               </div>
             )}
 
             {/* 链接提取模式 */}
             {extractMode === 'link' && (
               <div>
+                <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20 mb-6">
+                  <div className="flex items-center justify-between gap-4 mb-4">
+                    <div>
+                      <h3 className="text-lg font-medium text-white">浏览器采图助手</h3>
+                      <p className="text-white/50 text-sm mt-1">推荐用于淘宝/天猫页面 hover 采图，稳定性高于直接链接提取</p>
+                    </div>
+                    <button
+                      onClick={detectExtension}
+                      className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors"
+                    >
+                      检测插件
+                    </button>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-4 mb-4">
+                    <p className="text-sm text-white/80 mb-2">安装步骤</p>
+                    <ol className="space-y-1 text-sm text-white/50 list-decimal pl-5">
+                      {installGuide.map((step) => (
+                        <li key={step}>{step}</li>
+                      ))}
+                    </ol>
+                    <p className="text-xs text-yellow-400/90 mt-3">
+                      插件目录：`browser-extension/zaomeng-capture`
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                    <div>
+                      <p className="text-sm text-white/80">当前状态</p>
+                      <p className="text-sm text-white/50 mt-1">{pluginStatus}</p>
+                    </div>
+                    <div className={`text-xs px-3 py-1.5 rounded-full ${isExtensionInstalled ? 'bg-green-500/20 text-green-300' : 'bg-white/10 text-white/50'}`}>
+                      {isPluginCapturing ? '采集中...' : isExtensionInstalled ? '已连接' : '未连接'}
+                    </div>
+                  </div>
+                </div>
+
                 {/* 平台选择 */}
                 <div className="mb-6">
                   <label className="block text-white/80 text-sm font-medium mb-3">
@@ -665,6 +827,8 @@ export default function QuickCreatePage() {
                     <p className="text-white/60">正在提取商品图片...</p>
                   </div>
                 )}
+
+                {renderCapturedImages()}
               </div>
             )}
           </div>

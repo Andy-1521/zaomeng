@@ -16,6 +16,53 @@
 - 保持用户、订单、积分主链路稳定
 - 继续清理历史遗留的类型、状态同步和交互问题
 
+## 协作规则
+
+这是后续继续协作时必须遵守的工作规则。
+
+### 1. 备份规则
+
+后续只要你说“备份”，就默认按 GitHub 备份流程执行。
+
+备份时必须保留并可追溯以下信息：
+
+- Git 提交版本号
+- 提交日期
+- 提交时间
+- 提交备注信息
+- 如有 tag，还要记录对应 tag 名称
+
+后续当你要回滚时，我需要把这些信息列给你看，你再明确指定要回滚到哪个版本。
+
+当前备份仓库:
+
+- `git@github.com:Andy-1521/zaomeng.git`
+
+当前已存在的备份记录:
+
+- Commit: `8d1fafa`
+- Time: `2026-04-27 17:14`
+- Message: `backup: 2026-04-27 17:14 project snapshot`
+- Tag: `backup-2026-04-27-1714`
+
+### 2. 每次功能更新后的验收规则
+
+后续每次我完成一轮功能修改后，都需要：
+
+1. 保证本地服务可访问
+2. 保证公网入口可访问
+3. 把公网访问地址发给你
+4. 等你验收结果
+
+当前长期公网入口:
+
+- `http://124.223.26.206/home`
+
+说明:
+
+- 当前已通过 Nginx 将公网 `80` 端口反向代理到 `127.0.0.1:5000`
+- 后续每次更新功能后，默认用这个公网地址给你验收
+
 ## 工作目录
 
 - 当前项目目录: `/home/ubuntu/Downloads/zaomeng/project/projects`
@@ -232,21 +279,21 @@
 - 管理页: `http://10.0.4.6:5000/admin/generations`
 - 个人页: `http://10.0.4.6:5000/profile`
 
-### 当前临时公网地址
+### 当前公网地址
 
-- `https://5ed21107b7a06a.lhr.life/home`
+- 长期公网入口: `http://124.223.26.206/home`
 
 说明:
 
-- 这是临时隧道地址
-- 隧道可能失效，失效后需要重新生成新的公网地址
+- 当前已经不依赖临时隧道作为主要验收方式
+- 如需临时备用外链，可再临时起隧道
 
 ## 当前验证情况
 
 已确认:
 
 - 本地 `http://127.0.0.1:5000/home` 返回 `200 OK`
-- 当前临时公网地址可访问首页
+- 公网 `http://124.223.26.206/home` 返回 `200 OK`
 - `src/components/ColorExtraction2Page.tsx` 当前 lint 无 error
 - `src/components/TaskHistory.tsx` 当前 lint 无 error
 - `src/components/RemoveWatermarkPage.tsx` 当前 lint 无 error
@@ -303,3 +350,5 @@
 2. 当前彩绘提取前端已经恢复成旧版风格
 3. 当前 `TaskHistory` 和 `RemoveWatermarkPage` 已经做过稳定性修复，不建议直接原样回退
 4. 当前下一批最值得继续修的是 `ImageUpsamplingPage.tsx` 和 `AutoRemoveBackgroundPage.tsx`
+5. 后续每次完成功能修改后，都要部署到公网地址给用户验收
+6. 后续每次执行备份时，都要记录版本号、日期时间、备注和 tag 信息

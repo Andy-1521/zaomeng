@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useUser } from '@/contexts/UserContext';
 import Navbar from '@/components/Navbar';
 import Sidebar from '@/components/Sidebar';
@@ -15,6 +15,7 @@ type SidebarTab = 'color-extraction' | 'quick-create' | 'custom';
 
 export default function HomePage() {
   const pathname = usePathname();
+  const router = useRouter();
   const { user, isLoading, refreshUser } = useUser();
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('color-extraction');
 
@@ -37,7 +38,9 @@ export default function HomePage() {
     if (isLoading) return;
 
     if (!user) {
-      window.location.href = '/login';
+      queueMicrotask(() => {
+        router.replace('/login');
+      });
       return;
     }
 
@@ -62,14 +65,14 @@ export default function HomePage() {
     return () => {
       window.removeEventListener('focus', handleFocus);
     };
-  }, [isLoading]);
+  }, [isLoading, refreshUser, router, user]);
 
   if (isLoading || !user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-black text-white">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500 mx-auto mb-4"></div>
-          <p>加载中...</p>
+          <p>{isLoading ? '加载中...' : '正在跳转到登录页...'}</p>
         </div>
       </div>
     );

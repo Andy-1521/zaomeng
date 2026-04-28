@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "造梦AI 商品采图助手",
+  "version": "0.1.0",
+  "description": "在淘宝/天猫商品图片上悬浮显示采集按钮，将图片发送到当前登录的造梦AI网站账户。",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": [
+    "*://*.taobao.com/*",
+    "*://*.tmall.com/*",
+    "http://124.223.26.206/*",
+    "http://localhost:5000/*",
+    "http://10.0.4.6:5000/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.taobao.com/*", "*://*.tmall.com/*"],
+      "js": ["taobao-content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://124.223.26.206/*",
+        "http://localhost:5000/*",
+        "http://10.0.4.6:5000/*"
+      ],
+      "js": ["site-bridge.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
