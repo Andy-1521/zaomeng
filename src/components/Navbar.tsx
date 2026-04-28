@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useUser } from '@/contexts/UserContext';
 
@@ -11,6 +12,7 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { user, logout } = useUser();
+  const [pluginReady, setPluginReady] = useState(false);
 
   const handleLogoClick = () => {
     if (pathname === '/home') {
@@ -24,6 +26,20 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
     logout();
     router.push('/login');
   };
+
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data as { source?: string; type?: string };
+      if (data?.source === 'zaomeng-extension' && data.type === 'ZAOMENG_EXTENSION_READY') {
+        setPluginReady(true);
+      }
+    };
+
+    window.addEventListener('message', handler);
+    window.postMessage({ source: 'zaomeng-web', type: 'ZAOMENG_EXTENSION_PING' }, window.location.origin);
+    return () => window.removeEventListener('message', handler);
+  }, []);
 
   return (
     <nav className="bg-black backdrop-blur-md px-6 py-4">
@@ -46,6 +62,23 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
         {/* 右侧用户菜单 */}
         {showUserMenu && user && (
           <div className="flex items-center gap-4">
+            <div className="relative group">
+              <div className={`px-3 py-1 rounded-full border text-xs flex items-center gap-2 ${pluginReady ? 'bg-green-500/15 border-green-500/30 text-green-300' : 'bg-white/10 border-white/20 text-white/60'}`}>
+                <span className={`w-2 h-2 rounded-full ${pluginReady ? 'bg-green-400' : 'bg-white/40'}`}></span>
+                插件{pluginReady ? '已连接' : '未连接'}
+              </div>
+              <div className="absolute right-0 top-full mt-2 w-72 rounded-2xl border border-white/15 bg-black/85 p-4 text-xs text-white/70 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all backdrop-blur-xl z-50">
+                <p className="text-white font-medium mb-2">插件安装说明</p>
+                <ol className="space-y-1 list-decimal pl-4">
+                  <li>打开 `chrome://extensions/`</li>
+                  <li>开启开发者模式</li>
+                  <li>点击“加载已解压的扩展程序”</li>
+                  <li>选择 `browser-extension/zaomeng-capture` 目录</li>
+                </ol>
+                <p className="mt-3 text-white/45">安装后刷新网站页面，再去淘宝/天猫页面 hover 图片采图。</p>
+              </div>
+            </div>
+
             {/* 用户头像和用户名 */}
             <button
               onClick={() => router.push('/profile')}

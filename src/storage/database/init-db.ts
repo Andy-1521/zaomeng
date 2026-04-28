@@ -75,5 +75,20 @@ export async function initializeDatabase() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS captured_images (
+      id VARCHAR(36) PRIMARY KEY NOT NULL,
+      user_id VARCHAR(36) NOT NULL,
+      image_url TEXT NOT NULL,
+      original_url TEXT NULL,
+      page_url TEXT NULL,
+      page_title TEXT NULL,
+      source_host VARCHAR(255) NULL,
+      image_type VARCHAR(20) NOT NULL DEFAULT 'main',
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY captured_images_user_created_idx (user_id, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
   initialized = true;
 }

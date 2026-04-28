@@ -5,6 +5,7 @@ import { showToast } from '@/lib/toast';
 import AutoRemoveBackgroundPage from '@/components/AutoRemoveBackgroundPage';
 import RemoveWatermarkPage from '@/components/RemoveWatermarkPage';
 import ImageUpsamplingPage from '@/components/ImageUpsamplingPage';
+import ColorExtraction2Page from '@/components/ColorExtraction2Page';
 
 type PluginCapturePayload = {
   imageUrl: string;
@@ -15,208 +16,137 @@ type PluginCapturePayload = {
   imageType?: 'main' | 'detail';
 };
 
-// 自动抠图图标组件
-const RemoveBackgroundIcon = () => (
-  <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
-    <img
-      src="/assets/remove-background-demo.gif"
-      alt="自动抠图示例"
-      className="w-full h-full object-cover"
-    />
-  </div>
-);
-
-// 去除水印图标组件
-const RemoveWatermarkIcon = () => (
-  <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
-    <img
-      src="/assets/remove-watermark-demo.jpg"
-      alt="去除水印示例"
-      className="w-full h-full object-cover"
-    />
-  </div>
-);
-
-// 高清放大图标组件
-const ImageUpsamplingIcon = () => (
-  <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
-    <img
-      src="/assets/high-quality-upsampling.gif"
-      alt="高清放大示例"
-      className="w-full h-full object-cover"
-    />
-  </div>
-);
-
-// 模板提取图标组件
-const TemplateExtractionIcon = () => (
-  <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
-    <img
-      src="/assets/template-extraction-demo.jpg"
-      alt="模板提取示例"
-      className="w-full h-full object-cover"
-    />
-  </div>
-);
-
-interface Template {
+type CapturedImageRecord = {
   id: string;
-  name: string;
-  description: string;
-  icon: React.ReactNode;
-  prompt: string;
-  isInDevelopment?: boolean;
+  imageUrl: string;
+  originalUrl?: string | null;
+  pageUrl?: string | null;
+  pageTitle?: string | null;
+  sourceHost?: string | null;
+  imageType?: string | null;
+  createdAt: string;
+};
+
+type ProcessingAction = 'color-extraction' | 'auto-remove-bg' | 'watermark' | 'upsampling';
+
+interface QuickCreatePageProps {
+  defaultView?: 'capture-library' | 'quick-create';
 }
 
-export default function QuickCreatePage() {
+interface ModuleCard {
+  id: ProcessingAction;
+  name: string;
+  description: string;
+  tag?: string;
+  icon: React.ReactNode;
+}
+
+const RemoveBackgroundIcon = () => (
+  <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
+    <img src="/assets/remove-background-demo.gif" alt="自动抠图示例" className="w-full h-full object-cover" />
+  </div>
+);
+
+const RemoveWatermarkIcon = () => (
+  <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
+    <img src="/assets/remove-watermark-demo.jpg" alt="去除水印示例" className="w-full h-full object-cover" />
+  </div>
+);
+
+const ImageUpsamplingIcon = () => (
+  <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
+    <img src="/assets/high-quality-upsampling.gif" alt="高清放大示例" className="w-full h-full object-cover" />
+  </div>
+);
+
+const ColorExtractionIcon = () => (
+  <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
+    <img src="/assets/phone-case-demo.jpg" alt="彩绘提取示例" className="w-full h-full object-cover" />
+  </div>
+);
+
+const actionLabelMap: Record<ProcessingAction, string> = {
+  'color-extraction': '彩绘提取',
+  'auto-remove-bg': '智能抠图',
+  watermark: '去除水印',
+  upsampling: '高清放大',
+};
+
+const moduleCards: ModuleCard[] = [
+  {
+    id: 'auto-remove-bg',
+    name: '智能抠图',
+    description: '智能识别主体抠出',
+    icon: <RemoveBackgroundIcon />,
+    tag: '免费功能',
+  },
+  {
+    id: 'watermark',
+    name: '去除水印',
+    description: '快速去除图片水印',
+    icon: <RemoveWatermarkIcon />,
+    tag: '限时免费',
+  },
+  {
+    id: 'upsampling',
+    name: '高清放大',
+    description: 'AI智能放大图片',
+    icon: <ImageUpsamplingIcon />,
+    tag: '限时免费',
+  },
+  {
+    id: 'color-extraction',
+    name: '彩绘提取',
+    description: '进入彩绘提取页面处理图片',
+    icon: <ColorExtractionIcon />,
+    tag: '核心功能',
+  },
+];
+
+export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickCreatePageProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const gallerySectionRef = useRef<HTMLDivElement>(null);
+  const imageButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [capturedImages, setCapturedImages] = useState<CapturedImageRecord[]>([]);
+  const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const [showAutoRemoveBackground, setShowAutoRemoveBackground] = useState(false);
   const [showRemoveWatermark, setShowRemoveWatermark] = useState(false);
   const [showImageUpsampling, setShowImageUpsampling] = useState(false);
-  const [showTemplateExtraction, setShowTemplateExtraction] = useState(false);
+  const [showColorExtraction, setShowColorExtraction] = useState(false);
+  const [actionBarPosition, setActionBarPosition] = useState<{ top: number; left: number } | null>(null);
 
-  // 模板提取的状态
-  const [extractMode, setExtractMode] = useState<'link' | 'upload'>('upload');
-  const [platform, setPlatform] = useState<'taobao' | 'pinduoduo'>('taobao');
-  const [templateUrl, setTemplateUrl] = useState('');
-  const [isExtracting, setIsExtracting] = useState(false);
-  const [extractedImages, setExtractedImages] = useState<string[]>([]);
-  const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
+  const isCaptureLibraryView = defaultView === 'capture-library';
+  const selectedImageList = Array.from(selectedImages);
 
-  // 图片上传的状态
-  const [uploadedImages, setUploadedImages] = useState<string[]>([]);
-  const [isUploading, setIsUploading] = useState(false);
-  const [selectedUploadImages, setSelectedUploadImages] = useState<Set<string>>(new Set());
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isExtensionInstalled, setIsExtensionInstalled] = useState(false);
-  const [isPluginCapturing, setIsPluginCapturing] = useState(false);
-  const [pluginStatus, setPluginStatus] = useState('未检测到插件');
-
-  const templates: Template[] = [
-    {
-      id: '1',
-      name: '智能抠图',
-      description: '智能识别主体抠出',
-      icon: <RemoveBackgroundIcon />,
-      prompt: '智能抠图，使用平台AI插件识别主体并移除背景',
-    },
-    {
-      id: '2',
-      name: '去除水印',
-      description: '快速去除图片水印',
-      icon: <RemoveWatermarkIcon />,
-      prompt: '去除水印，使用RunningHub AI识别并移除水印',
-    },
-    {
-      id: '3',
-      name: '高清放大',
-      description: 'AI智能放大图片',
-      icon: <ImageUpsamplingIcon />,
-      prompt: '高清放大图片，提升清晰度和细节',
-    },
-    {
-      id: '4',
-      name: '模板提取',
-      description: '提取商品主图进行编辑',
-      icon: <TemplateExtractionIcon />,
-      prompt: '模板提取，输入链接或上传图片提取模板设计',
-    },
-    {
-      id: '5',
-      name: '宠物写真',
-      description: '可爱的宠物形象设计',
-      icon: '🐱',
-      prompt: '可爱的猫咪，毛茸茸，大眼睛，温馨的室内环境',
-      isInDevelopment: true,
-    },
-    {
-      id: '6',
-      name: '动漫风格',
-      description: '将照片转换为动漫风格',
-      icon: '🎨',
-      prompt: '动漫风格转换，二次元效果',
-      isInDevelopment: true,
-    },
-  ];
-
-  const handleGenerate = async (template: Template) => {
-    if (template.id === '1') {
-      setShowAutoRemoveBackground(true);
-      return;
-    }
-    if (template.id === '2') {
-      setShowRemoveWatermark(true);
-      return;
-    }
-    if (template.id === '3') {
-      setShowImageUpsampling(true);
-      return;
-    }
-    if (template.id === '4') {
-      setShowTemplateExtraction(true);
-      return;
-    }
-    showToast('该功能正在开发中，敬请期待！', 'info');
-  };
-
-  // 提取模板
-  const handleExtractTemplate = async () => {
-    if (!templateUrl.trim()) {
-      showToast('请输入链接', 'error');
-      return;
-    }
+  const loadCapturedImages = useCallback(async () => {
     try {
-      new URL(templateUrl);
-    } catch {
-      showToast('请输入有效的链接', 'error');
-      return;
-    }
-
-    setIsExtracting(true);
-    setExtractedImages([]);
-    setSelectedImages(new Set());
-
-    try {
-      const response = await fetch('/api/template/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: templateUrl, platform }),
+      const response = await fetch('/api/plugin/captured-images', {
+        credentials: 'include',
       });
-
       const data = await response.json();
-
-      if (data.success) {
-        setExtractedImages(data.images);
-        showToast(data.message || `成功提取 ${data.images?.length || 0} 张主图`, 'success');
-      } else if (data.needLogin || data.error?.includes('登录') || data.error?.includes('login')) {
-        showToast('该商品需要登录才能查看，请尝试直接上传商品主图', 'error');
-      } else if (data.error?.includes('风控') || data.error?.includes('拦截') || data.title?.includes('Access denied')) {
-        showToast('该商品链接当前被平台风控拦截，建议直接上传商品主图', 'error');
-      } else {
-        showToast(data.error || '提取失败，请稍后重试', 'error');
+      if (!response.ok || !data.success || !Array.isArray(data.data)) {
+        return;
       }
-    } catch {
-      showToast('提取失败，请稍后重试', 'error');
-    } finally {
-      setIsExtracting(false);
+      setCapturedImages(data.data);
+    } catch (error) {
+      console.error('[采集图库] 加载失败:', error);
     }
-  };
+  }, []);
 
-  // 处理图片上传
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  const uploadFiles = useCallback(async (files: File[]) => {
+    if (files.length === 0) return;
 
-    // 检查文件类型
     const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-    const invalidFiles = Array.from(files).filter(file => !validTypes.includes(file.type));
+    const invalidFiles = files.filter((file) => !validTypes.includes(file.type));
     if (invalidFiles.length > 0) {
       showToast('请上传 JPG、PNG、WebP 或 GIF 格式的图片', 'error');
       return;
     }
 
-    // 检查文件大小（最大 10MB）
     const maxSize = 10 * 1024 * 1024;
-    const oversizedFiles = Array.from(files).filter(file => file.size > maxSize);
+    const oversizedFiles = files.filter((file) => file.size > maxSize);
     if (oversizedFiles.length > 0) {
       showToast('单张图片大小不能超过 10MB', 'error');
       return;
@@ -237,15 +167,14 @@ export default function QuickCreatePage() {
         });
 
         const data = await response.json();
-
         if (data.success && data.data?.url) {
           uploadedUrls.push(data.data.url);
         }
       }
 
       if (uploadedUrls.length > 0) {
-        setUploadedImages(prev => [...prev, ...uploadedUrls]);
-        showToast(`成功上传 ${uploadedUrls.length} 张图片`, 'success');
+        await loadCapturedImages();
+        showToast(`成功加入 ${uploadedUrls.length} 张图片到采集图库`, 'success');
       } else {
         showToast('上传失败，请重试', 'error');
       }
@@ -253,114 +182,99 @@ export default function QuickCreatePage() {
       showToast('上传失败，请重试', 'error');
     } finally {
       setIsUploading(false);
-      // 清空文件输入
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
     }
+  }, []);
+
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    await uploadFiles(files);
   };
 
-  // 触发文件选择
-  const triggerFileInput = () => {
-    fileInputRef.current?.click();
+  const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDragging(false);
+    const files = Array.from(event.dataTransfer.files || []);
+    await uploadFiles(files);
   };
 
-  // 删除上传的图片
-  const removeUploadedImage = (url: string) => {
-    setUploadedImages(prev => prev.filter(u => u !== url));
-    setSelectedUploadImages(prev => {
-      const newSet = new Set(prev);
-      newSet.delete(url);
-      return newSet;
+  const removeUploadedImage = async (image: CapturedImageRecord) => {
+    try {
+      const response = await fetch('/api/plugin/captured-images', {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: image.id }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || '删除失败');
+      }
+
+      setCapturedImages((prev) => prev.filter((item) => item.id !== image.id));
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '删除失败';
+      showToast(errorMessage, 'error');
+      return;
+    }
+
+    setSelectedImages((prev) => {
+      const next = new Set(prev);
+      next.delete(image.imageUrl);
+      return next;
     });
   };
 
-  // 切换上传图片选中状态
-  const toggleUploadImageSelection = (url: string) => {
-    const newSelected = new Set(selectedUploadImages);
-    if (newSelected.has(url)) {
-      newSelected.delete(url);
-    } else {
-      newSelected.add(url);
-    }
-    setSelectedUploadImages(newSelected);
-  };
-
-  // 全选/取消全选上传图片
-  const toggleUploadSelectAll = () => {
-    if (selectedUploadImages.size === uploadedImages.length) {
-      setSelectedUploadImages(new Set());
-    } else {
-      setSelectedUploadImages(new Set(uploadedImages));
-    }
-  };
-
-  // 确认选择上传的图片
-  const handleConfirmUploadSelection = () => {
-    if (selectedUploadImages.size === 0) {
-      showToast('请至少选择一张图片', 'error');
+  const deleteSelectedImages = async () => {
+    if (selectedImageList.length === 0) {
+      showToast('请先选择要删除的图片', 'error');
       return;
     }
-    showToast(`已选择 ${selectedUploadImages.size} 张图片，可前往历史记录查看`, 'success');
-    // TODO: 保存选中的图片到历史记录
-  };
 
-  // 切换图片选中状态（链接提取）
-  const toggleImageSelection = (imageUrl: string) => {
-    const newSelected = new Set(selectedImages);
-    if (newSelected.has(imageUrl)) {
-      newSelected.delete(imageUrl);
-    } else {
-      newSelected.add(imageUrl);
-    }
-    setSelectedImages(newSelected);
-  };
+    try {
+      for (const imageUrl of selectedImageList) {
+        const target = capturedImages.find((image) => image.imageUrl === imageUrl)
+        if (!target) {
+          continue
+        }
 
-  // 全选/取消全选
-  const toggleSelectAll = () => {
-    if (selectedImages.size === extractedImages.length) {
+        const response = await fetch('/api/plugin/captured-images', {
+          method: 'DELETE',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: target.id }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || '删除失败');
+        }
+      }
+
+      setCapturedImages((prev) => prev.filter((image) => !selectedImages.has(image.imageUrl)))
       setSelectedImages(new Set());
-    } else {
-      setSelectedImages(new Set(extractedImages));
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '删除失败';
+      showToast(errorMessage, 'error');
     }
   };
 
-  // 确认选择
-  const handleConfirmSelection = () => {
-    if (selectedImages.size === 0) {
-      showToast('请至少选择一张图片', 'error');
-      return;
-    }
-    showToast(`已选择 ${selectedImages.size} 张图片，可前往历史记录查看`, 'success');
-    // TODO: 保存选中的图片到历史记录
+  const toggleImageSelection = (url: string) => {
+    setSelectedImages((prev) => {
+      const next = new Set(prev);
+      if (next.has(url)) {
+        next.delete(url);
+      } else {
+        next.add(url);
+      }
+      return next;
+    });
   };
-
-  // 重置模板提取状态
-  const resetTemplateExtraction = () => {
-    setShowTemplateExtraction(false);
-    setExtractMode('upload');
-    setPlatform('taobao');
-    setTemplateUrl('');
-    setExtractedImages([]);
-    setSelectedImages(new Set());
-    setUploadedImages([]);
-    setSelectedUploadImages(new Set());
-    setPluginStatus(isExtensionInstalled ? '插件已连接' : '未检测到插件');
-  };
-
-  const installGuide = [
-    '打开 chrome://extensions/',
-    '开启右上角开发者模式',
-    '点击“加载已解压的扩展程序”',
-    '选择 browser-extension/zaomeng-capture 目录',
-  ];
 
   const detectExtension = useCallback(() => {
-    setPluginStatus('正在检测插件...');
-    setIsExtensionInstalled(false);
-
     const timeout = window.setTimeout(() => {
-      setPluginStatus('未检测到插件，请确认插件已安装并刷新当前网站页面');
+      showToast('未检测到插件，请确认插件已安装并刷新当前网站页面', 'error');
     }, 1500);
 
     const handler = (event: MessageEvent) => {
@@ -369,8 +283,7 @@ export default function QuickCreatePage() {
       if (data?.source !== 'zaomeng-extension' || data.type !== 'ZAOMENG_EXTENSION_READY') return;
 
       clearTimeout(timeout);
-      setIsExtensionInstalled(true);
-      setPluginStatus('插件已连接，可前往淘宝/天猫页面悬浮采图');
+      showToast('插件已连接，可前往淘宝/天猫页面悬浮采图', 'success');
       window.removeEventListener('message', handler);
     };
 
@@ -383,9 +296,6 @@ export default function QuickCreatePage() {
       return;
     }
 
-    setIsPluginCapturing(true);
-    setPluginStatus('正在接收插件采集图片...');
-
     try {
       const response = await fetch('/api/plugin/capture-image', {
         method: 'POST',
@@ -396,24 +306,14 @@ export default function QuickCreatePage() {
 
       const data = await response.json();
       if (!response.ok || !data.success || !data.data?.uploadedUrl) {
-        throw new Error(data.error || data.message || '插件采集失败');
+        throw new Error(data.error || data.message || '插件采图失败');
       }
 
-      setUploadedImages((prev) => {
-        if (prev.includes(data.data.uploadedUrl)) {
-          return prev;
-        }
-        return [data.data.uploadedUrl, ...prev];
-      });
-
-      setPluginStatus('插件采集成功，图片已进入当前账号，可在下方继续选择');
-      showToast('插件采集成功，图片已加入当前账号', 'success');
+      await loadCapturedImages();
+      showToast('插件采图成功，图片已加入采集图库', 'success');
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '插件采集失败';
-      setPluginStatus(errorMessage);
+      const errorMessage = error instanceof Error ? error.message : '插件采图失败';
       showToast(errorMessage, 'error');
-    } finally {
-      setIsPluginCapturing(false);
     }
   }, []);
 
@@ -423,22 +323,8 @@ export default function QuickCreatePage() {
       const data = event.data as { source?: string; type?: string; payload?: PluginCapturePayload | null };
       if (data?.source !== 'zaomeng-extension') return;
 
-      if (data.type === 'ZAOMENG_EXTENSION_READY') {
-        setIsExtensionInstalled(true);
-        setPluginStatus('插件已连接，可前往淘宝/天猫页面悬浮采图');
-      }
-
-      if (data.type === 'ZAOMENG_CAPTURE_IMAGE') {
-        if (data.payload) {
-          void handlePluginCapture(data.payload || null);
-        }
-      }
-
-      if (data.type === 'ZAOMENG_LATEST_CAPTURE') {
-        const payload = data.payload || null;
-        if (payload?.imageUrl) {
-          setPluginStatus('插件已连接，可继续采集商品图片');
-        }
+      if (data.type === 'ZAOMENG_CAPTURE_IMAGE' && data.payload) {
+        void handlePluginCapture(data.payload);
       }
     };
 
@@ -447,585 +333,328 @@ export default function QuickCreatePage() {
   }, [handlePluginCapture]);
 
   useEffect(() => {
-    if (showTemplateExtraction) {
+    if (isCaptureLibraryView) {
       window.postMessage({ source: 'zaomeng-web', type: 'ZAOMENG_EXTENSION_PING' }, window.location.origin);
+      queueMicrotask(() => {
+        void loadCapturedImages();
+      });
     }
-  }, [showTemplateExtraction]);
+  }, [isCaptureLibraryView, loadCapturedImages]);
 
-  const renderCapturedImages = () => {
-    if (uploadedImages.length === 0) {
-      return null;
+  useEffect(() => {
+    const updateActionBarPosition = () => {
+      const container = gallerySectionRef.current;
+      if (!container || selectedImageList.length === 0) {
+        setActionBarPosition(null);
+        return;
+      }
+
+      const selectedRects = selectedImageList
+        .map((url) => imageButtonRefs.current[url]?.getBoundingClientRect() || null)
+        .filter((rect): rect is DOMRect => rect !== null);
+
+      if (selectedRects.length === 0) {
+        setActionBarPosition(null);
+        return;
+      }
+
+      const containerRect = container.getBoundingClientRect();
+      const bounds = selectedRects.reduce(
+        (acc, rect) => ({
+          left: Math.min(acc.left, rect.left),
+          right: Math.max(acc.right, rect.right),
+          top: Math.min(acc.top, rect.top),
+          bottom: Math.max(acc.bottom, rect.bottom),
+        }),
+        {
+          left: selectedRects[0].left,
+          right: selectedRects[0].right,
+          top: selectedRects[0].top,
+          bottom: selectedRects[0].bottom,
+        }
+      );
+
+      const centerX = (bounds.left + bounds.right) / 2 - containerRect.left;
+      const top = bounds.bottom - containerRect.top + 16;
+
+      setActionBarPosition({
+        left: centerX,
+        top,
+      });
+    };
+
+    const frame = window.requestAnimationFrame(updateActionBarPosition);
+    window.addEventListener('resize', updateActionBarPosition);
+    window.addEventListener('scroll', updateActionBarPosition, true);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', updateActionBarPosition);
+      window.removeEventListener('scroll', updateActionBarPosition, true);
+    };
+  }, [selectedImageList]);
+
+  const openActionPage = (action: ProcessingAction) => {
+    if (capturedImages.length === 0 || selectedImageList.length === 0) {
+      showToast('请先在图库中选择图片', 'error');
+      return;
     }
 
-    return (
-      <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-medium text-white">
-            已采集/上传 ({uploadedImages.length}张)
-          </h3>
-          <button
-            onClick={toggleUploadSelectAll}
-            className="text-sm text-purple-400 hover:text-purple-300 transition-colors"
-          >
-            {selectedUploadImages.size === uploadedImages.length ? '取消全选' : '全选'}
-          </button>
-        </div>
+    sessionStorage.setItem('capture-library:selected-images', JSON.stringify(selectedImageList));
 
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 mb-6">
-          {uploadedImages.map((url, index) => (
-            <div
-              key={index}
-              onClick={() => toggleUploadImageSelection(url)}
-              className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all group ${
-                selectedUploadImages.has(url)
-                  ? 'border-purple-500 ring-2 ring-purple-500/50'
-                  : 'border-transparent hover:border-white/30'
-              }`}
-            >
-              <img
-                src={url}
-                alt={`采集图片 ${index + 1}`}
-                className="w-full h-full object-cover"
-              />
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeUploadedImage(url);
-                }}
-                className="absolute top-1 left-1 w-6 h-6 bg-red-500/80 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-              {selectedUploadImages.has(url) && (
-                <div className="absolute top-1 right-1 w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center">
-                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+    if (action === 'color-extraction') {
+      setShowColorExtraction(true);
+      return;
+    }
+    if (action === 'auto-remove-bg') {
+      setShowAutoRemoveBackground(true);
+      return;
+    }
+    if (action === 'watermark') {
+      setShowRemoveWatermark(true);
+      return;
+    }
+    if (action === 'upsampling') {
+      setShowImageUpsampling(true);
+    }
+  };
 
+  const handleGenerate = (card: ModuleCard) => {
+    openActionPage(card.id);
+  };
+
+  const renderBackButton = (label: string, onClick: () => void) => (
+    <button
+      onClick={onClick}
+      className="mb-6 flex items-center gap-2 text-white/60 hover:text-white transition-colors"
+    >
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+      </svg>
+      <span>{label}</span>
+    </button>
+  );
+
+  const renderCaptureLibrary = () => (
+    <div
+      ref={gallerySectionRef}
+      className={`relative max-w-6xl mx-auto transition-all ${isDragging ? 'scale-[0.995]' : ''}`}
+      onDragOver={(event) => {
+        event.preventDefault();
+        setIsDragging(true);
+      }}
+      onDragLeave={(event) => {
+        event.preventDefault();
+        setIsDragging(false);
+      }}
+      onDrop={handleDrop}
+    >
+      <div className="flex items-end justify-between gap-4 mb-8">
+        <div>
+          <h2 className="text-3xl font-bold text-white">采集图库</h2>
+          <p className="text-white/55 mt-2">通过插件采图或右上角上传图片，把素材统一收进图库</p>
+        </div>
         <button
-          onClick={handleConfirmUploadSelection}
-          disabled={selectedUploadImages.size === 0}
-          className={`w-full py-3 rounded-lg font-medium transition-all ${
-            selectedUploadImages.size === 0
-              ? 'bg-white/10 text-white/40 cursor-not-allowed'
-              : 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white'
-          }`}
+          onClick={() => fileInputRef.current?.click()}
+          className="w-11 h-11 rounded-full bg-gradient-to-r from-purple-600 to-blue-600 text-white flex items-center justify-center hover:opacity-90 transition-opacity"
+          title="上传本地图片"
         >
-          确认选择 ({selectedUploadImages.size}张)
+          <span className="text-2xl leading-none">+</span>
         </button>
       </div>
-    )
+
+      {isDragging && (
+        <div className="mb-6 rounded-3xl border-2 border-dashed border-purple-500 bg-purple-500/10 p-6 text-center text-white/80">
+          松开鼠标即可把图片加入采集图库
+        </div>
+      )}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/gif"
+        multiple
+        onChange={handleImageUpload}
+        className="hidden"
+      />
+
+      {isUploading && (
+        <div className="mb-6 rounded-3xl border border-white/10 bg-white/[0.03] p-5 text-center text-white/60">
+          上传中...
+        </div>
+      )}
+
+        {capturedImages.length === 0 ? (
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-12 text-center text-white/45">
+            还没有图片进入图库，通过插件采集图片，或点击右上角上传图片
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 mb-6">
+            {capturedImages.map((image, index) => {
+              const selected = selectedImages.has(image.imageUrl);
+              return (
+                <button
+                  key={index}
+                  ref={(node) => {
+                    imageButtonRefs.current[image.imageUrl] = node;
+                  }}
+                  type="button"
+                  onClick={() => toggleImageSelection(image.imageUrl)}
+                  className={`group relative aspect-square overflow-hidden rounded-2xl border transition-all ${selected ? 'border-purple-500 ring-2 ring-purple-500/50' : 'border-white/10 hover:border-white/30'}`}
+                >
+                <img src={image.imageUrl} alt={`图库图片 ${index + 1}`} className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void removeUploadedImage(image);
+                  }}
+                  className="absolute top-2 right-2 w-7 h-7 bg-red-500/80 hover:bg-red-500 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="移除图片"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+                {selected && (
+                  <div className="absolute top-2 left-2 w-7 h-7 rounded-full bg-purple-500 flex items-center justify-center text-white shadow-lg">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                )}
+              </button>
+            );
+          })}
+          </div>
+        )}
+
+      {selectedImageList.length > 0 && (
+        <div className="mb-6 flex justify-end">
+          <button
+            onClick={() => void deleteSelectedImages()}
+            className="px-3 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white/65 text-xs transition-colors"
+          >
+            删除所选
+          </button>
+        </div>
+      )}
+
+      {selectedImageList.length > 0 && actionBarPosition && (
+        <div
+          className="pointer-events-none absolute z-30 transition-all duration-150"
+          style={{
+            top: actionBarPosition.top + 10,
+            left: actionBarPosition.left,
+            transform: 'translateX(-50%)',
+          }}
+        >
+          <div className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/75 px-3 py-2 backdrop-blur-xl shadow-2xl">
+            <span className="whitespace-nowrap text-xs text-white/65">已选 {selectedImageList.length} 张</span>
+            {moduleCards.map((card) => (
+              <button
+                key={card.id}
+                onClick={() => openActionPage(card.id)}
+                className="min-w-[88px] px-3 py-2 rounded-full text-sm font-medium transition-all bg-white/10 text-white/80 hover:bg-gradient-to-r hover:from-purple-600 hover:to-blue-600 hover:text-white"
+              >
+                {actionLabelMap[card.id]}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderQuickCreateGrid = () => (
+    <div className="max-w-7xl mx-auto">
+      <div className="text-center mb-12">
+        <h2 className="text-4xl font-bold text-white mb-4">快速制作</h2>
+        <p className="text-white/60 text-lg">选择一个处理模块，进入对应页面</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {moduleCards.map((card) => (
+          <div
+            key={card.id}
+            className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/20 hover:border-purple-500/50 transition-all cursor-pointer group"
+            onClick={() => handleGenerate(card)}
+          >
+            <div className="flex gap-4 h-full">
+              <div className="flex-shrink-0">{card.icon}</div>
+              <div className="flex-1 flex flex-col justify-between min-h-[140px]">
+                <div>
+                  <h3 className="text-2xl font-semibold text-white group-hover:text-purple-400 transition-colors mb-2">
+                    {card.name}
+                  </h3>
+                  <p className="text-base text-white/60">{card.description}</p>
+                  {card.tag && <p className="text-sm text-yellow-400 mt-1">{card.tag}</p>}
+                </div>
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleGenerate(card);
+                  }}
+                  className="w-full py-2 rounded-lg font-medium transition-all bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
+                >
+                  立即进入
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  if (showAutoRemoveBackground) {
+    return (
+      <div className="flex-1 px-6 py-8 overflow-y-auto">
+        <div className="relative">
+          {renderBackButton('返回快速制作', () => setShowAutoRemoveBackground(false))}
+          <AutoRemoveBackgroundPage />
+        </div>
+      </div>
+    );
+  }
+
+  if (showRemoveWatermark) {
+    return (
+      <div className="flex-1 px-6 py-8 overflow-y-auto">
+        <div className="relative">
+          {renderBackButton('返回快速制作', () => setShowRemoveWatermark(false))}
+          <RemoveWatermarkPage />
+        </div>
+      </div>
+    );
+  }
+
+  if (showImageUpsampling) {
+    return (
+      <div className="flex-1 px-6 py-8 overflow-y-auto">
+        <div className="relative">
+          {renderBackButton('返回快速制作', () => setShowImageUpsampling(false))}
+          <ImageUpsamplingPage />
+        </div>
+      </div>
+    );
+  }
+
+  if (showColorExtraction) {
+    return (
+      <div className="flex-1 px-6 py-8 overflow-y-auto">
+        <div className="relative">
+          {renderBackButton('返回快速制作', () => setShowColorExtraction(false))}
+          <ColorExtraction2Page />
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="flex-1 px-6 py-8 overflow-y-auto">
-      {showAutoRemoveBackground ? (
-        <div className="relative">
-          <button
-            onClick={() => setShowAutoRemoveBackground(false)}
-            className="mb-6 flex items-center gap-2 text-white/60 hover:text-white transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            <span>返回模板列表</span>
-          </button>
-          <AutoRemoveBackgroundPage />
-        </div>
-      ) : showRemoveWatermark ? (
-        <div className="relative">
-          <button
-            onClick={() => setShowRemoveWatermark(false)}
-            className="mb-6 flex items-center gap-2 text-white/60 hover:text-white transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            <span>返回模板列表</span>
-          </button>
-          <RemoveWatermarkPage />
-        </div>
-      ) : showImageUpsampling ? (
-        <div className="relative">
-          <button
-            onClick={() => setShowImageUpsampling(false)}
-            className="mb-6 flex items-center gap-2 text-white/60 hover:text-white transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            <span>返回模板列表</span>
-          </button>
-          <ImageUpsamplingPage />
-        </div>
-      ) : showTemplateExtraction ? (
-        <div className="relative">
-          <button
-            onClick={resetTemplateExtraction}
-            className="mb-6 flex items-center gap-2 text-white/60 hover:text-white transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            <span>返回模板列表</span>
-          </button>
-
-          <div className="max-w-4xl mx-auto">
-            <div className="text-center mb-8">
-              <h2 className="text-3xl font-bold text-white mb-3">模板提取</h2>
-              <p className="text-white/60">提取商品主图或上传本地图片</p>
-            </div>
-
-            {/* 模式切换 Tab */}
-            <div className="flex gap-2 mb-6">
-              <button
-                onClick={() => setExtractMode('upload')}
-                className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all flex items-center justify-center gap-2 ${
-                  extractMode === 'upload'
-                    ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white'
-                    : 'bg-white/5 border border-white/10 text-white/60 hover:border-purple-500/50 hover:text-white'
-                }`}
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-                本地上传
-              </button>
-              <button
-                onClick={() => setExtractMode('link')}
-                className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all flex items-center justify-center gap-2 ${
-                  extractMode === 'link'
-                    ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white'
-                    : 'bg-white/5 border border-white/10 text-white/60 hover:border-purple-500/50 hover:text-white'
-                }`}
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                </svg>
-                链接提取
-              </button>
-            </div>
-
-            {/* 本地上传模式 */}
-            {extractMode === 'upload' && (
-              <div>
-                {/* 上传区域 */}
-                <div
-                  onClick={triggerFileInput}
-                  className="bg-white/10 backdrop-blur-md rounded-2xl p-8 border border-white/20 mb-6 cursor-pointer hover:bg-white/15 transition-colors"
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/gif"
-                    multiple
-                    onChange={handleImageUpload}
-                    className="hidden"
-                  />
-                  <div className="text-center">
-                    {isUploading ? (
-                      <>
-                        <div className="animate-spin rounded-full h-12 w-12 border-2 border-purple-500 border-t-transparent mx-auto mb-4" />
-                        <p className="text-white/60">上传中...</p>
-                      </>
-                    ) : (
-                      <>
-                        <svg className="w-12 h-12 mx-auto mb-4 text-white/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                        </svg>
-                        <p className="text-white/80 mb-2">点击或拖拽图片到此处上传</p>
-                        <p className="text-white/40 text-sm">支持 JPG、PNG、WebP、GIF，最大 10MB</p>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {renderCapturedImages()}
-              </div>
-            )}
-
-            {/* 链接提取模式 */}
-            {extractMode === 'link' && (
-              <div>
-                <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20 mb-6">
-                  <div className="flex items-center justify-between gap-4 mb-4">
-                    <div>
-                      <h3 className="text-lg font-medium text-white">浏览器采图助手</h3>
-                      <p className="text-white/50 text-sm mt-1">推荐用于淘宝/天猫页面 hover 采图，稳定性高于直接链接提取</p>
-                    </div>
-                    <button
-                      onClick={detectExtension}
-                      className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors"
-                    >
-                      检测插件
-                    </button>
-                  </div>
-
-                  <div className="rounded-xl border border-white/10 bg-black/20 p-4 mb-4">
-                    <p className="text-sm text-white/80 mb-2">安装步骤</p>
-                    <ol className="space-y-1 text-sm text-white/50 list-decimal pl-5">
-                      {installGuide.map((step) => (
-                        <li key={step}>{step}</li>
-                      ))}
-                    </ol>
-                    <p className="text-xs text-yellow-400/90 mt-3">
-                      插件目录：`browser-extension/zaomeng-capture`
-                    </p>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                    <div>
-                      <p className="text-sm text-white/80">当前状态</p>
-                      <p className="text-sm text-white/50 mt-1">{pluginStatus}</p>
-                    </div>
-                    <div className={`text-xs px-3 py-1.5 rounded-full ${isExtensionInstalled ? 'bg-green-500/20 text-green-300' : 'bg-white/10 text-white/50'}`}>
-                      {isPluginCapturing ? '采集中...' : isExtensionInstalled ? '已连接' : '未连接'}
-                    </div>
-                  </div>
-                </div>
-
-                {/* 平台选择 */}
-                <div className="mb-6">
-                  <label className="block text-white/80 text-sm font-medium mb-3">
-                    选择平台
-                  </label>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => setPlatform('taobao')}
-                      className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${
-                        platform === 'taobao'
-                          ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white'
-                          : 'bg-white/5 border border-white/10 text-white/60 hover:border-orange-500/50 hover:text-white'
-                      }`}
-                    >
-                      淘宝/天猫
-                    </button>
-                    <button
-                      onClick={() => setPlatform('pinduoduo')}
-                      className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${
-                        platform === 'pinduoduo'
-                          ? 'bg-gradient-to-r from-yellow-500 to-orange-500 text-white'
-                          : 'bg-white/5 border border-white/10 text-white/60 hover:border-yellow-500/50 hover:text-white'
-                      }`}
-                    >
-                      拼多多
-                    </button>
-                  </div>
-                </div>
-
-                {/* URL输入 */}
-                <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20 mb-6">
-                  <div className="mb-4">
-                    <label className="block text-white/80 text-sm font-medium mb-3">
-                      商品链接
-                    </label>
-                    <input
-                      type="url"
-                      value={templateUrl}
-                      onChange={(e) => setTemplateUrl(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleExtractTemplate()}
-                      placeholder={`请输入${platform === 'taobao' ? '淘宝或天猫' : '拼多多'}商品链接`}
-                      className="w-full bg-black/50 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-purple-500 transition-colors"
-                    />
-                  </div>
-
-                  <button
-                    onClick={handleExtractTemplate}
-                    disabled={isExtracting}
-                    className={`w-full py-3 rounded-lg font-medium transition-all ${
-                      isExtracting
-                        ? 'bg-white/10 text-white/40 cursor-not-allowed'
-                        : 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white'
-                    }`}
-                  >
-                    {isExtracting ? (
-                      <span className="flex items-center justify-center gap-2">
-                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                        提取中，请稍候...
-                      </span>
-                    ) : '提取图片'}
-                  </button>
-
-                  {/* 提示信息 */}
-                  <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
-                    <p className="text-yellow-400 text-sm">
-                      提示：部分商品可能需要登录才能提取，建议直接上传商品图片
-                    </p>
-                  </div>
-                </div>
-
-                {/* 提取结果 */}
-                {extractedImages.length > 0 && (
-                  <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-medium text-white">
-                        提取结果 ({extractedImages.length}张)
-                      </h3>
-                      <button
-                        onClick={toggleSelectAll}
-                        className="text-sm text-purple-400 hover:text-purple-300 transition-colors"
-                      >
-                        {selectedImages.size === extractedImages.length ? '取消全选' : '全选'}
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 mb-6">
-                      {extractedImages.map((imageUrl, index) => (
-                        <div
-                          key={index}
-                          onClick={() => toggleImageSelection(imageUrl)}
-                          className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${
-                            selectedImages.has(imageUrl)
-                              ? 'border-purple-500 ring-2 ring-purple-500/50'
-                              : 'border-transparent hover:border-white/30'
-                          }`}
-                        >
-                          <img
-                            src={imageUrl}
-                            alt={`提取图片 ${index + 1}`}
-                            className="w-full h-full object-cover"
-                          />
-                          {selectedImages.has(imageUrl) && (
-                            <div className="absolute top-2 right-2 w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center">
-                              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                              </svg>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-
-                    <button
-                      onClick={handleConfirmSelection}
-                      disabled={selectedImages.size === 0}
-                      className={`w-full py-3 rounded-lg font-medium transition-all ${
-                        selectedImages.size === 0
-                          ? 'bg-white/10 text-white/40 cursor-not-allowed'
-                          : 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white'
-                      }`}
-                    >
-                      确认选择 ({selectedImages.size}张)
-                    </button>
-                  </div>
-                )}
-
-                {/* 加载中状态 */}
-                {isExtracting && (
-                  <div className="bg-white/10 backdrop-blur-md rounded-2xl p-8 border border-white/20 text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-2 border-purple-500 border-t-transparent mx-auto mb-4" />
-                    <p className="text-white/60">正在提取商品图片...</p>
-                  </div>
-                )}
-
-                {renderCapturedImages()}
-              </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-12">
-            <h2 className="text-4xl font-bold text-white mb-4">快速制作</h2>
-            <p className="text-white/60 text-lg">选择一个模板，快速生成精美的图片</p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {/* 智能抠图 */}
-            <div
-              className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/20 hover:border-purple-500/50 transition-all cursor-pointer group"
-              onClick={() => handleGenerate(templates[0])}
-            >
-              <div className="flex gap-4 h-full">
-                <div className="flex-shrink-0">
-                  <RemoveBackgroundIcon />
-                </div>
-                <div className="flex-1 flex flex-col justify-between min-h-[140px]">
-                  <div>
-                    <h3 className="text-2xl font-semibold text-white group-hover:text-purple-400 transition-colors mb-2">
-                      {templates[0].name}
-                    </h3>
-                    <p className="text-base text-white/60">
-                      {templates[0].description}
-                    </p>
-                    <p className="text-sm text-green-400 mt-1">
-                      免费功能
-                    </p>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleGenerate(templates[0]);
-                    }}
-                    className="w-full py-2 rounded-lg font-medium transition-all bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
-                  >
-                    立即进入
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* 去除水印 */}
-            <div
-              className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/20 hover:border-purple-500/50 transition-all cursor-pointer group"
-              onClick={() => handleGenerate(templates[1])}
-            >
-              <div className="flex gap-4 h-full">
-                <div className="flex-shrink-0">
-                  <RemoveWatermarkIcon />
-                </div>
-                <div className="flex-1 flex flex-col justify-between min-h-[140px]">
-                  <div>
-                    <h3 className="text-2xl font-semibold text-white group-hover:text-purple-400 transition-colors mb-2">
-                      {templates[1].name}
-                    </h3>
-                    <p className="text-base text-white/60">
-                      {templates[1].description}
-                    </p>
-                    <p className="text-sm text-green-400 mt-1">
-                      限时免费
-                    </p>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleGenerate(templates[1]);
-                    }}
-                    className="w-full py-2 rounded-lg font-medium transition-all bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
-                  >
-                    立即进入
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* 高清放大 */}
-            <div
-              className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/20 hover:border-purple-500/50 transition-all cursor-pointer group"
-              onClick={() => handleGenerate(templates[2])}
-            >
-              <div className="flex gap-4 h-full">
-                <div className="flex-shrink-0">
-                  <ImageUpsamplingIcon />
-                </div>
-                <div className="flex-1 flex flex-col justify-between min-h-[140px]">
-                  <div>
-                    <h3 className="text-2xl font-semibold text-white group-hover:text-purple-400 transition-colors mb-2">
-                      {templates[2].name}
-                    </h3>
-                    <p className="text-base text-white/60">
-                      {templates[2].description}
-                    </p>
-                    <p className="text-sm text-green-400 mt-1">
-                      限时免费
-                    </p>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleGenerate(templates[2]);
-                    }}
-                    className="w-full py-2 rounded-lg font-medium transition-all bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
-                  >
-                    立即进入
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* 模板提取 */}
-            <div
-              className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/20 hover:border-purple-500/50 transition-all cursor-pointer group"
-              onClick={() => handleGenerate(templates[3])}
-            >
-              <div className="flex gap-4 h-full">
-                <div className="flex-shrink-0">
-                  <TemplateExtractionIcon />
-                </div>
-                <div className="flex-1 flex flex-col justify-between min-h-[140px]">
-                  <div>
-                    <h3 className="text-2xl font-semibold text-white group-hover:text-purple-400 transition-colors mb-2">
-                      {templates[3].name}
-                    </h3>
-                    <p className="text-base text-white/60">
-                      {templates[3].description}
-                    </p>
-                    <p className="text-sm text-yellow-400 mt-1">
-                      支持上传和链接提取
-                    </p>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleGenerate(templates[3]);
-                    }}
-                    className="w-full py-2 rounded-lg font-medium transition-all bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
-                  >
-                    立即进入
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* 待开发模板 */}
-            {templates.slice(4).map((template) => (
-              <div
-                key={template.id}
-                className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10 opacity-60"
-              >
-                <div className="flex gap-4 h-full">
-                  <div className="flex-shrink-0">
-                    <div className="w-32 h-full min-h-[140px] rounded-lg bg-white/10 flex items-center justify-center animate-pulse">
-                      <span className="text-4xl">{template.icon}</span>
-                    </div>
-                  </div>
-                  <div className="flex-1 flex flex-col justify-between min-h-[140px]">
-                    <div>
-                      <h3 className="text-2xl font-semibold text-white/40 mb-2">
-                        待开发...
-                      </h3>
-                      <p className="text-base text-white/30">
-                        敬请期待
-                      </p>
-                    </div>
-                    <button
-                      disabled
-                      className="w-full py-2 rounded-lg font-medium bg-white/5 text-white/30 cursor-not-allowed"
-                    >
-                      待开发
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-12 p-6 bg-white/5 backdrop-blur-md rounded-2xl border border-white/10">
-            <h3 className="text-xl font-semibold text-white mb-4">使用提示</h3>
-            <ul className="text-white/60 space-y-2">
-              <li>选择合适的模板可以快速获得高质量的图片</li>
-              <li>每次生成会消耗相应
-                <span className="inline-flex items-center gap-1 mx-1">
-                  <img src="/points-icon.png" alt="积分" className="w-3 h-3" />
-                  积分
-                </span>
-                ，请合理使用
-              </li>
-              <li>生成的图片会自动保存到您的作品集</li>
-            </ul>
-          </div>
-        </div>
-      )}
+      {isCaptureLibraryView ? renderCaptureLibrary() : renderQuickCreateGrid()}
     </div>
   );
 }

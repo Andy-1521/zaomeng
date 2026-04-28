@@ -106,6 +106,24 @@ export const chatMessages = mysqlTable(
   ]
 );
 
+export const capturedImages = mysqlTable(
+  "captured_images",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().notNull(),
+    userId: varchar("user_id", { length: 36 }).notNull(),
+    imageUrl: text("image_url").notNull(),
+    originalUrl: text("original_url"),
+    pageUrl: text("page_url"),
+    pageTitle: text("page_title"),
+    sourceHost: varchar("source_host", { length: 255 }),
+    imageType: varchar("image_type", { length: 20 }).default("main").notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("captured_images_user_created_idx").on(table.userId, table.createdAt),
+  ]
+);
+
 export const insertTransactionSchema = createCoercedInsertSchema(transactions).pick({
   userId: true,
   orderNumber: true,
@@ -132,6 +150,16 @@ export const insertChatMessageSchema = createCoercedInsertSchema(chatMessages).p
   orderId: true,
 });
 
+export const insertCapturedImageSchema = createCoercedInsertSchema(capturedImages).pick({
+  userId: true,
+  imageUrl: true,
+  originalUrl: true,
+  pageUrl: true,
+  pageTitle: true,
+  sourceHost: true,
+  imageType: true,
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type UpdateUser = z.infer<typeof updateUserSchema>;
@@ -139,3 +167,5 @@ export type Transaction = typeof transactions.$inferSelect;
 export type InsertTransaction = z.infer<typeof insertTransactionSchema>;
 export type ChatMessage = typeof chatMessages.$inferSelect;
 export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;
+export type CapturedImage = typeof capturedImages.$inferSelect;
+export type InsertCapturedImage = z.infer<typeof insertCapturedImageSchema>;

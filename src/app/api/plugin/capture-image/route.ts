@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { mkdir, writeFile } from 'fs/promises';
 import path from 'path';
-import { userManager } from '@/storage/database';
+import { capturedImageManager, userManager } from '@/storage/database';
 import { uploadToCozeStorage } from '@/lib/dualStorage';
 
 type CaptureImageRequest = {
@@ -145,10 +145,21 @@ export async function POST(request: NextRequest) {
       uploadedUrl: uploadedUrl.substring(0, 80),
     });
 
+    const record = await capturedImageManager.createCapturedImage({
+      userId,
+      imageUrl: uploadedUrl,
+      originalUrl: imageUrl,
+      pageUrl,
+      pageTitle,
+      sourceHost,
+      imageType,
+    })
+
     return NextResponse.json({
       success: true,
       message: '图片已采集到当前账号',
       data: {
+        id: record.id,
         userId,
         uploadedUrl,
         originalUrl: imageUrl,

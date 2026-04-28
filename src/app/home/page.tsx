@@ -11,17 +11,17 @@ import ColorExtraction2Page from '@/components/ColorExtraction2Page';
 import QuickCreatePage from '@/components/QuickCreatePage';
 import CustomPage from '@/components/CustomPage';
 
-type SidebarTab = 'color-extraction' | 'quick-create' | 'custom';
+type SidebarTab = 'capture-library' | 'quick-create' | 'custom';
 
 export default function HomePage() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, isLoading, refreshUser } = useUser();
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('color-extraction');
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('capture-library');
 
   // Sidebar tab -> TaskHistory TabType mapping
   const getTaskHistoryTab = (): TabType => {
-    if (sidebarTab === 'color-extraction') return 'color-extraction';
+    if (sidebarTab === 'capture-library') return 'color-extraction';
     if (sidebarTab === 'quick-create') return 'auto-remove-bg';
     return 'custom';
   };
@@ -100,12 +100,12 @@ export default function HomePage() {
 
         {/* 主要内容区 */}
         <div className="pl-20 pr-28">
-          {sidebarTab === 'color-extraction' && (
-            <ColorExtraction2Page key="color-extraction" />
+          {sidebarTab === 'capture-library' && (
+            <QuickCreatePage key="capture-library" defaultView="capture-library" />
           )}
 
           {sidebarTab === 'quick-create' && (
-            <QuickCreatePage key="quick-create" />
+            <QuickCreatePage key="quick-create" defaultView="quick-create" />
           )}
 
           {sidebarTab === 'custom' && (

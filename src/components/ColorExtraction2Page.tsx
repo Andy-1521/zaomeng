@@ -68,6 +68,7 @@ export default function ColorExtraction2Page() {
   const [isRedrawing, setIsRedrawing] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [showCopySuccessForOrder, setShowCopySuccessForOrder] = useState<string | null>(null);
+  const [libraryImages, setLibraryImages] = useState<string[]>([]);
 
   const cleanStuckOrders = async (userId: string) => {
     try {
@@ -196,6 +197,25 @@ export default function ColorExtraction2Page() {
     if (!url || typeof url !== 'string') return false;
     return url.startsWith('http://') || url.startsWith('https://');
   };
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem('capture-library:selected-images');
+    if (!stored) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(stored) as string[];
+      if (Array.isArray(parsed)) {
+        const nextImages = parsed.filter((item) => typeof item === 'string' && item.startsWith('http'));
+        queueMicrotask(() => {
+          setLibraryImages(nextImages);
+        });
+      }
+    } catch (error) {
+      console.error('[彩绘提取2] 读取图库选中图片失败:', error);
+    }
+  }, []);
 
   useEffect(() => {
     const handleTaskCompleted = (event: Event) => {
@@ -602,6 +622,25 @@ export default function ColorExtraction2Page() {
     }
   };
 
+  const handleGenerateFromLibrary = async () => {
+    if (libraryImages.length === 0) {
+      showToast('当前没有可处理的图库图片', 'error');
+      return;
+    }
+
+    const hasEnoughPoints = await ensureEnoughPoints(libraryImages.length);
+    if (!hasEnoughPoints) {
+      return;
+    }
+
+    showToast(`已开始处理 ${libraryImages.length} 张图库图片`, 'info');
+
+    for (const imageUrl of libraryImages) {
+      await generateWithImage(imageUrl);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  };
+
   const handleDownloadHD = async (imageUrl: string, orderNumber: string) => {
     try {
       showToast('正在下载图片...', 'info');
@@ -803,6 +842,38 @@ export default function ColorExtraction2Page() {
         <div className="text-center mb-8">
           <h2 className="text-4xl font-bold text-white mb-4">彩绘提取</h2>
         </div>
+
+        {libraryImages.length > 0 && (
+          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20 mb-8">
+            <div className="flex items-center justify-between gap-4 mb-4">
+              <div>
+                <h3 className="text-xl font-semibold text-white">来自采集图库的图片</h3>
+                <p className="text-white/50 text-sm mt-1">当前带入 {libraryImages.length} 张图片，可直接一键开始彩绘提取</p>
+              </div>
+              <button
+                onClick={() => setLibraryImages([])}
+                className="px-3 py-2 rounded-lg bg-white/10 text-white/60 hover:bg-white/20 hover:text-white transition-colors text-sm"
+              >
+                清空
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mb-5">
+              {libraryImages.map((imageUrl, index) => (
+                <div key={index} className="aspect-square overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                  <img src={imageUrl} alt={`图库图片 ${index + 1}`} className="w-full h-full object-cover" />
+                </div>
+              ))}
+            </div>
+
+            <button
+              onClick={() => void handleGenerateFromLibrary()}
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 text-white font-medium hover:opacity-90 transition-opacity"
+            >
+              一键开始彩绘提取 ({libraryImages.length}张)
+            </button>
+          </div>
+        )}
 
         <div className="bg-white/10 backdrop-blur-md rounded-2xl p-8 border border-white/20 mb-8">
           <div
