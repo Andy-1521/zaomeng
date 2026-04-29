@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { showToast } from '@/lib/toast';
-import AutoRemoveBackgroundPage from '@/components/AutoRemoveBackgroundPage';
+import AIGeneratePage from '@/components/AIGeneratePage';
 import RemoveWatermarkPage from '@/components/RemoveWatermarkPage';
 import ImageUpsamplingPage from '@/components/ImageUpsamplingPage';
 import ColorExtraction2Page from '@/components/ColorExtraction2Page';
@@ -27,7 +27,7 @@ type CapturedImageRecord = {
   createdAt: string;
 };
 
-type ProcessingAction = 'color-extraction' | 'auto-remove-bg' | 'watermark' | 'upsampling';
+type ProcessingAction = 'color-extraction' | 'ai-generate' | 'watermark' | 'upsampling';
 
 interface QuickCreatePageProps {
   defaultView?: 'capture-library' | 'quick-create';
@@ -41,9 +41,9 @@ interface ModuleCard {
   icon: React.ReactNode;
 }
 
-const RemoveBackgroundIcon = () => (
+const AIGenerateIcon = () => (
   <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
-    <img src="/assets/remove-background-demo.gif" alt="自动抠图示例" className="w-full h-full object-cover" />
+    <img src="/assets/remove-background-demo.gif" alt="AI生图示例" className="w-full h-full object-cover" />
   </div>
 );
 
@@ -67,18 +67,18 @@ const ColorExtractionIcon = () => (
 
 const actionLabelMap: Record<ProcessingAction, string> = {
   'color-extraction': '彩绘提取',
-  'auto-remove-bg': '智能抠图',
+  'ai-generate': 'AI生图',
   watermark: '去除水印',
   upsampling: '高清放大',
 };
 
 const moduleCards: ModuleCard[] = [
   {
-    id: 'auto-remove-bg',
-    name: '智能抠图',
-    description: '智能识别主体抠出',
-    icon: <RemoveBackgroundIcon />,
-    tag: '免费功能',
+    id: 'ai-generate',
+    name: 'AI生图',
+    description: '进入 AI 生图独立页面处理图片',
+    icon: <AIGenerateIcon />,
+    tag: '独立页面',
   },
   {
     id: 'watermark',
@@ -111,14 +111,39 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [showAutoRemoveBackground, setShowAutoRemoveBackground] = useState(false);
+  const [showAIGenerate, setShowAIGenerate] = useState(false);
   const [showRemoveWatermark, setShowRemoveWatermark] = useState(false);
   const [showImageUpsampling, setShowImageUpsampling] = useState(false);
   const [showColorExtraction, setShowColorExtraction] = useState(false);
   const [actionBarPosition, setActionBarPosition] = useState<{ top: number; left: number } | null>(null);
+  const [columnCount, setColumnCount] = useState(4);
+  const [imageAspectRatios, setImageAspectRatios] = useState<Record<string, number>>({});
 
   const isCaptureLibraryView = defaultView === 'capture-library';
   const selectedImageList = Array.from(selectedImages);
+
+  const galleryColumns = useMemo(() => {
+    const columns = Array.from({ length: columnCount }, () => ({
+      items: [] as CapturedImageRecord[],
+      heightScore: 0,
+    }));
+
+    for (const image of capturedImages) {
+      const ratio = imageAspectRatios[image.imageUrl] ?? 1;
+      let targetIndex = 0;
+
+      for (let i = 1; i < columns.length; i += 1) {
+        if (columns[i].heightScore < columns[targetIndex].heightScore) {
+          targetIndex = i;
+        }
+      }
+
+      columns[targetIndex].items.push(image);
+      columns[targetIndex].heightScore += ratio;
+    }
+
+    return columns.map((column) => column.items);
+  }, [capturedImages, columnCount, imageAspectRatios]);
 
   const loadCapturedImages = useCallback(async () => {
     try {
@@ -342,6 +367,33 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
   }, [isCaptureLibraryView, loadCapturedImages]);
 
   useEffect(() => {
+    const updateColumnCount = () => {
+      const width = window.innerWidth;
+      if (width >= 1800) {
+        setColumnCount(6);
+        return;
+      }
+      if (width >= 1500) {
+        setColumnCount(5);
+        return;
+      }
+      if (width >= 1180) {
+        setColumnCount(4);
+        return;
+      }
+      if (width >= 820) {
+        setColumnCount(3);
+        return;
+      }
+      setColumnCount(2);
+    };
+
+    updateColumnCount();
+    window.addEventListener('resize', updateColumnCount);
+    return () => window.removeEventListener('resize', updateColumnCount);
+  }, []);
+
+  useEffect(() => {
     const updateActionBarPosition = () => {
       const container = gallerySectionRef.current;
       if (!container || selectedImageList.length === 0) {
@@ -406,8 +458,8 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
       setShowColorExtraction(true);
       return;
     }
-    if (action === 'auto-remove-bg') {
-      setShowAutoRemoveBackground(true);
+    if (action === 'ai-generate') {
+      setShowAIGenerate(true);
       return;
     }
     if (action === 'watermark') {
@@ -438,7 +490,7 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
   const renderCaptureLibrary = () => (
     <div
       ref={gallerySectionRef}
-      className={`relative max-w-6xl mx-auto transition-all ${isDragging ? 'scale-[0.995]' : ''}`}
+      className={`relative max-w-[92vw] 2xl:max-w-[1780px] mx-auto transition-all ${isDragging ? 'scale-[0.995]' : ''}`}
       onDragOver={(event) => {
         event.preventDefault();
         setIsDragging(true);
@@ -484,51 +536,83 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
         </div>
       )}
 
-        {capturedImages.length === 0 ? (
-          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-12 text-center text-white/45">
-            还没有图片进入图库，通过插件采集图片，或点击右上角上传图片
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 mb-6">
-            {capturedImages.map((image, index) => {
-              const selected = selectedImages.has(image.imageUrl);
-              return (
-                <button
-                  key={index}
-                  ref={(node) => {
-                    imageButtonRefs.current[image.imageUrl] = node;
-                  }}
-                  type="button"
-                  onClick={() => toggleImageSelection(image.imageUrl)}
-                  className={`group relative aspect-square overflow-hidden rounded-2xl border transition-all ${selected ? 'border-purple-500 ring-2 ring-purple-500/50' : 'border-white/10 hover:border-white/30'}`}
-                >
-                <img src={image.imageUrl} alt={`图库图片 ${index + 1}`} className="w-full h-full object-cover" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void removeUploadedImage(image);
-                  }}
-                  className="absolute top-2 right-2 w-7 h-7 bg-red-500/80 hover:bg-red-500 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                  title="移除图片"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-                {selected && (
-                  <div className="absolute top-2 left-2 w-7 h-7 rounded-full bg-purple-500 flex items-center justify-center text-white shadow-lg">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                  </div>
-                )}
-              </button>
-            );
-          })}
-          </div>
-        )}
+      {capturedImages.length === 0 ? (
+        <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-12 text-center text-white/45">
+          还没有图片进入图库，通过插件采集图片，或点击右上角上传图片
+        </div>
+      ) : (
+        <div className="mb-8 flex items-start justify-center gap-5 xl:gap-6">
+          {galleryColumns.map((column, columnIndex) => (
+            <div key={columnIndex} className="flex-1 min-w-0 max-w-[290px] space-y-5">
+              {column.map((image, index) => {
+                const selected = selectedImages.has(image.imageUrl);
+                const cardIndex = columnIndex * 100 + index;
+                const accentClass = cardIndex % 7 === 0
+                  ? 'before:absolute before:inset-0 before:border before:border-purple-400/20 before:rounded-[1.2rem] before:pointer-events-none'
+                  : '';
+
+                return (
+                  <button
+                    key={image.id}
+                    ref={(node) => {
+                      imageButtonRefs.current[image.imageUrl] = node;
+                    }}
+                    type="button"
+                    onClick={() => toggleImageSelection(image.imageUrl)}
+                    className={`group relative block w-full overflow-hidden rounded-[1.35rem] border transition-all ${accentClass} ${selected ? 'border-purple-500 ring-2 ring-purple-500/50 shadow-[0_0_0_1px_rgba(168,85,247,0.25),0_24px_50px_rgba(76,29,149,0.28)] -translate-y-1' : 'border-white/10 hover:border-white/30 hover:-translate-y-1 hover:shadow-[0_20px_45px_rgba(15,23,42,0.35)]'}`}
+                  >
+                    <div className="w-full bg-black/20">
+                      <img
+                        src={image.imageUrl}
+                        alt={`图库图片 ${cardIndex + 1}`}
+                        className="h-auto w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+                        onLoad={(event) => {
+                          const ratio = event.currentTarget.naturalHeight / Math.max(event.currentTarget.naturalWidth, 1);
+                          setImageAspectRatios((prev) => {
+                            if (prev[image.imageUrl] === ratio) {
+                              return prev;
+                            }
+                            return {
+                              ...prev,
+                              [image.imageUrl]: ratio,
+                            };
+                          });
+                        }}
+                      />
+                    </div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/15 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/60 to-transparent opacity-70" />
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void removeUploadedImage(image);
+                      }}
+                      className="absolute top-3 right-3 w-7 h-7 bg-red-500/80 hover:bg-red-500 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="移除图片"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                    {selected && (
+                      <div className="absolute top-3 left-3 w-7 h-7 rounded-full bg-purple-500 flex items-center justify-center text-white shadow-lg">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+                    )}
+                    <div className="absolute left-3 bottom-3 text-left opacity-0 group-hover:opacity-100 transition-opacity">
+                      <p className="text-[11px] tracking-[0.18em] uppercase text-white/55">Gallery</p>
+                      <p className="text-sm text-white/85 mt-1">图片 {cardIndex + 1}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
 
       {selectedImageList.length > 0 && (
         <div className="mb-6 flex justify-end">
@@ -571,7 +655,7 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
     <div className="max-w-7xl mx-auto">
       <div className="text-center mb-12">
         <h2 className="text-4xl font-bold text-white mb-4">快速制作</h2>
-        <p className="text-white/60 text-lg">选择一个处理模块，进入对应页面</p>
+        <p className="text-white/60 text-lg">选择一个功能模块，直接进入对应的独立页面</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -608,12 +692,12 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
     </div>
   );
 
-  if (showAutoRemoveBackground) {
+  if (showAIGenerate) {
     return (
       <div className="flex-1 px-6 py-8 overflow-y-auto">
         <div className="relative">
-          {renderBackButton('返回快速制作', () => setShowAutoRemoveBackground(false))}
-          <AutoRemoveBackgroundPage />
+          {renderBackButton('返回快速制作', () => setShowAIGenerate(false))}
+          <AIGeneratePage />
         </div>
       </div>
     );

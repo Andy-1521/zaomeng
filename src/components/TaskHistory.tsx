@@ -470,10 +470,10 @@ export const forceRefreshCache = (userId?: string) => {
       let tab: TabType = 'color-extraction';
       let tabName: string = '彩绘提取';
 
-      // 智能抠图判断：检查toolPage字段和订单号前缀
+      // AI生图判断：兼容旧的“智能抠图”数据和订单号前缀
       if (item.toolPage === '智能抠图' || item.orderNumber?.startsWith('ARB-')) {
         tab = 'auto-remove-bg';
-        tabName = '智能抠图';
+        tabName = 'AI生图';
       } else if (item.toolPage === '彩绘提取' || item.toolPage === '彩绘提取2' || item.description?.includes('彩绘提取')) {
         tab = 'color-extraction';
         tabName = '彩绘提取';
@@ -886,7 +886,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     const labels: Record<FilterType, string> = {
       'all': '全部',
       'color-extraction': '彩绘提取',
-      'auto-remove-bg': '智能抠图',
+      'auto-remove-bg': 'AI生图',
       'watermark': '去除水印',
       'custom': '自定义',
     };
@@ -1028,7 +1028,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                     }
                   `}
                 >
-                  智能抠图
+                  AI生图
                 </button>
 
                 <button

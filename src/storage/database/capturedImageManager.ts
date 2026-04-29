@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { getDb } from './client'
 import { capturedImages, insertCapturedImageSchema } from './shared/schema'
 import type { CapturedImage, InsertCapturedImage } from './shared/schema'
@@ -43,14 +43,14 @@ export class CapturedImageManager {
     const existing = await db
       .select({ id: capturedImages.id })
       .from(capturedImages)
-      .where(eq(capturedImages.id, id))
+      .where(and(eq(capturedImages.id, id), eq(capturedImages.userId, userId)))
       .limit(1)
 
     if (existing.length === 0) {
       return false
     }
 
-    await db.delete(capturedImages).where(eq(capturedImages.id, id))
+    await db.delete(capturedImages).where(and(eq(capturedImages.id, id), eq(capturedImages.userId, userId)))
     return true
   }
 
