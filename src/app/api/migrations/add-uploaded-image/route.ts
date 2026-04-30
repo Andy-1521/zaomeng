@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getDb } from '@/storage/database/client';
+import { getDb, getMysqlPool } from '@/storage/database/client';
 import { sql } from 'drizzle-orm';
 import type { RowDataPacket } from 'mysql2/promise';
 
@@ -20,9 +20,10 @@ export async function POST() {
     console.log('[Migration] 开始添加 uploaded_image 字段...');
 
     const db = await getDb();
+    const pool = await getMysqlPool();
 
     // 检查字段是否已存在
-    const [existingColumns] = await db.execute<ColumnRow[]>(sql`
+    const [existingColumns] = await pool.query<ColumnRow[]>(`
       SELECT column_name
       FROM information_schema.columns
       WHERE table_schema = DATABASE()
@@ -48,7 +49,7 @@ export async function POST() {
 
     // 检查是否有 request_params 中包含 imageUrl 的记录，尝试迁移数据
     // 使用更简单的方式，逐条处理
-    const [rows] = await db.execute<TransactionRow[]>(sql`
+    const [rows] = await pool.query<TransactionRow[]>(`
       SELECT id, request_params
       FROM transactions
       WHERE request_params IS NOT NULL

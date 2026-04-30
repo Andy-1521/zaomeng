@@ -295,15 +295,17 @@ export const forceRefreshCache = (userId?: string) => {
     console.log('[TaskHistory] transformDatabaseData ========== 开始 ==========');
     console.log('[TaskHistory] transformDatabaseData - 输入数据数量:', data.length);
     if (data.length > 0) {
+      const firstItem = data[0];
+      const lastItem = data[data.length - 1];
       console.log('[TaskHistory] transformDatabaseData - 第一条数据:', {
-        orderNumber: data[0].orderNumber,
-        resultData: data[0].resultData ? (typeof data[0].resultData === 'string' ? data[0].resultData.substring(0, 100) + '...' : JSON.stringify(data[0].resultData).substring(0, 100) + '...') : null,
-        createdAt: data[0].createdAt,
+        orderNumber: firstItem.orderNumber,
+        resultData: firstItem.resultData ? (typeof firstItem.resultData === 'string' ? firstItem.resultData.substring(0, 100) + '...' : JSON.stringify(firstItem.resultData).substring(0, 100) + '...') : null,
+        createdAt: firstItem.createdAt,
       });
       console.log('[TaskHistory] transformDatabaseData - 最后一条数据:', {
-        orderNumber: data[data.length - 1].orderNumber,
-        resultData: data[data.length - 1].resultData ? (typeof data[data.length - 1].resultData === 'string' ? data[data.length - 1].resultData.substring(0, 100) + '...' : JSON.stringify(data[data.length - 1].resultData).substring(0, 100) + '...') : null,
-        createdAt: data[data.length - 1].createdAt,
+        orderNumber: lastItem.orderNumber,
+        resultData: lastItem.resultData ? (typeof lastItem.resultData === 'string' ? lastItem.resultData.substring(0, 100) + '...' : JSON.stringify(lastItem.resultData).substring(0, 100) + '...') : null,
+        createdAt: lastItem.createdAt,
       });
     } else {
       console.warn('[TaskHistory] transformDatabaseData - 输入数据为空！');
@@ -582,6 +584,8 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [deletingOrder, setDeletingOrder] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState<FilterType>('all');
+  const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null);
+  const taskCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // 自动隐藏定时器
   const autoHideTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -668,6 +672,11 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     };
 
     const handleTaskHistoryUpdate = () => {
+      const latestTask = getTaskCache(userId)[0];
+      if (latestTask?.id) {
+        setIsCollapsed(false);
+        setHighlightTaskId(latestTask.id);
+      }
       void loadTasks(userId);
     };
 
@@ -678,6 +687,28 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       window.removeEventListener('taskHistoryUpdated', handleTaskHistoryUpdate);
     };
   }, [loadTasks, userId]);
+
+  useEffect(() => {
+    if (!highlightTaskId || isCollapsed) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      taskCardRefs.current[highlightTaskId]?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+      });
+    });
+
+    const timer = window.setTimeout(() => {
+      setHighlightTaskId((current) => (current === highlightTaskId ? null : current));
+    }, 5000);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [highlightTaskId, isCollapsed]);
 
 
 
@@ -736,7 +767,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
     const statusConfig = {
       '处理中': {
-        className: 'bg-blue-500/20 text-blue-300',
+        className: 'bg-blue-500/18 text-blue-200 border border-blue-400/35 shadow-[0_0_0_1px_rgba(96,165,250,0.08)]',
         icon: (
           <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -745,7 +776,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
         ),
       },
       '成功': {
-        className: 'bg-green-500/20 text-green-300',
+        className: 'bg-emerald-500/18 text-emerald-200 border border-emerald-400/35 shadow-[0_0_0_1px_rgba(52,211,153,0.08)]',
         icon: (
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -753,7 +784,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
         ),
       },
       '失败': {
-        className: 'bg-red-500/20 text-red-300',
+        className: 'bg-red-500/18 text-red-200 border border-red-400/35 shadow-[0_0_0_1px_rgba(248,113,113,0.08)]',
         icon: (
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -761,7 +792,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
         ),
       },
       '超时': {
-        className: 'bg-yellow-500/20 text-yellow-300',
+        className: 'bg-amber-500/18 text-amber-200 border border-amber-400/35 shadow-[0_0_0_1px_rgba(251,191,36,0.08)]',
         icon: (
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -769,7 +800,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
         ),
       },
       '部分成功': {
-        className: 'bg-orange-500/20 text-orange-300',
+        className: 'bg-orange-500/18 text-orange-200 border border-orange-400/35 shadow-[0_0_0_1px_rgba(251,146,60,0.08)]',
         icon: (
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -780,7 +811,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
     const config = statusConfig[status];
     return (
-      <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${config.className}`}>
+      <div className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium ${config.className}`}>
         {config.icon}
         <span>{status}</span>
       </div>
@@ -1085,13 +1116,25 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                 return filteredTasks.map((task) => (
                   <div
                     key={task.id}
+                    ref={(node) => {
+                      taskCardRefs.current[task.id] = node;
+                    }}
                     onClick={() => onTaskClick?.(task)}
                     className={`
                       p-3 rounded-xl transition-all cursor-pointer
                       ${task.tab === activeTab
-                        ? 'bg-white/20 border border-white/30'
+                        ? 'bg-white/20 border border-white/30 shadow-[0_10px_24px_rgba(15,23,42,0.18)]'
                         : 'bg-white/5 hover:bg-white/10 border border-transparent'
                       }
+                      ${highlightTaskId === task.id
+                        ? 'ring-2 ring-purple-400/70 shadow-[0_0_0_1px_rgba(196,181,253,0.3),0_0_24px_rgba(139,92,246,0.25)]'
+                        : ''
+                      }
+                      ${task.status === '处理中' ? 'border-l-4 border-l-blue-400' : ''}
+                      ${task.status === '成功' ? 'border-l-4 border-l-emerald-400' : ''}
+                      ${task.status === '失败' ? 'border-l-4 border-l-red-400' : ''}
+                      ${task.status === '超时' ? 'border-l-4 border-l-amber-400' : ''}
+                      ${task.status === '部分成功' ? 'border-l-4 border-l-orange-400' : ''}
                     `}
                   >
                     <div className="flex items-start gap-3">

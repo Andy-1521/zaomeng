@@ -348,9 +348,9 @@ export async function POST(request: NextRequest) {
       }
 
       // 提取任务ID
-      taskId = data.data?.taskId;
+      const nextTaskId = data.data?.taskId;
 
-      if (!taskId || taskId === '') {
+      if (!nextTaskId || nextTaskId === '') {
         console.error('[去除背景] ✗ taskId 为空');
         console.error('[去除背景] 完整响应数据:', JSON.stringify(data, null, 2));
         return NextResponse.json(
@@ -364,6 +364,8 @@ export async function POST(request: NextRequest) {
           { status: 500 }
         );
       }
+
+      taskId = nextTaskId;
 
       console.log('[去除背景] ✓ 任务创建成功:', taskId);
 

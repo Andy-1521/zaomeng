@@ -12,7 +12,7 @@
  * 3. 将临时值改回 NULL
  */
 
-import { getDb } from "../client";
+import { getDb, getMysqlPool } from "../client";
 import { users } from "../shared/schema";
 import { sql } from "drizzle-orm";
 import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
@@ -33,6 +33,7 @@ export async function migrateEmailToNullable() {
 
   try {
     const db = await getDb();
+    const pool = await getMysqlPool();
 
     // 步骤 1: 为所有 email 为 NULL 的记录设置临时值
     console.log("步骤 1: 为 NULL 值设置临时占位符...");
@@ -64,23 +65,23 @@ export async function migrateEmailToNullable() {
       `
     );
 
-    const [resetRows] = await db.execute<CountRow[]>(sql`
+    const [resetRows] = await pool.query<CountRow[]>(`
       SELECT COUNT(*) AS count
-      FROM ${users}
-      WHERE email LIKE ${`%${TEMP_EMAIL_PREFIX}%`}
-    `);
+      FROM users
+      WHERE email LIKE ?
+    `, [`%${TEMP_EMAIL_PREFIX}%`]);
 
     const remainingTempCount = Number(resetRows[0]?.count ?? 0);
 
     console.log(`  - 临时占位残留记录数: ${remainingTempCount}`);
 
     // 步骤 4: 验证迁移结果
-    const [verificationRows] = await db.execute<VerificationRow[]>(sql`
+    const [verificationRows] = await pool.query<VerificationRow[]>(`
       SELECT
         COUNT(*) as total_users,
         SUM(CASE WHEN email IS NULL THEN 1 ELSE 0 END) as null_emails,
         SUM(CASE WHEN email IS NOT NULL THEN 1 ELSE 0 END) as non_null_emails
-      FROM ${users}
+      FROM users
     `);
 
     const stats = verificationRows[0] ?? {

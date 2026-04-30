@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
 
 type Platform = 'taobao' | 'pinduoduo';
 
@@ -61,7 +62,7 @@ function normalizeUrl(rawUrl: string): NormalizedUrlResult {
 
 function extractWithNodeScript(url: string): Promise<ExtractResult> {
   return new Promise((resolve) => {
-    const scriptPath = '/home/ubuntu/Downloads/zaomeng/project/projects/scripts/template-extract.mjs';
+    const scriptPath = fileURLToPath(new URL('../../../../../scripts/template-extract.mjs', import.meta.url));
 
     const child = spawn('node', [scriptPath, url], {
       timeout: 90000,

@@ -2,100 +2,177 @@
 
 ## 项目定位
 
-这是一个基于 Next.js 的 AI 图片工具项目，当前主要面向以下能力：
+这是一个基于 Next.js 16 的 AI 图片工具网站，当前重点已经从“多页面工具站”转为“素材管理 + 选图后直接加工”的工作流。
 
+当前对外主能力：
+
+- 素材库
+- AI生图（当前先做前端交互占位）
 - 彩绘提取
-- 智能抠图
 - 去除水印
 - 高清放大
-- 模板提取
+- 模板提取 API
 
-当前阶段的核心目标不是重构整套后端协议，而是：
+当前核心目标：
 
-- 保持前端页面可验收
-- 保持用户、订单、积分主链路稳定
-- 继续清理历史遗留的类型、状态同步和交互问题
+- 先把前端交互体验完善
+- 后端功能接口后续按用户提供的真实 API 再接
+- 保持公网入口稳定可访问
+- 保持生产构建通过
 
-## 协作规则
+## 当前产品状态
 
-这是后续继续协作时必须遵守的工作规则。
+### 首页主链路
 
-### 1. 备份规则
+当前首页真实主链路：
 
-后续只要你说“备份”，就默认按 GitHub 备份流程执行。
+- 左侧只保留一个入口：`素材库`
+- 主内容固定为 `QuickCreatePage`
+- 用户先收集 / 上传图片素材
+- 再在素材上进行多选
+- 选图后图片区域下方悬浮出加工按钮条
+- 任务状态统一去右侧 `TaskHistory` 查看
 
-备份时必须保留并可追溯以下信息：
+### 当前首页交互特征
 
-- Git 提交版本号
-- 提交日期
-- 提交时间
-- 提交备注信息
-- 如有 tag，还要记录对应 tag 名称
+- 整个页面支持拖拽本地图片上传
+- 右上角 `+` 按钮支持手动上传素材
+- 素材按日期分组显示：
+  - 今天
+  - 昨天
+  - 更早
+- 顶部筛选已简化为一个日期下拉框：
+  - 全部日期
+  - 今天
+  - 昨天
+  - 更早
+- 图片卡片上不再直接压日期浮层
+- 日期与时间信息仅在 hover 内容中显示
+- 顶部工具条右侧固定放置：
+  - 删除重复
+  - 删除所选
+  - 日期筛选下拉框
 
-后续当你要回滚时，我需要把这些信息列给你看，你再明确指定要回滚到哪个版本。
+### 当前加工按钮条
 
-当前备份仓库:
+当前顺序：
 
-- `git@github.com:Andy-1521/zaomeng.git`
+1. AI生图
+2. 彩绘提取
+3. 去除水印
+4. 高清放大
 
-当前已存在的备份记录:
+说明：
 
-- Commit: `8d1fafa`
-- Time: `2026-04-27 17:14`
-- Message: `backup: 2026-04-27 17:14 project snapshot`
-- Tag: `backup-2026-04-27-1714`
+- `AI生图` 当前是前端交互优先模式
+- 点击后先弹提示词输入框
+- 暂不依赖最终正式后端接口
+- 当前可以作为前端交互占位继续完善
 
-### 2. 每次功能更新后的验收规则
+### 删除类操作
 
-后续每次我完成一轮功能修改后，都需要：
+删除类操作不在悬浮加工按钮条里，而在素材区右下角：
 
-1. 保证本地服务可访问
-2. 保证公网入口可访问
-3. 把公网访问地址发给你
-4. 等你验收结果
+- 删除重复
+- 删除所选
 
-当前长期公网入口:
+当前规则：
 
-- `http://124.223.26.206/home`
+- `删除重复` 只有检测到确实存在重复素材时才显示
+- 两个删除按钮 hover 都是明显红色反馈
 
-说明:
+## 当前关键页面与组件状态
 
-- 当前已通过 Nginx 将公网 `80` 端口反向代理到 `127.0.0.1:5000`
-- 后续每次更新功能后，默认用这个公网地址给你验收
+### 当前主链路组件
 
-## 工作目录
+- `src/app/home/page.tsx`
+- `src/components/Sidebar.tsx`
+- `src/components/Navbar.tsx`
+- `src/components/QuickCreatePage.tsx`
+- `src/components/TaskHistory.tsx`
+- `src/components/ColorExtraction2Page.tsx`
+- `src/components/RedrawAnnotation.tsx`
+- `src/components/GlobalEventHandler.tsx`
+- `src/components/ServiceWorkerRegister.tsx`
+- `src/components/ui/ImageThumbnail.tsx`
+- `src/components/ui/StatusBadge.tsx`
 
-- 当前项目目录: `/home/ubuntu/Downloads/zaomeng/project/projects`
-- 参考旧版前端包: `/home/ubuntu/Downloads/zaomeng/project_20260427_120107.zip`
+### QuickCreatePage
 
-说明:
+文件：
 
-- 旧版压缩包用于恢复原始页面结构和交互风格
-- 当前项目代码不是完全等同于压缩包内容，已经做过多轮修复和迁移
+- `src/components/QuickCreatePage.tsx`
 
-## 技术栈
+当前状态：
 
-- Next.js 16
-- React 19
-- TypeScript 5
-- Tailwind CSS 4
-- pnpm
+- 已从“采集图库”升级为“素材库”语义
+- 是当前首页主链路核心组件
+- 已支持：
+  - 插件采图
+  - 本地上传
+  - 整页拖拽上传
+  - 多选
+  - 日期分组
+  - 日期下拉筛选
+  - 删除重复
+  - 删除所选
+  - 悬浮加工按钮条
+  - AI生图提示词弹窗
 
-## 当前真实架构
+当前明确策略：
+
+- 后端接口不作为当前这轮的重点
+- 先把前端交互做顺
+- `AI生图` 按图生图交互来设计，但接口后续再接真实 API
+
+### TaskHistory
+
+文件：
+
+- `src/components/TaskHistory.tsx`
+
+当前状态：
+
+- 仍是右侧历史记录面板
+- 仍负责合并临时前端任务和数据库订单记录
+- 提交任务后会自动展开
+- 最新任务会高亮数秒
+- 状态显示已增强：
+  - 处理中、成功、失败、超时、部分成功
+  - 不仅有徽章，还有卡片左侧状态色条
+
+### ColorExtraction2Page
+
+文件：
+
+- `src/components/ColorExtraction2Page.tsx`
+- `src/app/api/color-extraction2/workflow/route.ts`
+- `src/app/api/color-extraction2/regenerate/route.ts`
+- `src/app/api/color-extraction2/redraw/route.ts`
+- `src/app/api/color-extraction2/identify/route.ts`
+
+当前状态：
+
+- 仍是项目里最完整的功能页实现
+- 支持订单读取、局部重绘、重新生成、PSD 下载
+- 当前仍是项目中最成熟的主能力页
+
+## 当前技术与数据架构
 
 ### 数据层
 
-当前真实主链路为：
+当前真实主链路：
 
-- MySQL: 用户、订单、积分、认证主链路
-- Redis: 验证码存储
+- MySQL：用户、订单、素材、认证主数据
+- Redis：验证码及相关临时状态
 
-关键目录与文件：
+关键文件：
 
 - `src/storage/database/client.ts`
 - `src/storage/database/shared/schema.ts`
 - `src/storage/database/userManager.ts`
 - `src/storage/database/transactionManager.ts`
+- `src/storage/database/capturedImageManager.ts`
 - `src/storage/database/init-db.ts`
 - `src/lib/db-init.ts`
 - `src/lib/app-init.ts`
@@ -107,248 +184,189 @@
 当前仍沿用：
 
 - Coze 对象存储
-- 现有后端工作流调用方式
+- RunningHub / Coze 工作流
 
-当前没有做的事：
+当前原则：
 
-- 没有替换对象存储供应商
-- 没有重构后端工作流协议
+- 不在本轮把旧接口全部重构
+- 不把临时可用的老接口当最终产品方案
+- 后续按用户提供的正式 API 逐项替换
 
-## 当前前端基线
+## 当前部署状态
 
-### 已确认与旧版一致或已恢复到旧版结构的部分
+### 当前公网主入口
 
-- `src/app/home/page.tsx` 基本延续当前既有首页框架
-- `src/components/Sidebar.tsx` 基本保持现有侧边导航结构
-- `src/components/ColorExtraction2Page.tsx` 已恢复为参考压缩包里的旧版前端结构
+- `http://124.223.26.206/home`
 
-当前 `ColorExtraction2Page.tsx` 的页面特征：
+### 当前域名状态
 
-- 顶部上传区
-- 使用提示区
-- 下方订单记录列表
-- 图片大图预览
-- 重新生成 / 高清下载 / 局部重绘 / 下载 PSD 按钮布局
+- 已绑定：`www.zaomengai.icu`
+- 当前不作为正式验收入口
+- HTTP 可访问过，但 HTTPS 和正式切换未收口
 
-### 当前仍使用“修复后版本”的部分
+### Nginx 状态
 
-- `src/components/TaskHistory.tsx`
-- `src/components/QuickCreatePage.tsx`
+当前仍是默认 HTTP 反代：
+
+- `80 -> 127.0.0.1:5000`
+
+### 应用进程状态
+
+当前网站仍依赖手动后台启动，不稳定因素较大：
+
+- 当前曾多次出现：
+  - 服务器重启后 502
+  - 应用进程退出后 502
+  - `.next` 构建产物不完整时启动失败
+
+根因：
+
+- 还没有正式启用 `systemd` 或 `pm2` 做进程托管
+
+### 已准备的 systemd 模板
+
+文件：
+
+- `docs/zaomeng-web.service`
+
+作用：
+
+- 为网站提供开机自启和自动重启能力
+- 当前模板尚未确认完成系统级启用
+
+## 当前构建状态
+
+- `pnpm build` 当前可通过
+
+这是当前非常重要的基线，说明项目代码已能稳定完成生产构建。
+
+## 当前已完成的重要修复
+
+本轮已完成：
+
+- 修复大量历史 TypeScript / build 问题
+- 当前生产构建已通过
+- 修复 `template-extract` 脚本路径问题
+- 修复多个 migration / admin / profile / API 的类型问题
+- 首页结构收缩为单入口素材库主链路
+- 完成素材库命名切换
+- 完成日期分组显示
+- 完成日期下拉筛选简化
+- 删除按钮已上移到日期筛选左侧，避免素材较多时被挤到页面下方
+- 完成整页拖拽上传
+- 恢复悬浮加工按钮条交互
+- 删除按钮分离为右下角独立操作区
+- 删除重复逻辑已按稳定键归一化处理
+- 历史记录自动展开 + 最新任务高亮
+
+## 当前高置信未使用/历史残留候选
+
+### 高置信未进入主链路的旧页面组件
+
+- `src/components/AIGeneratePage.tsx`
+- `src/components/CustomPage.tsx`
+- `src/components/AutoRemoveBackgroundPage.tsx`
+- `src/components/RemoveBackgroundPage.tsx`
 - `src/components/RemoveWatermarkPage.tsx`
-
-说明:
-
-- `TaskHistory.tsx` 保留了稳定性修复，没有直接回退成旧版
-- `QuickCreatePage.tsx` 保留了上传接口修复，没有直接回退成旧版 `/api/upload`
-- `RemoveWatermarkPage.tsx` 保留了本轮做过的类型和弹窗修复
-
-## 当前关键业务页面状态
-
-### 彩绘提取
-
-文件:
-
-- `src/components/ColorExtraction2Page.tsx`
-- `src/app/api/color-extraction2/workflow/route.ts`
-- `src/app/api/color-extraction2/regenerate/route.ts`
-- `src/app/api/color-extraction2/redraw/route.ts`
-- `src/components/RedrawAnnotation.tsx`
-
-当前状态:
-
-- 前端页面结构已恢复为旧版风格
-- 订单仍从数据库读取
-- 轮询管理仍通过 `taskPollingManager` 处理
-- 成功后可走局部重绘和 PSD 下载链路
-
-已修复的关键问题:
-
-- 彩绘提取失败时不再把所有处理中记录一起标成失败
-- 彩绘提取成功后订单 `remainingPoints` 已回写为真实扣费后余额
-
-### 任务历史
-
-文件:
-
-- `src/components/TaskHistory.tsx`
-
-当前状态:
-
-- 仍然作为右侧历史记录面板存在
-- 仍负责临时任务记录与后端订单记录的合并显示
-- 当前实现保留了稳定性修复版本，而不是完全旧版
-
-当前修复点:
-
-- 临时缓存按用户隔离
-- 不再直接依赖危险的文件级原地可变写法
-- 清空 / 删除历史记录时状态更稳定
-- 当前文件 lint 无 error
-
-### 去除水印
-
-文件:
-
-- `src/components/RemoveWatermarkPage.tsx`
-
-当前状态:
-
-- 页面功能可用
-- 已完成一轮稳定性修复
-
-当前修复点:
-
-- 图片预览弹窗不再在 render 内定义
-- 用户初始化方式已调整
-- 关键 `any` 已清理一部分
-- 当前文件 lint 无 error
-
-### 高清放大
-
-文件:
-
 - `src/components/ImageUpsamplingPage.tsx`
 
-当前状态:
+说明：
 
-- 仍保留旧版风格和旧问题模式
-- 尚未做和去水印页同等级别的修复
+- 这些大多属于旧的独立功能页模式残留
+- 当前首页真实交互已经不依赖它们
+- 删除前仍建议人工再确认一次，避免遗漏隐藏引用
 
-已确认问题类型:
+### 高置信调试/历史工具残留
 
-- `any` 较多
-- 用户初始化仍是旧写法
-- render 内定义图片预览弹窗组件
-- 多处事件同步和订单状态更新逻辑较旧
+- `debug_tmall.py`
+- `extractor_server.py`
+- `extractor_v2.py`
+- `product_image_extractor.py`
+- `test-watermark.html`
+- `tmp/AI_IMAGE_API_MIGRATION.md`
+- `tmp/COLOR_EXTRACTION_CONCURRENT_FIX.md`
+- `debug_login.png`
 
-### 智能抠图
+### 当前仍明确使用的脚本
 
-文件:
+- `scripts/template-extract.mjs`
 
-- `src/components/AutoRemoveBackgroundPage.tsx`
+### 需人工确认的脚本
 
-当前状态:
+- `scripts/replace_prod_users.py`
 
-- 仍保留旧版风格和旧问题模式
-- 尚未做和去水印页同等级别的修复
+## 备份记录
 
-已确认问题类型:
+### Git 备份仓库
 
-- `any` 较多
-- render 内定义图片预览弹窗组件
-- 失败状态更新逻辑仍偏旧
+- `git@github.com:Andy-1521/zaomeng.git`
 
-### 快速制作
+### 已知旧备份记录
 
-文件:
+- Commit: `8d1fafa`
+- Time: `2026-04-27 17:14`
+- Message: `backup: 2026-04-27 17:14 project snapshot`
+- Tag: `backup-2026-04-27-1714`
 
-- `src/components/QuickCreatePage.tsx`
+### 当前本地备份
 
-当前状态:
+- `/home/ubuntu/Downloads/zaomeng/project/projects-backup-20260429-zaomengai.tar.gz`
+- `/home/ubuntu/Downloads/zaomeng/project/projects-source-backup-20260429.tar.gz`
 
-- 页面主体可用
-- 模板提取上传已对齐当前真实接口 `/api/upload/file`
+## 当前工作规则
 
-说明:
+### 功能修改后的默认动作
 
-- 不能直接回退成旧版文件，否则会恢复到调用不存在的 `/api/upload`
+每次完成功能修改后，默认需要：
 
-## 当前接口与安全状态
+1. 确认本地可访问
+2. 确认公网入口可访问
+3. 若涉及构建链路，优先保证 `pnpm build` 通过
+4. 再交由人工验收
 
-### 已补强的用户相关接口
+### 当前协作原则
 
-以下接口已经补了“只能操作当前登录用户数据”的校验：
+用户已经明确说明：
 
-- `src/app/api/user/transactions/route.ts`
-- `src/app/api/user/transactions/clear/route.ts`
-- `src/app/api/user/transactions/delete/route.ts`
-- `src/app/api/user/profile/route.ts`
-- `src/app/api/auth/refresh/route.ts`
+- 先不要深度依赖后端
+- 每个功能的正式 API 后续会再给
+- 当前优先完善整个前端交互体验
 
-当前结果:
+因此后续实现时应遵守：
 
-- 不能再仅靠前端传 `userId` 越权读取或修改其他用户数据
-- 用户数据相关接口已以登录 cookie 归属为主
+- 前端交互优先
+- 后端接口占位可临时存在，但不要当最终方案
+- 不要为了临时后端可用性破坏页面稳定性
 
-## 当前开发与验收入口
+### 关于备份
 
-### 本地与局域网
+以后当用户说“先备份”时，默认至少执行源码级备份，并保留：
 
-- 首页: `http://localhost:5000/home`
-- 首页: `http://10.0.4.6:5000/home`
-- 管理页: `http://10.0.4.6:5000/admin/generations`
-- 个人页: `http://10.0.4.6:5000/profile`
+- 时间
+- 备份文件路径
+- 如有 Git 提交，则记录 commit / tag / message
 
-### 当前公网地址
-
-- 长期公网入口: `http://124.223.26.206/home`
-
-说明:
-
-- 当前已经不依赖临时隧道作为主要验收方式
-- 如需临时备用外链，可再临时起隧道
-
-## 当前验证情况
-
-已确认:
-
-- 本地 `http://127.0.0.1:5000/home` 返回 `200 OK`
-- 公网 `http://124.223.26.206/home` 返回 `200 OK`
-- `src/components/ColorExtraction2Page.tsx` 当前 lint 无 error
-- `src/components/TaskHistory.tsx` 当前 lint 无 error
-- `src/components/RemoveWatermarkPage.tsx` 当前 lint 无 error
-
-当前常见剩余项主要是:
-
-- `@next/next/no-img-element` warning
-- 旧工具页中的 `any`
-- 旧工具页中的 render 内组件和状态同步问题
-
-## 当前未完成事项
-
-### 前端恢复
-
-当前还没有继续决定是否要把这些文件在视觉和交互上进一步向旧版靠拢：
-
-- `src/components/QuickCreatePage.tsx`
-- `src/components/TaskHistory.tsx`
-
-注意:
-
-- `QuickCreatePage.tsx` 若继续回退，必须保留 `/api/upload/file` 修复
-- `TaskHistory.tsx` 若继续回退，不能退掉现有稳定性修复
-
-### 相邻工具页修复
-
-仍建议继续处理:
-
-1. `src/components/ImageUpsamplingPage.tsx`
-2. `src/components/AutoRemoveBackgroundPage.tsx`
-
-### 复杂工作流 API 类型收尾
-
-仍然是后续可继续清理的重点:
-
-1. `src/app/api/color-extraction2/workflow/route.ts`
-2. `src/app/api/color-extraction2/regenerate/route.ts`
-3. `src/app/api/color-extraction2/redraw/route.ts`
-
-## 建议的下一步顺序
+## 下一步建议
 
 推荐按下面顺序继续推进：
 
-1. 先验收当前已恢复的彩绘提取前端页面
-2. 再处理 `ImageUpsamplingPage.tsx`
-3. 然后处理 `AutoRemoveBackgroundPage.tsx`
-4. 最后再决定是否继续恢复 `QuickCreatePage.tsx` / `TaskHistory.tsx` 的旧版前端表现
+1. 先把网站进程托管切到 `systemd`
+2. 再继续做素材库体验增强：
+   - 排序方式
+   - 搜索
+   - 日期分组折叠
+3. 再完善 `AI生图` 的纯前端交互流：
+   - 提示词输入体验
+   - 示例提示词
+   - 提交前确认信息
+4. 最后等待用户给正式 API，再接入真正后端
 
 ## 接手提醒
 
-后续继续接手时，优先记住这些事实：
+后续继续接手时优先记住这些事实：
 
-1. 当前后端主链路是 MySQL + Redis，不是旧的 PostgreSQL / 内存方案
-2. 当前彩绘提取前端已经恢复成旧版风格
-3. 当前 `TaskHistory` 和 `RemoveWatermarkPage` 已经做过稳定性修复，不建议直接原样回退
-4. 当前下一批最值得继续修的是 `ImageUpsamplingPage.tsx` 和 `AutoRemoveBackgroundPage.tsx`
-5. 后续每次完成功能修改后，都要部署到公网地址给用户验收
-6. 后续每次执行备份时，都要记录版本号、日期时间、备注和 tag 信息
+1. 当前首页已经不是“采集图库 + 多页面功能入口”，而是“素材库 + 选图后直接加工”
+2. 当前 `AI生图` 应该先按前端占位式交互处理，不要强绑临时后端
+3. 当前生产构建已通过，但运行稳定性仍受“进程未托管”影响
+4. 当前公网主验收入口仍应优先使用 `http://124.223.26.206/home`
+5. 域名和 HTTPS 暂时不是当前最高优先级

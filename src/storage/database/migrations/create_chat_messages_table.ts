@@ -7,7 +7,7 @@
  * - 跟随用户账号隔离
  */
 
-import { getDb } from "../client";
+import { getDb, getMysqlPool } from "../client";
 import { sql } from "drizzle-orm";
 import type { RowDataPacket } from "mysql2/promise";
 
@@ -24,9 +24,10 @@ export async function createChatMessagesTable() {
 
   try {
     const db = await getDb();
+    const pool = await getMysqlPool();
 
     // 检查表是否已存在
-    const [existingTables] = await db.execute<TableRow[]>(sql`
+    const [existingTables] = await pool.query<TableRow[]>(`
       SELECT table_name
       FROM information_schema.tables
       WHERE table_schema = DATABASE()
@@ -72,14 +73,14 @@ export async function createChatMessagesTable() {
     console.log("  - created_at 索引创建成功");
 
     // 验证表结构
-    const [tables] = await db.execute<TableRow[]>(sql`
+    const [tables] = await pool.query<TableRow[]>(`
       SELECT table_name
       FROM information_schema.tables
       WHERE table_schema = DATABASE()
         AND table_name = 'chat_messages'
     `);
 
-    const [indexes] = await db.execute<IndexRow[]>(sql`
+    const [indexes] = await pool.query<IndexRow[]>(`
       SELECT index_name
       FROM information_schema.statistics
       WHERE table_schema = DATABASE()

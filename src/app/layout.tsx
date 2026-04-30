@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 import { GlobalEventHandler } from "@/components/GlobalEventHandler";
@@ -8,16 +7,6 @@ import { UserProvider } from "@/contexts/UserContext";
 
 // 触发应用初始化（在应用启动时自动执行）
 triggerInitialization();
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "造梦Ai",
@@ -34,9 +23,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+      <body className="antialiased">
         <UserProvider>
           <GlobalEventHandler />
           <ServiceWorkerRegister />

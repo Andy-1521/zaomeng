@@ -186,11 +186,14 @@ export default function RemoveWatermarkPage() {
 
               processingOrders.forEach((order) => {
                 const orderNumber = order.orderNumber;
+                if (!orderNumber) {
+                  return;
+                }
                 const createdAt = Date.now();
                 const userId = user.id;
 
                 // 检查订单创建时间，如果创建时间超过10分钟，不恢复轮询
-                const orderCreatedAt = new Date(order.createdAt).getTime();
+                const orderCreatedAt = new Date(order.createdAt || order.time || Date.now()).getTime();
                 const currentTimestamp = Date.now();
                 const age = currentTimestamp - orderCreatedAt;
 

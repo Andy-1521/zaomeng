@@ -83,6 +83,14 @@ function getResultImageUrls(data: ResultDataValue): string[] {
   return [];
 }
 
+function getResultErrorMessage(data: ResultDataValue): string {
+  if (!data) return '未知错误';
+  if (typeof data === 'string') return data;
+  if (Array.isArray(data)) return data.join(', ') || '未知错误';
+
+  return data.error || data.message || data.debug?.error || '未知错误';
+}
+
 export default function AdminGenerationsPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabType>('generations');
@@ -498,7 +506,12 @@ export default function AdminGenerationsPage() {
       userId,
       currentData: currentValue,
     });
-    setEditValue(type === 'points' ? currentValue.toString() : currentValue || '');
+    if (type === 'points') {
+      setEditValue(typeof currentValue === 'number' ? currentValue.toString() : '');
+      return;
+    }
+
+    setEditValue(typeof currentValue === 'string' ? currentValue : '');
   };
 
   const closeEditModal = () => {
@@ -1163,7 +1176,7 @@ export default function AdminGenerationsPage() {
                       placeholder="输入图片URL"
                       className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-white/20"
                     />
-                    {editModal.currentData && (
+                    {typeof editModal.currentData === 'string' && editModal.currentData && (
                       <div className="mt-4">
                         <p className="text-white/60 text-xs mb-2">当前头像:</p>
                         <img
@@ -1290,12 +1303,7 @@ export default function AdminGenerationsPage() {
                     <div className="flex items-start gap-4">
                       <label className="text-red-600 text-sm w-20 flex-shrink-0 pt-0.5">失败原因</label>
                       <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-red-600 text-sm flex-1">
-                        {typeof detailModal.record.resultData === 'string'
-                          ? detailModal.record.resultData
-                          : detailModal.record.resultData?.error ||
-                            detailModal.record.resultData?.message ||
-                            detailModal.record.resultData?.debug?.error ||
-                            '未知错误'}
+                        {getResultErrorMessage(detailModal.record.resultData)}
                       </div>
                     </div>
                   )}

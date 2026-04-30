@@ -1,30 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useUser } from '@/contexts/UserContext';
 import Navbar from '@/components/Navbar';
 import Sidebar from '@/components/Sidebar';
 import TaskHistory from '@/components/TaskHistory';
-import { TabType } from '@/components/TaskHistory';
-import ColorExtraction2Page from '@/components/ColorExtraction2Page';
 import QuickCreatePage from '@/components/QuickCreatePage';
-import CustomPage from '@/components/CustomPage';
-
-type SidebarTab = 'capture-library' | 'quick-create' | 'custom';
 
 export default function HomePage() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, isLoading, refreshUser } = useUser();
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('capture-library');
-
-  // Sidebar tab -> TaskHistory TabType mapping
-  const getTaskHistoryTab = (): TabType => {
-    if (sidebarTab === 'capture-library') return 'color-extraction';
-    if (sidebarTab === 'quick-create') return 'auto-remove-bg';
-    return 'custom';
-  };
 
   // 监听路由变化
   useEffect(() => {
@@ -93,24 +80,14 @@ export default function HomePage() {
         <Navbar />
 
         {/* 左侧导航栏 */}
-        <Sidebar activeTab={sidebarTab} onTabChange={setSidebarTab} />
+        <Sidebar activeTab="capture-library" onTabChange={() => undefined} />
 
         {/* 右侧任务历史 */}
-        <TaskHistory activeTab={getTaskHistoryTab()} userId={user?.id} />
+        <TaskHistory activeTab="color-extraction" userId={user?.id} />
 
         {/* 主要内容区 */}
         <div className="pl-20 pr-28">
-          {sidebarTab === 'capture-library' && (
-            <QuickCreatePage key="capture-library" defaultView="capture-library" />
-          )}
-
-          {sidebarTab === 'quick-create' && (
-            <QuickCreatePage key="quick-create" defaultView="quick-create" />
-          )}
-
-          {sidebarTab === 'custom' && (
-            <CustomPage key="custom" />
-          )}
+          <QuickCreatePage />
         </div>
       </div>
     </div>

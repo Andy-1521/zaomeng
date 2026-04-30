@@ -1,11 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { addTaskRecord, updateTaskRecordStatus } from '@/components/TaskHistory';
+import CropEditorPanel from '@/components/CropEditorPanel';
+import AnnotateEditorPanel from '@/components/AnnotateEditorPanel';
+import { useUser } from '@/contexts/UserContext';
 import { showToast } from '@/lib/toast';
-import AIGeneratePage from '@/components/AIGeneratePage';
-import RemoveWatermarkPage from '@/components/RemoveWatermarkPage';
-import ImageUpsamplingPage from '@/components/ImageUpsamplingPage';
-import ColorExtraction2Page from '@/components/ColorExtraction2Page';
 
 type PluginCapturePayload = {
   imageUrl: string;
@@ -27,136 +27,260 @@ type CapturedImageRecord = {
   createdAt: string;
 };
 
-type ProcessingAction = 'color-extraction' | 'ai-generate' | 'watermark' | 'upsampling';
+type MaterialFilter = 'all' | 'today' | 'yesterday' | 'earlier';
+type GalleryActionId = 'color-extraction' | 'auto-remove-bg' | 'watermark' | 'upsampling';
 
-interface QuickCreatePageProps {
-  defaultView?: 'capture-library' | 'quick-create';
-}
-
-interface ModuleCard {
-  id: ProcessingAction;
-  name: string;
+type GalleryAction = {
+  id: GalleryActionId;
+  label: string;
   description: string;
-  tag?: string;
-  icon: React.ReactNode;
-}
-
-const AIGenerateIcon = () => (
-  <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
-    <img src="/assets/remove-background-demo.gif" alt="AI生图示例" className="w-full h-full object-cover" />
-  </div>
-);
-
-const RemoveWatermarkIcon = () => (
-  <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
-    <img src="/assets/remove-watermark-demo.jpg" alt="去除水印示例" className="w-full h-full object-cover" />
-  </div>
-);
-
-const ImageUpsamplingIcon = () => (
-  <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
-    <img src="/assets/high-quality-upsampling.gif" alt="高清放大示例" className="w-full h-full object-cover" />
-  </div>
-);
-
-const ColorExtractionIcon = () => (
-  <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
-    <img src="/assets/phone-case-demo.jpg" alt="彩绘提取示例" className="w-full h-full object-cover" />
-  </div>
-);
-
-const actionLabelMap: Record<ProcessingAction, string> = {
-  'color-extraction': '彩绘提取',
-  'ai-generate': 'AI生图',
-  watermark: '去除水印',
-  upsampling: '高清放大',
+  className: string;
+  tag: string;
+  preview: React.ReactNode;
 };
 
-const moduleCards: ModuleCard[] = [
+type EditorAction = {
+  id: 'edit-image' | 'annotate';
+  label: string;
+};
+
+type ImageEditorState = {
+  open: boolean;
+  mode: 'crop' | 'annotate';
+  imageUrl: string;
+};
+
+type JsonObject = Record<string, unknown>;
+
+const galleryActions: GalleryAction[] = [
   {
-    id: 'ai-generate',
-    name: 'AI生图',
-    description: '进入 AI 生图独立页面处理图片',
-    icon: <AIGenerateIcon />,
-    tag: '独立页面',
-  },
-  {
-    id: 'watermark',
-    name: '去除水印',
-    description: '快速去除图片水印',
-    icon: <RemoveWatermarkIcon />,
-    tag: '限时免费',
-  },
-  {
-    id: 'upsampling',
-    name: '高清放大',
-    description: 'AI智能放大图片',
-    icon: <ImageUpsamplingIcon />,
-    tag: '限时免费',
+    id: 'auto-remove-bg',
+    label: 'AI生图',
+    description: '参考已选图片进行图生图创作',
+    className: 'bg-gradient-to-r from-fuchsia-600 to-violet-600 hover:from-fuchsia-500 hover:to-violet-500',
+    tag: '图生图',
+    preview: (
+      <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
+        <img src="/assets/remove-background-demo.gif" alt="AI生图示例" className="w-full h-full object-cover" />
+      </div>
+    ),
   },
   {
     id: 'color-extraction',
-    name: '彩绘提取',
-    description: '进入彩绘提取页面处理图片',
-    icon: <ColorExtractionIcon />,
+    label: '彩绘提取',
+    description: '手机壳彩绘提取',
+    className: 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500',
     tag: '核心功能',
+    preview: (
+      <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
+        <img src="/assets/phone-case-demo.jpg" alt="彩绘提取示例" className="w-full h-full object-cover" />
+      </div>
+    ),
+  },
+  {
+    id: 'watermark',
+    label: '去除水印',
+    description: '清理图片水印',
+    className: 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500',
+    tag: '限时免费',
+    preview: (
+      <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
+        <img src="/assets/remove-watermark-demo.jpg" alt="去除水印示例" className="w-full h-full object-cover" />
+      </div>
+    ),
+  },
+  {
+    id: 'upsampling',
+    label: '高清放大',
+    description: '增强清晰度和细节',
+    className: 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500',
+    tag: '限时免费',
+    preview: (
+      <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
+        <img src="/assets/high-quality-upsampling.gif" alt="高清放大示例" className="w-full h-full object-cover" />
+      </div>
+    ),
   },
 ];
 
-export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickCreatePageProps) {
+const editorActions: EditorAction[] = [
+  { id: 'edit-image', label: '裁切工具' },
+  { id: 'annotate', label: '画笔标注' },
+];
+
+function getString(value: unknown): string | null {
+  return typeof value === 'string' && value ? value : null;
+}
+
+function normalizeDuplicateKey(image: CapturedImageRecord): string {
+  const normalizeUrl = (value?: string | null) => {
+    if (!value) return '';
+
+    try {
+      const url = new URL(value);
+      url.hash = '';
+      return url.toString();
+    } catch {
+      return value.trim();
+    }
+  };
+
+  const originalKey = normalizeUrl(image.originalUrl);
+  if (originalKey) return `original:${originalKey}`;
+
+  const pageKey = normalizeUrl(image.pageUrl);
+  const hostKey = image.sourceHost?.trim().toLowerCase() || '';
+  const imageTypeKey = image.imageType?.trim().toLowerCase() || '';
+
+  if (pageKey && hostKey && imageTypeKey) return `page:${hostKey}|${pageKey}|${imageTypeKey}`;
+  if (pageKey && imageTypeKey) return `page:${pageKey}|${imageTypeKey}`;
+
+  return `image:${normalizeUrl(image.imageUrl)}`;
+}
+
+function parseMaterialDate(value: string): Date {
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)) {
+    return new Date(value.replace(' ', 'T'));
+  }
+  return new Date(value);
+}
+
+function formatMaterialDateLabel(value: string): string {
+  const date = parseMaterialDate(value);
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const targetStart = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const diffDays = Math.floor((todayStart - targetStart) / 86400000);
+
+  if (diffDays === 0) return '今天';
+  if (diffDays === 1) return '昨天';
+
+  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', weekday: 'short' });
+}
+
+function formatMaterialTime(value: string): string {
+  return parseMaterialDate(value).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function getMaterialDateGroup(value: string): 'today' | 'yesterday' | 'earlier' {
+  const date = parseMaterialDate(value);
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const targetStart = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const diffDays = Math.floor((todayStart - targetStart) / 86400000);
+
+  if (diffDays === 0) return 'today';
+  if (diffDays === 1) return 'yesterday';
+  return 'earlier';
+}
+
+async function parseErrorResponse(response: Response, fallbackMessage: string): Promise<string> {
+  try {
+    const text = await response.text();
+    if (!text) return fallbackMessage;
+    try {
+      const parsed = JSON.parse(text) as JsonObject;
+      return getString(parsed.message) || fallbackMessage;
+    } catch {
+      return text.length < 200 ? text : fallbackMessage;
+    }
+  } catch {
+    return fallbackMessage;
+  }
+}
+
+export default function QuickCreatePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { user, setPoints } = useUser();
   const gallerySectionRef = useRef<HTMLDivElement>(null);
   const imageButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [capturedImages, setCapturedImages] = useState<CapturedImageRecord[]>([]);
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [showAIGenerate, setShowAIGenerate] = useState(false);
-  const [showRemoveWatermark, setShowRemoveWatermark] = useState(false);
-  const [showImageUpsampling, setShowImageUpsampling] = useState(false);
-  const [showColorExtraction, setShowColorExtraction] = useState(false);
-  const [actionBarPosition, setActionBarPosition] = useState<{ top: number; left: number } | null>(null);
   const [columnCount, setColumnCount] = useState(4);
   const [imageAspectRatios, setImageAspectRatios] = useState<Record<string, number>>({});
+  const [processingAction, setProcessingAction] = useState<GalleryActionId | null>(null);
+  const [actionBarPosition, setActionBarPosition] = useState<{ top: number; left: number } | null>(null);
+  const [showAiPromptPanel, setShowAiPromptPanel] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiAspectRatio, setAiAspectRatio] = useState('auto');
+  const [aiResolution, setAiResolution] = useState('2k');
+  const [materialFilter, setMaterialFilter] = useState<MaterialFilter>('all');
+  const [imageEditor, setImageEditor] = useState<ImageEditorState>({
+    open: false,
+    mode: 'crop',
+    imageUrl: '',
+  });
 
-  const isCaptureLibraryView = defaultView === 'capture-library';
-  const selectedImageList = Array.from(selectedImages);
+  const selectedImageList = useMemo(() => Array.from(selectedImages), [selectedImages]);
 
-  const galleryColumns = useMemo(() => {
-    const columns = Array.from({ length: columnCount }, () => ({
-      items: [] as CapturedImageRecord[],
-      heightScore: 0,
-    }));
-
+  const duplicateImageCount = useMemo(() => {
+    const duplicatedTargets = new Map<string, number>();
     for (const image of capturedImages) {
-      const ratio = imageAspectRatios[image.imageUrl] ?? 1;
-      let targetIndex = 0;
-
-      for (let i = 1; i < columns.length; i += 1) {
-        if (columns[i].heightScore < columns[targetIndex].heightScore) {
-          targetIndex = i;
-        }
-      }
-
-      columns[targetIndex].items.push(image);
-      columns[targetIndex].heightScore += ratio;
+      const duplicateKey = normalizeDuplicateKey(image);
+      duplicatedTargets.set(duplicateKey, (duplicatedTargets.get(duplicateKey) || 0) + 1);
     }
 
-    return columns.map((column) => column.items);
-  }, [capturedImages, columnCount, imageAspectRatios]);
+    return Array.from(duplicatedTargets.values()).reduce((count, current) => {
+      if (current <= 1) return count;
+      return count + current - 1;
+    }, 0);
+  }, [capturedImages]);
+
+  const processingActionLabel = useMemo(
+    () => galleryActions.find((action) => action.id === processingAction)?.label || null,
+    [processingAction]
+  );
+
+  const filteredCapturedImages = useMemo(() => {
+    return capturedImages.filter((image) => {
+      if (materialFilter === 'all') return true;
+      return getMaterialDateGroup(image.createdAt) === materialFilter;
+    });
+  }, [capturedImages, materialFilter]);
+
+  const groupedMaterials = useMemo(() => {
+    const groupMap = new Map<'today' | 'yesterday' | 'earlier', CapturedImageRecord[]>();
+    for (const image of filteredCapturedImages) {
+      const key = getMaterialDateGroup(image.createdAt);
+      const current = groupMap.get(key) || [];
+      current.push(image);
+      groupMap.set(key, current);
+    }
+
+    return [
+      { key: 'today' as const, label: '今天', items: groupMap.get('today') || [] },
+      { key: 'yesterday' as const, label: '昨天', items: groupMap.get('yesterday') || [] },
+      { key: 'earlier' as const, label: '更早', items: groupMap.get('earlier') || [] },
+    ].filter((group) => group.items.length > 0);
+  }, [filteredCapturedImages]);
+
+  const dispatchTaskHistoryUpdated = useCallback((delay = 0) => {
+    const dispatch = () => window.dispatchEvent(new Event('taskHistoryUpdated'));
+    if (delay > 0) {
+      window.setTimeout(dispatch, delay);
+      return;
+    }
+    dispatch();
+  }, []);
+
+  const syncPoints = useCallback((points: number) => {
+    setPoints(points);
+    window.dispatchEvent(new CustomEvent('userPointsChanged', { detail: { points } }));
+  }, [setPoints]);
 
   const loadCapturedImages = useCallback(async () => {
     try {
-      const response = await fetch('/api/plugin/captured-images', {
-        credentials: 'include',
-      });
+      const response = await fetch('/api/plugin/captured-images', { credentials: 'include' });
       const data = await response.json();
-      if (!response.ok || !data.success || !Array.isArray(data.data)) {
-        return;
-      }
+      if (!response.ok || !data.success || !Array.isArray(data.data)) return;
       setCapturedImages(data.data);
     } catch (error) {
-      console.error('[采集图库] 加载失败:', error);
+      console.error('[素材库] 加载失败:', error);
     }
   }, []);
 
@@ -178,19 +302,12 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
     }
 
     setIsUploading(true);
-
     try {
       const uploadedUrls: string[] = [];
-
       for (const file of files) {
         const formData = new FormData();
         formData.append('file', file);
-
-        const response = await fetch('/api/upload/file', {
-          method: 'POST',
-          body: formData,
-        });
-
+        const response = await fetch('/api/upload/file', { method: 'POST', body: formData });
         const data = await response.json();
         if (data.success && data.data?.url) {
           uploadedUrls.push(data.data.url);
@@ -199,7 +316,7 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
 
       if (uploadedUrls.length > 0) {
         await loadCapturedImages();
-        showToast(`成功加入 ${uploadedUrls.length} 张图片到采集图库`, 'success');
+        showToast(`成功加入 ${uploadedUrls.length} 张图片到素材库`, 'success');
       } else {
         showToast('上传失败，请重试', 'error');
       }
@@ -207,11 +324,9 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
       showToast('上传失败，请重试', 'error');
     } finally {
       setIsUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
-  }, []);
+  }, [loadCapturedImages]);
 
   const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
@@ -220,10 +335,37 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
 
   const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
+    event.stopPropagation();
     setIsDragging(false);
     const files = Array.from(event.dataTransfer.files || []);
     await uploadFiles(files);
   };
+
+  useEffect(() => {
+    const handleWindowDragEnter = (event: DragEvent) => {
+      event.preventDefault();
+      if ((event.dataTransfer?.types || []).includes('Files')) setIsDragging(true);
+    };
+    const handleWindowDragOver = (event: DragEvent) => {
+      event.preventDefault();
+      if ((event.dataTransfer?.types || []).includes('Files')) setIsDragging(true);
+    };
+    const handleWindowDrop = () => setIsDragging(false);
+    const handleWindowDragLeave = (event: DragEvent) => {
+      if (event.clientX === 0 && event.clientY === 0) setIsDragging(false);
+    };
+
+    window.addEventListener('dragenter', handleWindowDragEnter);
+    window.addEventListener('dragover', handleWindowDragOver);
+    window.addEventListener('drop', handleWindowDrop);
+    window.addEventListener('dragleave', handleWindowDragLeave);
+    return () => {
+      window.removeEventListener('dragenter', handleWindowDragEnter);
+      window.removeEventListener('dragover', handleWindowDragOver);
+      window.removeEventListener('drop', handleWindowDrop);
+      window.removeEventListener('dragleave', handleWindowDragLeave);
+    };
+  }, [uploadFiles]);
 
   const removeUploadedImage = async (image: CapturedImageRecord) => {
     try {
@@ -234,10 +376,7 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
         body: JSON.stringify({ id: image.id }),
       });
       const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || '删除失败');
-      }
-
+      if (!response.ok || !data.success) throw new Error(data.error || '删除失败');
       setCapturedImages((prev) => prev.filter((item) => item.id !== image.id));
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '删除失败';
@@ -260,10 +399,8 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
 
     try {
       for (const imageUrl of selectedImageList) {
-        const target = capturedImages.find((image) => image.imageUrl === imageUrl)
-        if (!target) {
-          continue
-        }
+        const target = capturedImages.find((image) => image.imageUrl === imageUrl);
+        if (!target) continue;
 
         const response = await fetch('/api/plugin/captured-images', {
           method: 'DELETE',
@@ -272,15 +409,54 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
           body: JSON.stringify({ id: target.id }),
         });
         const data = await response.json();
-        if (!response.ok || !data.success) {
-          throw new Error(data.error || '删除失败');
-        }
+        if (!response.ok || !data.success) throw new Error(data.error || '删除失败');
       }
 
-      setCapturedImages((prev) => prev.filter((image) => !selectedImages.has(image.imageUrl)))
+      setCapturedImages((prev) => prev.filter((image) => !selectedImages.has(image.imageUrl)));
       setSelectedImages(new Set());
+      setShowAiPromptPanel(false);
+      setAiPrompt('');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '删除失败';
+      showToast(errorMessage, 'error');
+    }
+  };
+
+  const deleteDuplicateImages = async () => {
+    const duplicatedTargets = new Map<string, CapturedImageRecord[]>();
+    for (const image of capturedImages) {
+      const duplicateKey = normalizeDuplicateKey(image);
+      const existing = duplicatedTargets.get(duplicateKey) || [];
+      existing.push(image);
+      duplicatedTargets.set(duplicateKey, existing);
+    }
+
+    const imagesToDelete = Array.from(duplicatedTargets.values())
+      .filter((items) => items.length > 1)
+      .flatMap((items) => items.slice(1));
+
+    if (imagesToDelete.length === 0) {
+      showToast('没有重复图片可删除', 'info');
+      return;
+    }
+
+    try {
+      for (const image of imagesToDelete) {
+        const response = await fetch('/api/plugin/captured-images', {
+          method: 'DELETE',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: image.id }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || '删除重复图片失败');
+      }
+
+      const duplicateIdSet = new Set(imagesToDelete.map((image) => image.id));
+      setCapturedImages((prev) => prev.filter((image) => !duplicateIdSet.has(image.id)));
+      showToast(`已删除 ${imagesToDelete.length} 张重复图片`, 'success');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '删除重复图片失败';
       showToast(errorMessage, 'error');
     }
   };
@@ -290,6 +466,12 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
       const next = new Set(prev);
       if (next.has(url)) {
         next.delete(url);
+        if (next.size === 0) {
+          setShowAiPromptPanel(false);
+          setAiPrompt('');
+          setAiAspectRatio('auto');
+          setAiResolution('2k');
+        }
       } else {
         next.add(url);
       }
@@ -297,30 +479,8 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
     });
   };
 
-  const detectExtension = useCallback(() => {
-    const timeout = window.setTimeout(() => {
-      showToast('未检测到插件，请确认插件已安装并刷新当前网站页面', 'error');
-    }, 1500);
-
-    const handler = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      const data = event.data as { source?: string; type?: string };
-      if (data?.source !== 'zaomeng-extension' || data.type !== 'ZAOMENG_EXTENSION_READY') return;
-
-      clearTimeout(timeout);
-      showToast('插件已连接，可前往淘宝/天猫页面悬浮采图', 'success');
-      window.removeEventListener('message', handler);
-    };
-
-    window.addEventListener('message', handler);
-    window.postMessage({ source: 'zaomeng-web', type: 'ZAOMENG_EXTENSION_PING' }, window.location.origin);
-  }, []);
-
   const handlePluginCapture = useCallback(async (payload: PluginCapturePayload | null) => {
-    if (!payload?.imageUrl) {
-      return;
-    }
-
+    if (!payload?.imageUrl) return;
     try {
       const response = await fetch('/api/plugin/capture-image', {
         method: 'POST',
@@ -335,19 +495,237 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
       }
 
       await loadCapturedImages();
-      showToast('插件采图成功，图片已加入采集图库', 'success');
+      showToast('插件采图成功，图片已加入素材库', 'success');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '插件采图失败';
       showToast(errorMessage, 'error');
     }
+  }, [loadCapturedImages]);
+
+  const ensureUserReady = useCallback(() => {
+    if (!user?.id) {
+      showToast('请先登录后再执行功能', 'error');
+      return false;
+    }
+    return true;
+  }, [user?.id]);
+
+  const ensureEnoughColorExtractionPoints = useCallback(async (imageCount: number) => {
+    if (!user?.id) return false;
+    const requiredPoints = 30 * imageCount;
+    try {
+      const response = await fetch(`/api/user/profile?userId=${encodeURIComponent(user.id)}`, {
+        method: 'GET',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        if ((user.points || 0) < requiredPoints) {
+          showToast(`积分不足，当前 ${user.points || 0}，需要 ${requiredPoints}`, 'error');
+          return false;
+        }
+        return true;
+      }
+
+      const data = await response.json() as { success?: boolean; data?: { points?: number } };
+      const currentPoints = data.success ? (data.data?.points || 0) : (user.points || 0);
+      syncPoints(currentPoints);
+
+      if (currentPoints < requiredPoints) {
+        showToast(`积分不足，当前 ${currentPoints}，需要 ${requiredPoints}`, 'error');
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('[素材库] 校验彩绘提取积分失败:', error);
+      if ((user.points || 0) < requiredPoints) {
+        showToast(`积分不足，当前 ${user.points || 0}，需要 ${requiredPoints}`, 'error');
+        return false;
+      }
+      return true;
+    }
+  }, [syncPoints, user?.id, user?.points]);
+
+  const startColorExtraction = useCallback((imageUrl: string) => {
+    if (!user?.id) return;
+    const tempOrderId = `ORD${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+
+    addTaskRecord('color-extraction', '彩绘提取', '手机壳彩绘提取', undefined, tempOrderId, undefined, imageUrl, '处理中');
+
+    void (async () => {
+      try {
+        const response = await fetch('/api/color-extraction2/workflow', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: user.id, imageUrl, orderId: tempOrderId }),
+        });
+
+        const data = await response.json() as {
+          success?: boolean;
+          message?: string;
+          data?: { imageUrl?: string; remainingPoints?: number };
+        };
+
+        if (!response.ok || !data.success) throw new Error(data.message || '彩绘提取失败');
+
+        updateTaskRecordStatus(tempOrderId, '成功', data.data?.imageUrl);
+        if (typeof data.data?.remainingPoints === 'number') syncPoints(data.data.remainingPoints);
+        dispatchTaskHistoryUpdated();
+      } catch (error) {
+        console.error('[素材库] 彩绘提取执行失败:', error);
+        updateTaskRecordStatus(tempOrderId, '失败');
+        dispatchTaskHistoryUpdated();
+      }
+    })();
+  }, [dispatchTaskHistoryUpdated, syncPoints, user?.id]);
+
+  const startRemoveWatermark = useCallback((imageUrl: string) => {
+    if (!user?.id) return;
+    void (async () => {
+      try {
+        const response = await fetch('/api/remove-watermark/run', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: user.id, imageUrl }),
+        });
+        if (!response.ok) {
+          const errorMessage = await parseErrorResponse(response, '去除水印失败');
+          throw new Error(errorMessage);
+        }
+        dispatchTaskHistoryUpdated();
+      } catch (error) {
+        console.error('[素材库] 去除水印执行失败:', error);
+        dispatchTaskHistoryUpdated();
+      }
+    })();
+    dispatchTaskHistoryUpdated(500);
+  }, [dispatchTaskHistoryUpdated, user?.id]);
+
+  const startUpsampling = useCallback((imageUrl: string) => {
+    if (!user?.id) return;
+    void (async () => {
+      try {
+        const response = await fetch('/api/image-upsampling/run', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: user.id, imageUrl }),
+        });
+        if (!response.ok) {
+          const errorMessage = await parseErrorResponse(response, '高清放大失败');
+          throw new Error(errorMessage);
+        }
+        dispatchTaskHistoryUpdated();
+      } catch (error) {
+        console.error('[素材库] 高清放大执行失败:', error);
+        dispatchTaskHistoryUpdated();
+      }
+    })();
+    dispatchTaskHistoryUpdated(500);
+  }, [dispatchTaskHistoryUpdated, user?.id]);
+
+  const startAiGenerate = useCallback((imageUrl: string, prompt: string) => {
+    const tempOrderId = `TEMP-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    addTaskRecord('auto-remove-bg', 'AI生图', prompt ? `AI生图：${prompt}` : 'AI生图', undefined, tempOrderId, undefined, imageUrl, '处理中');
+    window.setTimeout(() => {
+      updateTaskRecordStatus(tempOrderId, '失败');
+      dispatchTaskHistoryUpdated();
+    }, 1200);
+  }, [dispatchTaskHistoryUpdated]);
+
+  const handleRunAction = useCallback(async (actionId: GalleryActionId) => {
+    if (!ensureUserReady()) return;
+    if (selectedImageList.length === 0) {
+      showToast('请先在素材库中选择图片', 'error');
+      return;
+    }
+
+    if (actionId === 'auto-remove-bg') {
+      setShowAiPromptPanel((current) => !current);
+      return;
+    }
+
+    setProcessingAction(actionId);
+    try {
+      if (actionId === 'color-extraction') {
+        const hasEnoughPoints = await ensureEnoughColorExtractionPoints(selectedImageList.length);
+        if (!hasEnoughPoints) return;
+        selectedImageList.forEach((imageUrl) => startColorExtraction(imageUrl));
+        showToast(`已提交 ${selectedImageList.length} 张图片到彩绘提取`, 'info');
+      }
+
+      if (actionId === 'watermark') {
+        selectedImageList.forEach((imageUrl) => startRemoveWatermark(imageUrl));
+        showToast(`已提交 ${selectedImageList.length} 张图片到去除水印`, 'info');
+      }
+
+      if (actionId === 'upsampling') {
+        selectedImageList.forEach((imageUrl) => startUpsampling(imageUrl));
+        showToast(`已提交 ${selectedImageList.length} 张图片到高清放大`, 'info');
+      }
+
+      setSelectedImages(new Set());
+    } finally {
+      setProcessingAction(null);
+    }
+  }, [ensureEnoughColorExtractionPoints, ensureUserReady, selectedImageList, startColorExtraction, startRemoveWatermark, startUpsampling]);
+
+  const submitAiGenerate = useCallback(() => {
+    const prompt = aiPrompt.trim();
+    if (!prompt) {
+      showToast('请输入AI生图提示词', 'error');
+      return;
+    }
+
+    setShowAiPromptPanel(false);
+    setProcessingAction('auto-remove-bg');
+    try {
+      selectedImageList.forEach((imageUrl) => {
+        startAiGenerate(imageUrl, `${prompt} [比例:${aiAspectRatio} 分辨率:${aiResolution}]`);
+      });
+      showToast('AI生图前端交互已完成，等待你后续提供正式接口后接入', 'info');
+      setSelectedImages(new Set());
+      setAiPrompt('');
+      setAiAspectRatio('auto');
+      setAiResolution('2k');
+    } finally {
+      setProcessingAction(null);
+    }
+  }, [aiAspectRatio, aiPrompt, aiResolution, selectedImageList, startAiGenerate]);
+
+  const handleEditorAction = useCallback((action: EditorAction['id']) => {
+    if (selectedImageList.length !== 1) {
+      showToast('编辑类功能一次只能选择 1 张图片', 'error');
+      return;
+    }
+
+    if (action === 'edit-image') {
+      setImageEditor({ open: true, mode: 'crop', imageUrl: selectedImageList[0] });
+      return;
+    }
+
+    if (action === 'annotate') {
+      setImageEditor({ open: true, mode: 'annotate', imageUrl: selectedImageList[0] });
+    }
+  }, [selectedImageList]);
+
+  const closeImageEditor = useCallback(() => {
+    setImageEditor({ open: false, mode: 'crop', imageUrl: '' });
   }, []);
+
+  const handleEditorComplete = useCallback(async () => {
+    await loadCapturedImages();
+    showToast('编辑后的素材已加入素材库', 'success');
+  }, [loadCapturedImages]);
 
   useEffect(() => {
     const handlePluginMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
       const data = event.data as { source?: string; type?: string; payload?: PluginCapturePayload | null };
       if (data?.source !== 'zaomeng-extension') return;
-
       if (data.type === 'ZAOMENG_CAPTURE_IMAGE' && data.payload) {
         void handlePluginCapture(data.payload);
       }
@@ -358,36 +736,21 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
   }, [handlePluginCapture]);
 
   useEffect(() => {
-    if (isCaptureLibraryView) {
-      window.postMessage({ source: 'zaomeng-web', type: 'ZAOMENG_EXTENSION_PING' }, window.location.origin);
-      queueMicrotask(() => {
-        void loadCapturedImages();
-      });
-    }
-  }, [isCaptureLibraryView, loadCapturedImages]);
+    window.postMessage({ source: 'zaomeng-web', type: 'ZAOMENG_EXTENSION_PING' }, window.location.origin);
+    queueMicrotask(() => {
+      void loadCapturedImages();
+    });
+  }, [loadCapturedImages]);
 
   useEffect(() => {
     const updateColumnCount = () => {
       const width = window.innerWidth;
-      if (width >= 1800) {
-        setColumnCount(6);
-        return;
-      }
-      if (width >= 1500) {
-        setColumnCount(5);
-        return;
-      }
-      if (width >= 1180) {
-        setColumnCount(4);
-        return;
-      }
-      if (width >= 820) {
-        setColumnCount(3);
-        return;
-      }
+      if (width >= 1800) return setColumnCount(6);
+      if (width >= 1500) return setColumnCount(5);
+      if (width >= 1180) return setColumnCount(4);
+      if (width >= 820) return setColumnCount(3);
       setColumnCount(2);
     };
-
     updateColumnCount();
     window.addEventListener('resize', updateColumnCount);
     return () => window.removeEventListener('resize', updateColumnCount);
@@ -428,17 +791,12 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
 
       const centerX = (bounds.left + bounds.right) / 2 - containerRect.left;
       const top = bounds.bottom - containerRect.top + 16;
-
-      setActionBarPosition({
-        left: centerX,
-        top,
-      });
+      setActionBarPosition({ left: centerX, top });
     };
 
     const frame = window.requestAnimationFrame(updateActionBarPosition);
     window.addEventListener('resize', updateActionBarPosition);
     window.addEventListener('scroll', updateActionBarPosition, true);
-
     return () => {
       window.cancelAnimationFrame(frame);
       window.removeEventListener('resize', updateActionBarPosition);
@@ -446,299 +804,377 @@ export default function QuickCreatePage({ defaultView = 'quick-create' }: QuickC
     };
   }, [selectedImageList]);
 
-  const openActionPage = (action: ProcessingAction) => {
-    if (capturedImages.length === 0 || selectedImageList.length === 0) {
-      showToast('请先在图库中选择图片', 'error');
-      return;
-    }
+  return (
+    <div className="flex-1 px-6 py-8 overflow-y-auto">
+      {imageEditor.open && imageEditor.mode === 'crop' && (
+        <CropEditorPanel imageUrl={imageEditor.imageUrl} onClose={closeImageEditor} onComplete={handleEditorComplete} />
+      )}
 
-    sessionStorage.setItem('capture-library:selected-images', JSON.stringify(selectedImageList));
-
-    if (action === 'color-extraction') {
-      setShowColorExtraction(true);
-      return;
-    }
-    if (action === 'ai-generate') {
-      setShowAIGenerate(true);
-      return;
-    }
-    if (action === 'watermark') {
-      setShowRemoveWatermark(true);
-      return;
-    }
-    if (action === 'upsampling') {
-      setShowImageUpsampling(true);
-    }
-  };
-
-  const handleGenerate = (card: ModuleCard) => {
-    openActionPage(card.id);
-  };
-
-  const renderBackButton = (label: string, onClick: () => void) => (
-    <button
-      onClick={onClick}
-      className="mb-6 flex items-center gap-2 text-white/60 hover:text-white transition-colors"
-    >
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-      </svg>
-      <span>{label}</span>
-    </button>
-  );
-
-  const renderCaptureLibrary = () => (
-    <div
-      ref={gallerySectionRef}
-      className={`relative max-w-[92vw] 2xl:max-w-[1780px] mx-auto transition-all ${isDragging ? 'scale-[0.995]' : ''}`}
-      onDragOver={(event) => {
-        event.preventDefault();
-        setIsDragging(true);
-      }}
-      onDragLeave={(event) => {
-        event.preventDefault();
-        setIsDragging(false);
-      }}
-      onDrop={handleDrop}
-    >
-      <div className="flex items-end justify-between gap-4 mb-8">
-        <div>
-          <h2 className="text-3xl font-bold text-white">采集图库</h2>
-          <p className="text-white/55 mt-2">通过插件采图或右上角上传图片，把素材统一收进图库</p>
-        </div>
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="w-11 h-11 rounded-full bg-gradient-to-r from-purple-600 to-blue-600 text-white flex items-center justify-center hover:opacity-90 transition-opacity"
-          title="上传本地图片"
-        >
-          <span className="text-2xl leading-none">+</span>
-        </button>
-      </div>
+      {imageEditor.open && imageEditor.mode === 'annotate' && (
+        <AnnotateEditorPanel imageUrl={imageEditor.imageUrl} onClose={closeImageEditor} onComplete={handleEditorComplete} />
+      )}
 
       {isDragging && (
-        <div className="mb-6 rounded-3xl border-2 border-dashed border-purple-500 bg-purple-500/10 p-6 text-center text-white/80">
-          松开鼠标即可把图片加入采集图库
-        </div>
-      )}
-
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/jpeg,image/png,image/webp,image/gif"
-        multiple
-        onChange={handleImageUpload}
-        className="hidden"
-      />
-
-      {isUploading && (
-        <div className="mb-6 rounded-3xl border border-white/10 bg-white/[0.03] p-5 text-center text-white/60">
-          上传中...
-        </div>
-      )}
-
-      {capturedImages.length === 0 ? (
-        <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-12 text-center text-white/45">
-          还没有图片进入图库，通过插件采集图片，或点击右上角上传图片
-        </div>
-      ) : (
-        <div className="mb-8 flex items-start justify-center gap-5 xl:gap-6">
-          {galleryColumns.map((column, columnIndex) => (
-            <div key={columnIndex} className="flex-1 min-w-0 max-w-[290px] space-y-5">
-              {column.map((image, index) => {
-                const selected = selectedImages.has(image.imageUrl);
-                const cardIndex = columnIndex * 100 + index;
-                const accentClass = cardIndex % 7 === 0
-                  ? 'before:absolute before:inset-0 before:border before:border-purple-400/20 before:rounded-[1.2rem] before:pointer-events-none'
-                  : '';
-
-                return (
-                  <button
-                    key={image.id}
-                    ref={(node) => {
-                      imageButtonRefs.current[image.imageUrl] = node;
-                    }}
-                    type="button"
-                    onClick={() => toggleImageSelection(image.imageUrl)}
-                    className={`group relative block w-full overflow-hidden rounded-[1.35rem] border transition-all ${accentClass} ${selected ? 'border-purple-500 ring-2 ring-purple-500/50 shadow-[0_0_0_1px_rgba(168,85,247,0.25),0_24px_50px_rgba(76,29,149,0.28)] -translate-y-1' : 'border-white/10 hover:border-white/30 hover:-translate-y-1 hover:shadow-[0_20px_45px_rgba(15,23,42,0.35)]'}`}
-                  >
-                    <div className="w-full bg-black/20">
-                      <img
-                        src={image.imageUrl}
-                        alt={`图库图片 ${cardIndex + 1}`}
-                        className="h-auto w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
-                        onLoad={(event) => {
-                          const ratio = event.currentTarget.naturalHeight / Math.max(event.currentTarget.naturalWidth, 1);
-                          setImageAspectRatios((prev) => {
-                            if (prev[image.imageUrl] === ratio) {
-                              return prev;
-                            }
-                            return {
-                              ...prev,
-                              [image.imageUrl]: ratio,
-                            };
-                          });
-                        }}
-                      />
-                    </div>
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/15 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                    <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/60 to-transparent opacity-70" />
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void removeUploadedImage(image);
-                      }}
-                      className="absolute top-3 right-3 w-7 h-7 bg-red-500/80 hover:bg-red-500 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="移除图片"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                    {selected && (
-                      <div className="absolute top-3 left-3 w-7 h-7 rounded-full bg-purple-500 flex items-center justify-center text-white shadow-lg">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                      </div>
-                    )}
-                    <div className="absolute left-3 bottom-3 text-left opacity-0 group-hover:opacity-100 transition-opacity">
-                      <p className="text-[11px] tracking-[0.18em] uppercase text-white/55">Gallery</p>
-                      <p className="text-sm text-white/85 mt-1">图片 {cardIndex + 1}</p>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {selectedImageList.length > 0 && (
-        <div className="mb-6 flex justify-end">
-          <button
-            onClick={() => void deleteSelectedImages()}
-            className="px-3 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white/65 text-xs transition-colors"
-          >
-            删除所选
-          </button>
-        </div>
-      )}
-
-      {selectedImageList.length > 0 && actionBarPosition && (
         <div
-          className="pointer-events-none absolute z-30 transition-all duration-150"
-          style={{
-            top: actionBarPosition.top + 10,
-            left: actionBarPosition.left,
-            transform: 'translateX(-50%)',
+          className="fixed inset-0 z-30 bg-black/40 backdrop-blur-[2px]"
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onDrop={(event) => {
+            void handleDrop(event);
           }}
         >
-          <div className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/75 px-3 py-2 backdrop-blur-xl shadow-2xl">
-            <span className="whitespace-nowrap text-xs text-white/65">已选 {selectedImageList.length} 张</span>
-            {moduleCards.map((card) => (
-              <button
-                key={card.id}
-                onClick={() => openActionPage(card.id)}
-                className="min-w-[88px] px-3 py-2 rounded-full text-sm font-medium transition-all bg-white/10 text-white/80 hover:bg-gradient-to-r hover:from-purple-600 hover:to-blue-600 hover:text-white"
-              >
-                {actionLabelMap[card.id]}
-              </button>
-            ))}
+          <div className="absolute inset-8 rounded-[2rem] border-2 border-dashed border-purple-400 bg-purple-500/10 flex items-center justify-center">
+            <div className="text-center text-white">
+              <div className="mx-auto mb-4 h-14 w-14 rounded-full bg-white/10 flex items-center justify-center">
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+              </div>
+              <p className="text-2xl font-semibold">松开鼠标即可上传到素材库</p>
+              <p className="mt-2 text-white/65">现在整个页面都支持直接拖入本地图片素材</p>
+            </div>
           </div>
         </div>
       )}
-    </div>
-  );
 
-  const renderQuickCreateGrid = () => (
-    <div className="max-w-7xl mx-auto">
-      <div className="text-center mb-12">
-        <h2 className="text-4xl font-bold text-white mb-4">快速制作</h2>
-        <p className="text-white/60 text-lg">选择一个功能模块，直接进入对应的独立页面</p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {moduleCards.map((card) => (
-          <div
-            key={card.id}
-            className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/20 hover:border-purple-500/50 transition-all cursor-pointer group"
-            onClick={() => handleGenerate(card)}
+      <div
+        ref={gallerySectionRef}
+        className={`relative max-w-[92vw] 2xl:max-w-[1780px] mx-auto transition-all ${isDragging ? 'scale-[0.995]' : ''}`}
+        onDragOver={(event) => {
+          event.preventDefault();
+          setIsDragging(true);
+        }}
+        onDragLeave={(event) => {
+          event.preventDefault();
+          setIsDragging(false);
+        }}
+        onDrop={handleDrop}
+      >
+        <div className="flex items-end justify-between gap-4 mb-8">
+          <div>
+            <h2 className="text-3xl font-bold text-white">素材库</h2>
+            <p className="text-white/55 mt-2">这里统一收集、整理和筛选图片素材，选图后直接执行功能，处理进度和结果统一在右侧历史记录查看</p>
+          </div>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="w-11 h-11 rounded-full bg-gradient-to-r from-purple-600 to-blue-600 text-white flex items-center justify-center hover:opacity-90 transition-opacity"
+            title="上传本地素材"
           >
-            <div className="flex gap-4 h-full">
-              <div className="flex-shrink-0">{card.icon}</div>
-              <div className="flex-1 flex flex-col justify-between min-h-[140px]">
-                <div>
-                  <h3 className="text-2xl font-semibold text-white group-hover:text-purple-400 transition-colors mb-2">
-                    {card.name}
-                  </h3>
-                  <p className="text-base text-white/60">{card.description}</p>
-                  {card.tag && <p className="text-sm text-yellow-400 mt-1">{card.tag}</p>}
+            <span className="text-2xl leading-none">+</span>
+          </button>
+        </div>
+
+        <div className="mb-6 flex items-center justify-between gap-4">
+          <div className="text-sm text-white/45">共 {filteredCapturedImages.length} 张素材</div>
+
+          <div className="flex items-center gap-3">
+            {duplicateImageCount > 0 && (
+              <button
+                onClick={() => void deleteDuplicateImages()}
+                disabled={processingAction !== null}
+                className="px-3 py-2 rounded-full bg-white/10 hover:bg-red-500/85 text-white/65 hover:text-white text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                删除重复
+              </button>
+            )}
+
+            {selectedImageList.length > 0 && (
+              <button
+                onClick={() => void deleteSelectedImages()}
+                disabled={processingAction !== null}
+                className="px-3 py-2 rounded-full bg-white/10 hover:bg-red-500/85 text-white/65 hover:text-white text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                删除所选
+              </button>
+            )}
+
+            <label className="flex items-center gap-2 text-sm text-white/60">
+              <span>按日期筛选</span>
+              <select
+                value={materialFilter}
+                onChange={(event) => setMaterialFilter(event.target.value as MaterialFilter)}
+                className="rounded-xl border border-white/10 bg-white/8 px-3 py-2 text-sm text-white outline-none focus:border-purple-400/40"
+              >
+                <option value="all" className="bg-[#111]">全部日期</option>
+                <option value="today" className="bg-[#111]">今天</option>
+                <option value="yesterday" className="bg-[#111]">昨天</option>
+                <option value="earlier" className="bg-[#111]">更早</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          multiple
+          onChange={handleImageUpload}
+          className="hidden"
+        />
+
+        {isUploading && (
+          <div className="mb-6 rounded-3xl border border-white/10 bg-white/[0.03] p-5 text-center text-white/60">
+            素材上传中...
+          </div>
+        )}
+
+        {filteredCapturedImages.length === 0 ? (
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-12 text-center text-white/45">
+            {capturedImages.length === 0
+              ? '素材库里还没有图片素材，可以通过插件采集图片，或点击右上角上传本地图片'
+              : '当前筛选条件下没有匹配的素材'}
+          </div>
+        ) : (
+          <div className="mb-8 space-y-10">
+            {groupedMaterials.map((group) => {
+              const groupColumns = (() => {
+                const columns = Array.from({ length: columnCount }, () => ({
+                  items: [] as CapturedImageRecord[],
+                  heightScore: 0,
+                }));
+
+                for (const image of group.items) {
+                  const ratio = imageAspectRatios[image.imageUrl] ?? 1;
+                  let targetIndex = 0;
+
+                  for (let i = 1; i < columns.length; i += 1) {
+                    if (columns[i].heightScore < columns[targetIndex].heightScore) {
+                      targetIndex = i;
+                    }
+                  }
+
+                  columns[targetIndex].items.push(image);
+                  columns[targetIndex].heightScore += ratio;
+                }
+
+                return columns.map((column) => column.items);
+              })();
+
+              return (
+                <section key={group.key}>
+                  <div className="flex items-center gap-3 mb-5">
+                    <h3 className="text-xl font-semibold text-white">{group.label}</h3>
+                    <span className="text-xs text-white/45 rounded-full border border-white/10 px-2.5 py-1 bg-white/[0.04]">
+                      {group.items.length} 张素材
+                    </span>
+                  </div>
+
+                  <div className="flex items-start justify-center gap-5 xl:gap-6">
+                    {groupColumns.map((column, columnIndex) => (
+                      <div key={`${group.key}-${columnIndex}`} className="flex-1 min-w-0 max-w-[290px] space-y-5">
+                        {column.map((image, index) => {
+                          const selected = selectedImages.has(image.imageUrl);
+                          const cardIndex = columnIndex * 100 + index;
+                          const accentClass = cardIndex % 7 === 0
+                            ? 'before:absolute before:inset-0 before:border before:border-purple-400/20 before:rounded-[1.2rem] before:pointer-events-none'
+                            : '';
+
+                          return (
+                            <button
+                              key={image.id}
+                              ref={(node) => {
+                                imageButtonRefs.current[image.imageUrl] = node;
+                              }}
+                              type="button"
+                              onClick={() => toggleImageSelection(image.imageUrl)}
+                              className={`group relative block w-full overflow-hidden rounded-[1.35rem] border transition-all ${accentClass} ${selected ? 'border-purple-500 ring-2 ring-purple-500/50 shadow-[0_0_0_1px_rgba(168,85,247,0.25),0_24px_50px_rgba(76,29,149,0.28)] -translate-y-1' : 'border-white/10 hover:border-white/30 hover:-translate-y-1 hover:shadow-[0_20px_45px_rgba(15,23,42,0.35)]'}`}
+                            >
+                              <div className="w-full bg-black/20">
+                                <img
+                                  src={image.imageUrl}
+                                  alt={`素材图片 ${cardIndex + 1}`}
+                                  className="h-auto w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+                                  onLoad={(event) => {
+                                    const ratio = event.currentTarget.naturalHeight / Math.max(event.currentTarget.naturalWidth, 1);
+                                    setImageAspectRatios((prev) => {
+                                      if (prev[image.imageUrl] === ratio) return prev;
+                                      return { ...prev, [image.imageUrl]: ratio };
+                                    });
+                                  }}
+                                />
+                              </div>
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/15 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                              <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/60 to-transparent opacity-70" />
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void removeUploadedImage(image);
+                                }}
+                                className="absolute top-3 right-3 w-7 h-7 bg-red-500/80 hover:bg-red-500 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                                title="移除图片"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                              {selected && (
+                                <div className="absolute top-3 left-3 w-7 h-7 rounded-full bg-purple-500 flex items-center justify-center text-white shadow-lg">
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                  </svg>
+                                </div>
+                              )}
+                              <div className="absolute left-3 bottom-3 text-left opacity-0 group-hover:opacity-100 transition-opacity">
+                                <p className="text-[11px] tracking-[0.18em] uppercase text-white/55">Material</p>
+                                <p className="text-sm text-white/85 mt-1">素材 {cardIndex + 1}</p>
+                                <p className="text-[11px] text-white/50 mt-1">
+                                  {formatMaterialDateLabel(image.createdAt)}
+                                  <span className="mx-1 text-white/35">·</span>
+                                  {formatMaterialTime(image.createdAt)}
+                                  {(image.imageType || 'main') ? ` · ${(image.imageType || 'main') === 'detail' ? '明细图' : '主图'}` : ''}
+                                  {image.sourceHost ? ` · ${image.sourceHost}` : ''}
+                                </p>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        )}
+
+        {selectedImageList.length > 0 && actionBarPosition && (
+          <div
+            className="pointer-events-none absolute z-30 transition-all duration-150"
+            style={{
+              top: actionBarPosition.top + 6,
+              left: actionBarPosition.left,
+              transform: 'translateX(-50%)',
+            }}
+          >
+            <div className="pointer-events-none absolute left-1/2 top-0 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[3px] border-l border-t border-white/12 bg-black/78 backdrop-blur-2xl" />
+            <div className={`pointer-events-auto rounded-[1.6rem] border border-white/12 bg-black/78 px-4 py-4 backdrop-blur-2xl shadow-[0_18px_40px_rgba(0,0,0,0.38),0_6px_18px_rgba(88,28,135,0.24)] ring-1 ring-white/5 max-w-[92vw] transition-all ${showAiPromptPanel ? 'min-w-[760px]' : 'min-w-[420px]'}`}>
+              <div className="flex items-center justify-between gap-4">
+                <span className="whitespace-nowrap text-xs font-medium text-white/68">已选 {selectedImageList.length} 张</span>
+                {processingActionLabel && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-purple-500/18 px-2.5 py-1 text-xs font-medium text-purple-200 border border-purple-400/20">
+                    <span className="h-1.5 w-1.5 rounded-full bg-purple-300 animate-pulse"></span>
+                    正在提交 {processingActionLabel}
+                  </span>
+                )}
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                {editorActions.map((action) => {
+                  const disabled = selectedImageList.length !== 1 || processingAction !== null;
+                  return (
+                    <button
+                      key={action.id}
+                      onClick={() => handleEditorAction(action.id)}
+                      disabled={disabled}
+                      className={`px-3.5 py-2 rounded-full text-sm font-medium transition-all ${disabled ? 'bg-white/6 text-white/30 cursor-not-allowed' : 'bg-white/9 text-white/78 hover:-translate-y-0.5 hover:bg-white/16 hover:text-white'}`}
+                    >
+                      {action.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {showAiPromptPanel && (
+                <div className="mt-5 mb-4 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/8 p-4">
+                  <div className="flex flex-wrap items-start gap-3 mb-4">
+                    <div className="flex flex-wrap gap-2 flex-1 min-w-0">
+                      {selectedImageList.slice(0, 6).map((imageUrl, index) => (
+                        <div key={`${imageUrl}-${index}`} className="w-14 h-14 rounded-xl overflow-hidden border border-white/10 bg-black/20">
+                          <img src={imageUrl} alt={`已选素材 ${index + 1}`} className="w-full h-full object-cover" />
+                        </div>
+                      ))}
+                      {selectedImageList.length > 6 && (
+                        <div className="w-14 h-14 rounded-xl border border-white/10 bg-white/6 flex items-center justify-center text-xs text-white/55">
+                          +{selectedImageList.length - 6}
+                        </div>
+                      )}
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-14 h-14 rounded-xl border border-dashed border-white/15 bg-white/6 hover:bg-white/12 text-white/70 hover:text-white flex items-center justify-center transition-colors"
+                        title="继续上传素材"
+                      >
+                        <span className="text-2xl leading-none">+</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="relative">
+                    <textarea
+                      value={aiPrompt}
+                      onChange={(event) => setAiPrompt(event.target.value)}
+                      placeholder="请输入 AI 生图提示词"
+                      className="w-full min-h-[108px] rounded-2xl border border-white/12 bg-white/6 px-4 py-3 pb-14 text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/35"
+                    />
+
+                    <div className="absolute left-3 right-3 bottom-3 flex items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={aiAspectRatio}
+                          onChange={(event) => setAiAspectRatio(event.target.value)}
+                          className="rounded-xl border border-white/10 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-fuchsia-400/40"
+                        >
+                          <option value="auto" className="bg-[#111]">自动</option>
+                          <option value="1:1" className="bg-[#111]">1:1</option>
+                          <option value="2:3" className="bg-[#111]">2:3</option>
+                          <option value="3:2" className="bg-[#111]">3:2</option>
+                          <option value="3:4" className="bg-[#111]">3:4</option>
+                          <option value="4:3" className="bg-[#111]">4:3</option>
+                          <option value="4:5" className="bg-[#111]">4:5</option>
+                          <option value="5:4" className="bg-[#111]">5:4</option>
+                          <option value="9:16" className="bg-[#111]">9:16</option>
+                          <option value="16:9" className="bg-[#111]">16:9</option>
+                          <option value="21:9" className="bg-[#111]">21:9</option>
+                        </select>
+
+                        <select
+                          value={aiResolution}
+                          onChange={(event) => setAiResolution(event.target.value)}
+                          className="rounded-xl border border-white/10 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-fuchsia-400/40"
+                        >
+                          <option value="1k" className="bg-[#111]">1k</option>
+                          <option value="2k" className="bg-[#111]">2k</option>
+                          <option value="4k" className="bg-[#111]">4k</option>
+                        </select>
+                      </div>
+
+                      <button
+                        onClick={submitAiGenerate}
+                        disabled={processingAction !== null}
+                        className="px-4 py-2 rounded-xl text-sm font-medium bg-gradient-to-r from-fuchsia-600 to-violet-600 hover:from-fuchsia-500 hover:to-violet-500 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        开始AI生图
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <button
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    handleGenerate(card);
-                  }}
-                  className="w-full py-2 rounded-lg font-medium transition-all bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
-                >
-                  立即进入
-                </button>
+              )}
+
+              <div className="mt-5 flex flex-wrap items-center gap-2">
+                {galleryActions.map((action) => (
+                  <button
+                    key={action.id}
+                    onClick={() => {
+                      if (action.id === 'auto-remove-bg') {
+                        setShowAiPromptPanel((current) => !current);
+                        return;
+                      }
+                      void handleRunAction(action.id);
+                    }}
+                    disabled={processingAction !== null}
+                    className={`min-w-[88px] px-3.5 py-2 rounded-full text-sm font-medium transition-all bg-white/9 text-white/82 hover:-translate-y-0.5 hover:bg-gradient-to-r hover:from-purple-600 hover:to-blue-600 hover:text-white hover:shadow-[0_10px_24px_rgba(109,40,217,0.28)] disabled:cursor-not-allowed ${processingAction !== null && processingAction !== action.id ? 'opacity-35' : 'disabled:opacity-50'} ${showAiPromptPanel && action.id === 'auto-remove-bg' ? 'ring-2 ring-fuchsia-400/60 bg-fuchsia-500/16 text-white' : ''}`}
+                  >
+                    {processingAction === action.id ? '提交中...' : action.label}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
-        ))}
+        )}
       </div>
-    </div>
-  );
-
-  if (showAIGenerate) {
-    return (
-      <div className="flex-1 px-6 py-8 overflow-y-auto">
-        <div className="relative">
-          {renderBackButton('返回快速制作', () => setShowAIGenerate(false))}
-          <AIGeneratePage />
-        </div>
-      </div>
-    );
-  }
-
-  if (showRemoveWatermark) {
-    return (
-      <div className="flex-1 px-6 py-8 overflow-y-auto">
-        <div className="relative">
-          {renderBackButton('返回快速制作', () => setShowRemoveWatermark(false))}
-          <RemoveWatermarkPage />
-        </div>
-      </div>
-    );
-  }
-
-  if (showImageUpsampling) {
-    return (
-      <div className="flex-1 px-6 py-8 overflow-y-auto">
-        <div className="relative">
-          {renderBackButton('返回快速制作', () => setShowImageUpsampling(false))}
-          <ImageUpsamplingPage />
-        </div>
-      </div>
-    );
-  }
-
-  if (showColorExtraction) {
-    return (
-      <div className="flex-1 px-6 py-8 overflow-y-auto">
-        <div className="relative">
-          {renderBackButton('返回快速制作', () => setShowColorExtraction(false))}
-          <ColorExtraction2Page />
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex-1 px-6 py-8 overflow-y-auto">
-      {isCaptureLibraryView ? renderCaptureLibrary() : renderQuickCreateGrid()}
     </div>
   );
 }

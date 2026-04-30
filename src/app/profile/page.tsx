@@ -325,11 +325,11 @@ export default function ProfilePage() {
 
           {/* 标签页切换 */}
           <div className="flex mb-6 bg-white/10 rounded-lg p-1 border border-white/20">
-            {[
+            {([
               { key: 'info', label: '基本信息' },
               { key: 'security', label: '安全设置' },
               { key: 'transactions', label: '消费记录' },
-            ].map((tab: { key: ProfileTab; label: string }) => (
+            ] as Array<{ key: ProfileTab; label: string }>).map((tab) => (
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}

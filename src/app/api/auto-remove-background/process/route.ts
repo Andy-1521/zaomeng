@@ -23,7 +23,7 @@ type CozeImageClient = {
     image: string;
     size: string;
     watermark: boolean;
-    responseFormat: string;
+    responseFormat: 'url' | 'b64_json';
   }): Promise<CozeGenerateResponse>;
   getResponseHelper(response: CozeGenerateResponse): CozeResponseHelper;
 };
@@ -43,7 +43,7 @@ async function getImageClient() {
   if (!imageClient) {
     const { ImageGenerationClient, Config } = await import('coze-coding-dev-sdk');
     const config = new Config();
-    imageClient = new ImageGenerationClient(config);
+    imageClient = new ImageGenerationClient(config) as unknown as CozeImageClient;
   }
   return imageClient;
 }
