@@ -105,7 +105,7 @@
 
 当前状态：
 
-- 已从“采集图库”升级为“素材库”语义
+- 已完成从“采集图库”到“素材库”的命名切换
 - 是当前首页主链路核心组件
 - 已支持：
   - 插件采图
@@ -259,33 +259,29 @@
 - 删除重复逻辑已按稳定键归一化处理
 - 历史记录自动展开 + 最新任务高亮
 
-## 当前高置信未使用/历史残留候选
+## 当前已完成的冗余清理
 
-### 高置信未进入主链路的旧页面组件
+本轮已经清理：
 
-- `src/components/AIGeneratePage.tsx`
-- `src/components/CustomPage.tsx`
-- `src/components/AutoRemoveBackgroundPage.tsx`
-- `src/components/RemoveBackgroundPage.tsx`
-- `src/components/RemoveWatermarkPage.tsx`
-- `src/components/ImageUpsamplingPage.tsx`
+- 旧独立功能页组件：
+- 上述旧独立页面组件已清理完毕
+- 顶层调试/抓取脚本：
+  - `debug_tmall.py`
+  - `extractor_server.py`
+  - `extractor_v2.py`
+  - `product_image_extractor.py`
+  - `test-watermark.html`
+  - `debug_login.png`
+- tmp 临时文件：
+  - `tmp/AI_IMAGE_API_MIGRATION.md`
+  - `tmp/COLOR_EXTRACTION_CONCURRENT_FIX.md`
+  - `tmp/check-watermark-orders.sql`
+  - `tmp/check_orders.js`
 
 说明：
 
-- 这些大多属于旧的独立功能页模式残留
-- 当前首页真实交互已经不依赖它们
-- 删除前仍建议人工再确认一次，避免遗漏隐藏引用
-
-### 高置信调试/历史工具残留
-
-- `debug_tmall.py`
-- `extractor_server.py`
-- `extractor_v2.py`
-- `product_image_extractor.py`
-- `test-watermark.html`
-- `tmp/AI_IMAGE_API_MIGRATION.md`
-- `tmp/COLOR_EXTRACTION_CONCURRENT_FIX.md`
-- `debug_login.png`
+- 当前代码库已经移除主链路不再使用的旧独立页面
+- 运行中的素材资源目录 `public/plugin-capture` 不再纳入“冗余清理”范围，避免再次误删用户素材
 
 ### 当前仍明确使用的脚本
 
@@ -365,7 +361,7 @@
 
 后续继续接手时优先记住这些事实：
 
-1. 当前首页已经不是“采集图库 + 多页面功能入口”，而是“素材库 + 选图后直接加工”
+1. 当前首页已经不是旧的多页面入口模式，而是“素材库 + 选图后直接加工”
 2. 当前 `AI生图` 应该先按前端占位式交互处理，不要强绑临时后端
 3. 当前生产构建已通过，但运行稳定性仍受“进程未托管”影响
 4. 当前公网主验收入口仍应优先使用 `http://124.223.26.206/home`

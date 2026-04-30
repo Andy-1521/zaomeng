@@ -1,6 +1,6 @@
 'use client';
 
-type SidebarTabType = 'capture-library';
+type SidebarTabType = 'material-library';
 
 interface SidebarProps {
   activeTab: SidebarTabType;
@@ -10,7 +10,7 @@ interface SidebarProps {
 export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
   const tabs: Array<{ id: SidebarTabType; name: string; icon: React.ReactNode }> = [
     {
-      id: 'capture-library',
+      id: 'material-library',
       name: '素材库',
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

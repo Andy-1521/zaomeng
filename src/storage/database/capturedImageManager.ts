@@ -23,7 +23,7 @@ export class CapturedImageManager {
 
     const [record] = await db.select().from(capturedImages).where(eq(capturedImages.id, id)).limit(1)
     if (!record) {
-      throw new Error('创建采集图库记录后读取失败')
+      throw new Error('创建素材库记录后读取失败')
     }
 
     return record

@@ -490,9 +490,9 @@ export const forceRefreshCache = (userId?: string) => {
         tab = 'watermark';
         tabName = '去除水印';
       } else if (item.toolPage === '快速制作') {
-        // 快速制作（通用，不包含具体的子功能）
+        // Keep legacy history visible without restoring the old page mode.
         tab = 'custom';
-        tabName = '快速制作';
+        tabName = '历史工具记录';
       }
 
       // 调试日志：记录toolPage映射

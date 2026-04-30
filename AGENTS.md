@@ -28,7 +28,7 @@ src/
 ├── components/
 │   ├── TaskHistory.tsx  # Task history sidebar with filter/tabs
 │   ├── ColorExtraction2Page.tsx  # Main color extraction feature
-│   ├── CustomPage.tsx   # Custom tools placeholder
+│   ├── QuickCreatePage.tsx  # Material library main workflow
 │   ├── Navbar.tsx       # Navigation bar
 │   └── ui/              # shadcn/ui components
 ├── lib/

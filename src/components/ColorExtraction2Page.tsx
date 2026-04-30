@@ -199,7 +199,7 @@ export default function ColorExtraction2Page() {
   };
 
   useEffect(() => {
-    const stored = sessionStorage.getItem('capture-library:selected-images');
+    const stored = sessionStorage.getItem('material-library:selected-images');
     if (!stored) {
       return;
     }
@@ -847,7 +847,7 @@ export default function ColorExtraction2Page() {
           <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20 mb-8">
             <div className="flex items-center justify-between gap-4 mb-4">
               <div>
-                <h3 className="text-xl font-semibold text-white">来自采集图库的图片</h3>
+                <h3 className="text-xl font-semibold text-white">来自素材库的图片</h3>
                 <p className="text-white/50 text-sm mt-1">当前带入 {libraryImages.length} 张图片，可直接一键开始彩绘提取</p>
               </div>
               <button

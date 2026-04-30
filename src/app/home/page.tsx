@@ -80,7 +80,7 @@ export default function HomePage() {
         <Navbar />
 
         {/* 左侧导航栏 */}
-        <Sidebar activeTab="capture-library" onTabChange={() => undefined} />
+        <Sidebar activeTab="material-library" onTabChange={() => undefined} />
 
         {/* 右侧任务历史 */}
         <TaskHistory activeTab="color-extraction" userId={user?.id} />
