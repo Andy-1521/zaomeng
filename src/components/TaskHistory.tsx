@@ -8,6 +8,7 @@ import { ImageThumbnail } from '@/components/ui/ImageThumbnail';
 
 export type TabType = 'color-extraction' | 'auto-remove-bg' | 'watermark' | 'custom';
 export type FilterType = 'all' | TabType;
+type TaskCenterFilter = 'all' | 'processing' | 'success' | 'failed';
 export type TaskStatus = '处理中' | '成功' | '失败' | '超时' | '部分成功';
 
 export interface TaskRecord {
@@ -73,6 +74,96 @@ type TaskRecordApiResponse = {
 };
 
 const taskRecordCacheByUser = new Map<string, TaskRecord[]>();
+
+function getFirstImage(value?: string | string[]): string | null {
+  if (Array.isArray(value)) {
+    return value.find((item) => typeof item === 'string' && item.length > 0) || null;
+  }
+
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function getImageList(value?: string | string[]): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
+  }
+
+  return typeof value === 'string' && value.length > 0 ? [value] : [];
+}
+
+function isImageValue(value: string | null): value is string {
+  return !!value && (value.startsWith('http://') || value.startsWith('https://') || value.startsWith('/'));
+}
+
+function getOrderSuffix(orderId?: string) {
+  if (!orderId) return '未生成';
+  return orderId.slice(-6);
+}
+
+function isToday(timestamp: number) {
+  const date = new Date(timestamp);
+  const now = new Date();
+  return date.getFullYear() === now.getFullYear()
+    && date.getMonth() === now.getMonth()
+    && date.getDate() === now.getDate();
+}
+
+function getTaskDateGroup(timestamp: number) {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const targetStart = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const diffDays = Math.floor((todayStart - targetStart) / 86400000);
+
+  if (diffDays === 0) return '今天';
+  if (diffDays === 1) return '昨天';
+  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', weekday: 'short' });
+}
+
+function getTaskStatusLabel(task: TaskRecord) {
+  if (task.status === '成功') return '生成成功';
+  if (task.status === '失败') return '生成失败';
+  if (task.status === '超时') return '已超时';
+  if (task.status === '部分成功') return '部分成功';
+  if (task.status === '处理中' && Date.now() - task.time < 15000) return '排队中';
+  if (task.status === '处理中') return '处理中';
+  return '生成成功';
+}
+
+function getTaskProgressText(task: TaskRecord) {
+  if (task.status === '成功') return '结果已生成，可查看或下载。';
+  if (task.status === '失败') return '任务失败，可回到对应工具重新提交。';
+  if (task.status === '超时') return '处理时间过长，建议刷新或重新提交。';
+  if (task.status === '部分成功') return '部分结果已生成，可先查看可用结果。';
+
+  switch (task.tab) {
+    case 'color-extraction':
+      return '正在提取彩绘图案...';
+    case 'watermark':
+      return '正在清理水印...';
+    case 'custom':
+      return '正在增强图片细节...';
+    case 'auto-remove-bg':
+      return '等待生成接口处理...';
+    default:
+      return '正在处理任务...';
+  }
+}
+
+function getStatusClasses(status?: TaskStatus) {
+  if (status === '成功') return 'border-emerald-400/50 bg-emerald-500/12 text-emerald-200';
+  if (status === '失败') return 'border-red-400/50 bg-red-500/12 text-red-200';
+  if (status === '超时') return 'border-amber-400/50 bg-amber-500/12 text-amber-200';
+  if (status === '部分成功') return 'border-orange-400/50 bg-orange-500/12 text-orange-200';
+  return 'border-blue-400/50 bg-blue-500/12 text-blue-200';
+}
+
+function matchesTaskCenterFilter(task: TaskRecord, filter: TaskCenterFilter) {
+  if (filter === 'all') return true;
+  if (filter === 'processing') return task.status === '处理中';
+  if (filter === 'success') return task.status === '成功' || task.status === '部分成功' || !task.status;
+  return task.status === '失败' || task.status === '超时';
+}
 
 function getStoredUserId(): string | null {
   if (typeof window === 'undefined') {
@@ -584,8 +675,26 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [deletingOrder, setDeletingOrder] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState<FilterType>('all');
+  const [statusFilter, setStatusFilter] = useState<TaskCenterFilter>('all');
   const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null);
   const taskCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  const processingCount = tasks.filter((task) => task.status === '处理中').length;
+  const completedTodayCount = tasks.filter((task) => (task.status === '成功' || task.status === '部分成功') && isToday(task.time)).length;
+  const failedCount = tasks.filter((task) => task.status === '失败' || task.status === '超时').length;
+  const visibleTasks = tasks.filter((task) =>
+    (filterTab === 'all' || task.tab === filterTab) && matchesTaskCenterFilter(task, statusFilter)
+  );
+  const groupedVisibleTasks = visibleTasks.reduce<Array<{ label: string; tasks: TaskRecord[] }>>((groups, task) => {
+    const label = getTaskDateGroup(task.time);
+    const existing = groups.find((group) => group.label === label);
+    if (existing) {
+      existing.tasks.push(task);
+    } else {
+      groups.push({ label, tasks: [task] });
+    }
+    return groups;
+  }, []);
 
   // 自动隐藏定时器
   const autoHideTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -761,61 +870,76 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     }
   };
 
-  // 获取状态标签
-  const getStatusBadge = (status?: TaskStatus) => {
-    if (!status) return null;
+  const downloadTaskImages = async (task: TaskRecord) => {
+    const imagesToDownload = getImageList(task.imageUrl);
 
-    const statusConfig = {
-      '处理中': {
-        className: 'bg-blue-500/18 text-blue-200 border border-blue-400/35 shadow-[0_0_0_1px_rgba(96,165,250,0.08)]',
-        icon: (
-          <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-        ),
-      },
-      '成功': {
-        className: 'bg-emerald-500/18 text-emerald-200 border border-emerald-400/35 shadow-[0_0_0_1px_rgba(52,211,153,0.08)]',
-        icon: (
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-        ),
-      },
-      '失败': {
-        className: 'bg-red-500/18 text-red-200 border border-red-400/35 shadow-[0_0_0_1px_rgba(248,113,113,0.08)]',
-        icon: (
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        ),
-      },
-      '超时': {
-        className: 'bg-amber-500/18 text-amber-200 border border-amber-400/35 shadow-[0_0_0_1px_rgba(251,191,36,0.08)]',
-        icon: (
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        ),
-      },
-      '部分成功': {
-        className: 'bg-orange-500/18 text-orange-200 border border-orange-400/35 shadow-[0_0_0_1px_rgba(251,146,60,0.08)]',
-        icon: (
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-        ),
-      },
-    };
+    if (imagesToDownload.length === 0) {
+      showToast('没有可下载的图片', 'error');
+      return;
+    }
 
-    const config = statusConfig[status];
-    return (
-      <div className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium ${config.className}`}>
-        {config.icon}
-        <span>{status}</span>
-      </div>
-    );
+    try {
+      showToast('正在下载图片...', 'info');
+
+      for (let i = 0; i < imagesToDownload.length; i++) {
+        const url = imagesToDownload[i];
+        if (!url.startsWith('http')) {
+          continue;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, i * 200));
+        const response = await fetch(url);
+        const blob = await response.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = `image-${task.orderId || task.id}-${i + 1}.png`;
+        link.click();
+        window.URL.revokeObjectURL(blobUrl);
+      }
+
+      showToast('图片下载成功', 'success');
+    } catch (error) {
+      console.error('下载图片失败:', error);
+      showToast('下载失败，请重试', 'error');
+    }
+  };
+
+  const openTaskResult = (task: TaskRecord) => {
+    const resultImage = getFirstImage(task.imageUrl);
+    if (!isImageValue(resultImage)) {
+      showToast('该任务暂无可查看结果', 'error');
+      return;
+    }
+
+    setPreviewImageUrl(resultImage);
+  };
+
+  const openPsdUrl = (task: TaskRecord) => {
+    if (!task.psdUrl) {
+      showToast('PSD文件尚未生成完成', 'error');
+      return;
+    }
+
+    if (typeof task.psdUrl !== 'string' || !task.psdUrl.startsWith('http')) {
+      showToast('PSD链接无效', 'error');
+      return;
+    }
+
+    window.open(task.psdUrl, '_blank');
+    showToast('已在新标签页打开下载链接', 'info');
+  };
+
+  const copyOrderId = (task: TaskRecord, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!task.orderId) return;
+
+    navigator.clipboard.writeText(task.orderId).then(() => {
+      setShowCopySuccessForOrder(task.orderId || null);
+      setTimeout(() => setShowCopySuccessForOrder(null), 2000);
+    }).catch((err) => {
+      console.error('复制失败:', err);
+    });
   };
 
   // 清空历史记录
@@ -977,387 +1101,249 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
   return (
     <div
-      className="fixed right-6 top-1/2 -translate-y-1/2 z-50"
+      className="fixed right-5 top-1/2 -translate-y-1/2 z-50"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      {/* 任务列表 */}
       <div
         className={`
-          bg-black/60 backdrop-blur-xl rounded-2xl border border-white/20 overflow-hidden transition-all duration-300
-          ${isCollapsed ? 'w-12' : 'w-80'}
+          overflow-hidden border border-white/15 bg-[#050509]/82 shadow-[0_24px_80px_rgba(0,0,0,0.42)] backdrop-blur-2xl transition-all duration-300
+          ${isCollapsed ? 'w-[58px] rounded-[1.35rem]' : 'w-[390px] rounded-[1.7rem]'}
         `}
       >
-        {/* 标题栏 */}
-        <div
-          className="flex items-center justify-between p-3 cursor-pointer hover:bg-white/5 transition-colors border-b border-white/10"
+        <button
+          type="button"
+          className={`relative w-full transition-colors hover:bg-white/[0.06] ${isCollapsed ? 'flex min-h-[170px] flex-col items-center justify-center gap-3 px-2 py-4' : 'border-b border-white/10 px-4 py-4 text-left'}`}
           onClick={() => setIsCollapsed(!isCollapsed)}
         >
-          {!isCollapsed && (
-            <span className="text-white text-sm font-medium flex items-center gap-2">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          {isCollapsed ? (
+            <>
+              <div className={`relative flex h-10 w-10 items-center justify-center rounded-2xl border ${processingCount > 0 ? 'border-blue-300/45 bg-blue-500/18 text-blue-200' : 'border-white/12 bg-white/8 text-white/70'}`}>
+                {processingCount > 0 && <span className="absolute inset-[-3px] rounded-[1.15rem] border border-blue-300/35 animate-pulse" />}
+                <svg className={processingCount > 0 ? 'h-5 w-5 animate-spin' : 'h-5 w-5'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+                {processingCount > 0 && (
+                  <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500 px-1 text-[10px] font-semibold text-white shadow-lg shadow-blue-500/30">
+                    {processingCount}
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-col items-center gap-2">
+                <span className="[writing-mode:vertical-rl] text-xs font-medium tracking-[0.22em] text-white/78">任务中心</span>
+                {processingCount > 0 ? (
+                  <span className="rounded-full bg-blue-500/20 px-1.5 py-1 text-[10px] text-blue-200 [writing-mode:vertical-rl]">处理中{processingCount}</span>
+                ) : failedCount > 0 ? (
+                  <span className="rounded-full bg-red-500/18 px-1.5 py-1 text-[10px] text-red-200 [writing-mode:vertical-rl]">失败{failedCount}</span>
+                ) : (
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="mb-2 flex items-center gap-2">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-purple-300/25 bg-purple-500/15 text-purple-200">
+                    <svg className="h-4.5 w-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold text-white">任务中心</h3>
+                    <p className="text-xs text-white/42">订单进度、结果与下载</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="rounded-full border border-blue-400/25 bg-blue-500/12 px-2 py-1 text-blue-200">处理中 {processingCount}</span>
+                  <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2 py-1 text-emerald-200">今日完成 {completedTodayCount}</span>
+                  {failedCount > 0 && <span className="rounded-full border border-red-400/20 bg-red-500/10 px-2 py-1 text-red-200">失败 {failedCount}</span>}
+                </div>
+              </div>
+              <svg className="h-5 w-5 rotate-180 text-white/45" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
-              历史记录
-            </span>
+            </div>
           )}
-          <svg
-            className={`w-5 h-5 text-white/60 transition-transform ${isCollapsed ? '' : 'rotate-180'}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        </div>
+        </button>
 
-        {/* 任务列表内容 */}
         {!isCollapsed && (
           <>
-            {/* 筛选器 */}
-            <div className="p-3 border-b border-white/10">
-              <div className="flex gap-2 flex-wrap">
-                <button
-                  onClick={() => {
-                    setFilterTab('all');
-                  }}
-                  className={`
-                    px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
-                    ${filterTab === 'all'
-                      ? 'bg-purple-500/30 text-purple-300 border border-purple-500/50'
-                      : 'bg-white/5 text-white/60 hover:bg-white/10 border border-transparent'
-                    }
-                  `}
-                >
-                  全部
-                </button>
-
-                <button
-                  onClick={() => {
-                    setFilterTab('color-extraction');
-                  }}
-                  className={`
-                    px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
-                    ${filterTab === 'color-extraction'
-                      ? 'bg-purple-500/30 text-purple-300 border border-purple-500/50'
-                      : 'bg-white/5 text-white/60 hover:bg-white/10 border border-transparent'
-                    }
-                  `}
-                >
-                  彩绘提取
-                </button>
-
-                <button
-                  onClick={() => {
-                    setFilterTab('auto-remove-bg');
-                  }}
-                  className={`
-                    px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
-                    ${filterTab === 'auto-remove-bg'
-                      ? 'bg-purple-500/30 text-purple-300 border border-purple-500/50'
-                      : 'bg-white/5 text-white/60 hover:bg-white/10 border border-transparent'
-                    }
-                  `}
-                >
-                  AI生图
-                </button>
-
-                <button
-                  onClick={() => {
-                    setFilterTab('watermark');
-                  }}
-                  className={`
-                    px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
-                    ${filterTab === 'watermark'
-                      ? 'bg-purple-500/30 text-purple-300 border border-purple-500/50'
-                      : 'bg-white/5 text-white/60 hover:bg-white/10 border border-transparent'
-                    }
-                  `}
-                >
-                  去除水印
-                </button>
-
-                <button
-                  onClick={() => {
-                    setFilterTab('custom');
-                  }}
-                  className={`
-                    px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
-                    ${filterTab === 'custom'
-                      ? 'bg-purple-500/30 text-purple-300 border border-purple-500/50'
-                      : 'bg-white/5 text-white/60 hover:bg-white/10 border border-transparent'
-                    }
-                  `}
-                >
-                  自定义
-                </button>
+            <div className="border-b border-white/10 px-4 py-3">
+              <div className="grid grid-cols-4 gap-1 rounded-2xl border border-white/8 bg-white/[0.035] p-1">
+                {([
+                  ['all', '全部'],
+                  ['processing', '处理中'],
+                  ['success', '成功'],
+                  ['failed', '失败'],
+                ] as Array<[TaskCenterFilter, string]>).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setStatusFilter(value)}
+                    className={`rounded-xl px-2 py-1.5 text-xs transition-colors ${statusFilter === value ? 'bg-white/14 text-white shadow-sm' : 'text-white/45 hover:bg-white/8 hover:text-white/75'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-3 flex gap-2 overflow-x-auto pb-1 history-scrollbar">
+                {(['all', 'color-extraction', 'auto-remove-bg', 'watermark', 'custom'] as FilterType[]).map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setFilterTab(filter)}
+                    className={`shrink-0 rounded-full border px-3 py-1.5 text-xs transition-colors ${filterTab === filter ? 'border-purple-300/45 bg-purple-500/20 text-purple-100' : 'border-white/8 bg-white/[0.04] text-white/45 hover:text-white/75'}`}
+                  >
+                    {getFilterLabel(filter)}
+                  </button>
+                ))}
               </div>
             </div>
 
-            <div
-              className="max-h-[700px] overflow-y-auto p-3 space-y-2 history-scrollbar"
-            >
-              {(() => {
-                // 筛选逻辑：
-                // - 'all': 显示所有记录
-                // - 其他：只显示对应类型的记录
-                const filteredTasks = filterTab === 'all'
-                  ? tasks
-                  : tasks.filter(task => task.tab === filterTab);
-
-                if (filteredTasks.length === 0) {
-                  return (
-                    <div className="text-center py-8 text-white/40 text-sm">
-                      {filterTab === 'all' ? '暂无历史记录' : `暂无${getFilterLabel(filterTab)}记录`}
-                    </div>
-                  );
-                }
-
-                return filteredTasks.map((task) => (
-                  <div
-                    key={task.id}
-                    ref={(node) => {
-                      taskCardRefs.current[task.id] = node;
-                    }}
-                    onClick={() => onTaskClick?.(task)}
-                    className={`
-                      p-3 rounded-xl transition-all cursor-pointer
-                      ${task.tab === activeTab
-                        ? 'bg-white/20 border border-white/30 shadow-[0_10px_24px_rgba(15,23,42,0.18)]'
-                        : 'bg-white/5 hover:bg-white/10 border border-transparent'
-                      }
-                      ${highlightTaskId === task.id
-                        ? 'ring-2 ring-purple-400/70 shadow-[0_0_0_1px_rgba(196,181,253,0.3),0_0_24px_rgba(139,92,246,0.25)]'
-                        : ''
-                      }
-                      ${task.status === '处理中' ? 'border-l-4 border-l-blue-400' : ''}
-                      ${task.status === '成功' ? 'border-l-4 border-l-emerald-400' : ''}
-                      ${task.status === '失败' ? 'border-l-4 border-l-red-400' : ''}
-                      ${task.status === '超时' ? 'border-l-4 border-l-amber-400' : ''}
-                      ${task.status === '部分成功' ? 'border-l-4 border-l-orange-400' : ''}
-                    `}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="mt-0.5 text-purple-400">
-                        {getTabIcon(task.tab)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2 mb-1">
-                          <span className="text-white text-sm font-medium truncate">{task.tabName}</span>
-                          <div className="flex items-center gap-2">
-                            {getStatusBadge(task.status)}
-                            <span className="text-white/40 text-xs shrink-0">{formatTime(task.time)}</span>
-                          </div>
-                        </div>
-                        {/* 关键信息 */}
-                        <div className="mt-2 space-y-1 text-xs text-white/50">
-                          <div className="flex items-center gap-2">
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                            <span>{new Date(task.time).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
-                          </div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                            <span className="flex-1">{task.orderId || 'N/A'}</span>
-                            {/* 复制按钮 */}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (task.orderId) {
-                                  navigator.clipboard.writeText(task.orderId).then(() => {
-                                    setShowCopySuccessForOrder(task.orderId || null);
-                                    setTimeout(() => setShowCopySuccessForOrder(null), 2000);
-                                  }).catch((err) => {
-                                    console.error('复制失败:', err);
-                                  });
-                                }
-                              }}
-                              className="hover:bg-white/10 rounded p-1 transition-colors cursor-pointer"
-                              title="复制订单号"
-                            >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                              </svg>
-                            </button>
-                            {/* 删除按钮 */}
-                            <button
-                              onClick={(e) => deleteTask(task.orderId!, e)}
-                              disabled={deletingOrder === task.orderId}
-                              className={`hover:bg-red-500/20 rounded p-1 transition-colors cursor-pointer ${
-                                deletingOrder === task.orderId ? 'opacity-50 cursor-not-allowed' : ''
-                              }`}
-                              title="删除记录"
-                            >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                            </button>
-                          </div>
-                          {task.duration && (
-                            <div className="flex items-center gap-2">
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                              </svg>
-                              <span>{task.duration.toFixed(1)}秒</span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* 生成结果图片 - 统一处理 */}
-                        {(task.imageUrl) ? (
-                          <div className="mt-2">
-                            {/* 图片数量标签 */}
-                            {Array.isArray(task.imageUrl) && task.imageUrl.length > 1 && (
-                              <div className="text-xs text-purple-400 mb-1 flex items-center gap-1">
-                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                </svg>
-                                <span>生成{task.imageUrl.length}张图片</span>
-                              </div>
-                            )}
-                            {Array.isArray(task.imageUrl) && task.imageUrl.length > 0 ? (
-                              // 多张图片：水平排列
-                              <div className="flex gap-2">
-                                {task.imageUrl.map((imageUrl, index) => (
-                                  <img
-                                    key={index}
-                                    src={imageUrl}
-                                    alt={`生成结果 ${index + 1}`}
-                                    className="object-cover rounded-lg cursor-pointer hover:opacity-80 transition-opacity flex-1 min-w-0"
-                                    style={{ maxHeight: '80px' }}
-                                    onClick={() => setPreviewImageUrl(imageUrl)}
-                                  />
-                                ))}
-                              </div>
-                            ) : (
-                              // 单张图片：正常显示
-                              <ImageThumbnail
-                                src={typeof task.imageUrl === 'string' ? task.imageUrl : task.imageUrl![0]}
-                                alt="生成结果"
-                                width={200}
-                                height={80}
-                                thumbnailSize="small"
-                                className="w-full h-20 object-cover rounded-lg cursor-pointer hover:opacity-80 transition-opacity"
-                                onClick={() => {
-                                  const imageToShow = typeof task.imageUrl === 'string' ? task.imageUrl : task.imageUrl![0];
-                                  setPreviewImageUrl(imageToShow || null);
-                                }}
-                              />
-                            )}
-                          </div>
-                        ) : null}
-
-                        {/* 操作按钮 - 图片加载完成后显示 */}
-                        {task.imageUrl && (
-                          <div className="mt-3 flex gap-2">
-                            <button
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                const imagesToDownload = Array.isArray(task.imageUrl) ? task.imageUrl : [task.imageUrl];
-
-                                if (imagesToDownload.length === 0) {
-                                  showToast('没有可下载的图片', 'error');
-                                  return;
-                                }
-
-                                try {
-                                  showToast('正在下载图片...', 'info');
-
-                                  // 批量下载（间隔200ms）
-                                  for (let i = 0; i < imagesToDownload.length; i++) {
-                                    const url = imagesToDownload[i];
-                                    if (typeof url !== 'string' || !url.startsWith('http')) {
-                                      continue;
-                                    }
-                                    await new Promise(resolve => setTimeout(resolve, i * 200));
-                                    const response = await fetch(url);
-                                    const blob = await response.blob();
-                                    const blobUrl = window.URL.createObjectURL(blob);
-                                    const link = document.createElement('a');
-                                    link.href = blobUrl;
-                                    link.download = `image-${task.orderId}-${i + 1}.png`;
-                                    link.click();
-                                    window.URL.revokeObjectURL(blobUrl);
-                                  }
-
-                                  showToast('图片下载成功', 'success');
-                                } catch (error) {
-                                  console.error('下载图片失败:', error);
-                                  showToast('下载失败，请重试', 'error');
-                                }
-                              }}
-                              className="flex-1 py-1.5 px-2 bg-white/10 hover:bg-white/20 rounded-lg text-white/80 text-xs transition-colors flex items-center justify-center gap-1"
-                            >
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                              </svg>
-                              高清下载
-                            </button>
-                            {/* 彩绘提取订单显示下载PSD按钮 */}
-                            {task.tab === 'color-extraction' && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-
-                                  if (!task.psdUrl) {
-                                    showToast('PSD文件尚未生成完成', 'error');
-                                    return;
-                                  }
-
-                                  if (typeof task.psdUrl !== 'string' || !task.psdUrl.startsWith('http')) {
-                                    showToast('PSD链接无效', 'error');
-                                    return;
-                                  }
-
-                                  // 直接在新标签页打开PSD链接，避免CORS跨域问题
-                                  window.open(task.psdUrl, '_blank');
-                                  showToast('已在新标签页打开下载链接', 'info');
-                                }}
-                                disabled={!task.psdUrl}
-                                className={`
-                                  flex-1 py-1.5 px-2 rounded-lg text-xs transition-colors flex items-center justify-center gap-1
-                                  ${!task.psdUrl
-                                    ? 'bg-white/10 text-white/40 cursor-not-allowed'
-                                    : 'bg-[#001e36] text-[#31a8ff] hover:bg-[#001e36]/80'
-                                  }
-                                `}
-                                title={!task.psdUrl ? 'PSD文件尚未生成' : '下载PSD文件'}
-                              >
-                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                </svg>
-                                {!task.psdUrl ? '暂无PSD' : '下载PSD'}
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+            <div className="max-h-[680px] overflow-y-auto px-3 py-3 history-scrollbar">
+              {visibleTasks.length === 0 ? (
+                <div className="rounded-2xl border border-white/8 bg-white/[0.035] px-5 py-10 text-center">
+                  <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-white/8 text-white/36">
+                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
                   </div>
-                ));
-              })()}
+                  <p className="text-sm text-white/56">暂无匹配任务</p>
+                  <p className="mt-1 text-xs text-white/32">提交图片处理后会自动出现在这里</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {groupedVisibleTasks.map((group) => (
+                    <section key={group.label} className="space-y-2">
+                      <div className="flex items-center gap-2 px-1 text-xs font-medium text-white/38">
+                        <span>{group.label}</span>
+                        <span className="h-px flex-1 bg-white/8" />
+                      </div>
+                      {group.tasks.map((task) => {
+                        const inputImage = getFirstImage(task.uploadedImage);
+                        const resultImage = getFirstImage(task.imageUrl);
+                        const hasResult = isImageValue(resultImage);
+                        const isProcessing = task.status === '处理中';
+                        const statusLabel = getTaskStatusLabel(task);
+
+                        return (
+                          <div
+                            key={task.id}
+                            ref={(node) => {
+                              taskCardRefs.current[task.id] = node;
+                            }}
+                            onClick={() => onTaskClick?.(task)}
+                            className={`group rounded-2xl border p-3 transition-all ${task.tab === activeTab ? 'border-white/22 bg-white/[0.075]' : 'border-white/10 bg-white/[0.045] hover:border-white/18 hover:bg-white/[0.065]'} ${highlightTaskId === task.id ? 'ring-2 ring-purple-300/70 shadow-[0_0_0_1px_rgba(196,181,253,0.26),0_0_32px_rgba(139,92,246,0.24)]' : ''}`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/8 text-purple-200">
+                                  {getTabIcon(task.tab)}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <h4 className="truncate text-sm font-medium text-white">{task.tabName}</h4>
+                                    <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${getStatusClasses(task.status)}`}>{statusLabel}</span>
+                                  </div>
+                                  <div className="mt-1 flex items-center gap-2 text-[11px] text-white/38">
+                                    <span>{formatTime(task.time)}</span>
+                                    <span>订单#{getOrderSuffix(task.orderId)}</span>
+                                    {task.duration && <span>{task.duration.toFixed(1)}秒</span>}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1 text-white/35">
+                                <button type="button" onClick={(e) => copyOrderId(task, e)} className="rounded-lg p-1.5 transition-colors hover:bg-white/10 hover:text-white" title="复制订单号">
+                                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                  </svg>
+                                </button>
+                                <button type="button" onClick={(e) => task.orderId && void deleteTask(task.orderId, e)} disabled={!task.orderId || deletingOrder === task.orderId} className="rounded-lg p-1.5 transition-colors hover:bg-red-500/15 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-40" title="删除记录">
+                                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                              <div className="overflow-hidden rounded-xl border border-white/8 bg-black/30">
+                                {isImageValue(inputImage) ? (
+                                  <ImageThumbnail src={inputImage} alt="原图" width={120} height={82} thumbnailSize="small" className="h-[82px] w-full object-cover" />
+                                ) : (
+                                  <div className="flex h-[82px] items-center justify-center text-xs text-white/28">原图</div>
+                                )}
+                              </div>
+                              <div className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-white/35">
+                                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                </svg>
+                              </div>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); if (hasResult) setPreviewImageUrl(resultImage); }} className="overflow-hidden rounded-xl border border-white/8 bg-black/30 text-left">
+                                {hasResult ? (
+                                  <ImageThumbnail src={resultImage} alt="结果图" width={120} height={82} thumbnailSize="small" className="h-[82px] w-full object-cover transition-opacity hover:opacity-80" />
+                                ) : (
+                                  <div className="relative flex h-[82px] items-center justify-center text-xs text-white/32">
+                                    {isProcessing && <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/[0.07] to-transparent animate-pulse" />}
+                                    <span>{isProcessing ? '结果生成中' : '暂无结果'}</span>
+                                  </div>
+                                )}
+                              </button>
+                            </div>
+
+                            <div className="mt-3 rounded-xl border border-white/8 bg-black/18 px-3 py-2">
+                              <div className="flex items-center gap-2 text-xs text-white/58">
+                                {isProcessing && <span className="h-2 w-2 rounded-full bg-blue-400 shadow-[0_0_12px_rgba(96,165,250,0.8)] animate-pulse" />}
+                                <span>{getTaskProgressText(task)}</span>
+                              </div>
+                              {isProcessing && (
+                                <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/8">
+                                  <div className="h-full w-2/3 rounded-full bg-gradient-to-r from-blue-500 via-purple-400 to-blue-500 animate-pulse" />
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="mt-3 flex gap-2">
+                              <button type="button" onClick={(e) => { e.stopPropagation(); openTaskResult(task); }} disabled={!hasResult} className="flex-1 rounded-xl bg-white/8 px-3 py-2 text-xs text-white/72 transition-colors hover:bg-white/14 disabled:cursor-not-allowed disabled:opacity-40">
+                                查看结果
+                              </button>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); void downloadTaskImages(task); }} disabled={!hasResult} className="flex-1 rounded-xl bg-white/8 px-3 py-2 text-xs text-white/72 transition-colors hover:bg-white/14 disabled:cursor-not-allowed disabled:opacity-40">
+                                下载
+                              </button>
+                              {task.tab === 'color-extraction' && (
+                                <button type="button" onClick={(e) => { e.stopPropagation(); openPsdUrl(task); }} disabled={!task.psdUrl} className="rounded-xl bg-[#001e36] px-3 py-2 text-xs text-[#31a8ff] transition-colors hover:bg-[#001e36]/80 disabled:cursor-not-allowed disabled:opacity-40">
+                                  PSD
+                                </button>
+                              )}
+                              {(task.status === '失败' || task.status === '超时') && (
+                                <button type="button" onClick={(e) => { e.stopPropagation(); showToast('请回到对应工具重新提交该任务', 'info'); }} className="rounded-xl bg-red-500/14 px-3 py-2 text-xs text-red-200 transition-colors hover:bg-red-500/22">
+                                  重试
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </section>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* 底部操作 */}
             {tasks.length > 0 && (
-              <div className="p-3 border-t border-white/10 flex gap-2">
+              <div className="flex gap-2 border-t border-white/10 p-3">
                 <button
                   onClick={() => void loadTasks(userId)}
-                  className="flex-1 py-2 px-4 bg-white/10 hover:bg-white/20 text-white/80 text-sm rounded-xl transition-colors flex items-center justify-center gap-1"
+                  className="flex-1 rounded-xl bg-white/8 px-4 py-2 text-sm text-white/75 transition-colors hover:bg-white/14"
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  刷新
+                  刷新任务
                 </button>
                 <button
                   onClick={clearHistory}
-                  className="flex-1 py-2 px-4 bg-red-500/20 hover:bg-red-500/30 text-red-400 text-sm rounded-xl transition-colors"
+                  className="rounded-xl bg-red-500/14 px-4 py-2 text-sm text-red-200 transition-colors hover:bg-red-500/22"
                 >
-                  清空{filterTab === 'all' ? '' : getFilterLabel(filterTab)}
+                  清空
                 </button>
               </div>
             )}
