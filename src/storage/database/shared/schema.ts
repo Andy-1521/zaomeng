@@ -117,10 +117,30 @@ export const capturedImages = mysqlTable(
     pageTitle: text("page_title"),
     sourceHost: varchar("source_host", { length: 255 }),
     imageType: varchar("image_type", { length: 20 }).default("main").notNull(),
+    folderId: varchar("folder_id", { length: 36 }),
+    isFavorite: boolean("is_favorite").default(false).notNull(),
     createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("captured_images_user_created_idx").on(table.userId, table.createdAt),
+    index("captured_images_user_folder_idx").on(table.userId, table.folderId),
+    index("captured_images_user_favorite_idx").on(table.userId, table.isFavorite),
+  ]
+);
+
+export const materialFolders = mysqlTable(
+  "material_folders",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().notNull(),
+    userId: varchar("user_id", { length: 36 }).notNull(),
+    name: varchar("name", { length: 80 }).notNull(),
+    sortOrder: int("sort_order").default(0).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" }),
+  },
+  (table) => [
+    index("material_folders_user_idx").on(table.userId),
+    uniqueIndex("material_folders_user_name_unique").on(table.userId, table.name),
   ]
 );
 
@@ -158,6 +178,14 @@ export const insertCapturedImageSchema = createCoercedInsertSchema(capturedImage
   pageTitle: true,
   sourceHost: true,
   imageType: true,
+  folderId: true,
+  isFavorite: true,
+});
+
+export const insertMaterialFolderSchema = createCoercedInsertSchema(materialFolders).pick({
+  userId: true,
+  name: true,
+  sortOrder: true,
 });
 
 export type User = typeof users.$inferSelect;
@@ -169,3 +197,5 @@ export type ChatMessage = typeof chatMessages.$inferSelect;
 export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;
 export type CapturedImage = typeof capturedImages.$inferSelect;
 export type InsertCapturedImage = z.infer<typeof insertCapturedImageSchema>;
+export type MaterialFolder = typeof materialFolders.$inferSelect;
+export type InsertMaterialFolder = z.infer<typeof insertMaterialFolderSchema>;

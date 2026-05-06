@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'fs/promises';
 import path from 'path';
 import { capturedImageManager, userManager } from '@/storage/database';
 import { uploadToCozeStorage } from '@/lib/dualStorage';
+import { normalizeFileExtension } from '@/lib/localUploadStorage';
 
 type CaptureImageRequest = {
   imageUrl?: string;
@@ -11,6 +12,7 @@ type CaptureImageRequest = {
   sourceHost?: string;
   capturedAt?: number;
   imageType?: 'main' | 'detail';
+  captureMethod?: string;
 };
 
 function getErrorMessage(error: unknown) {
@@ -37,7 +39,7 @@ function getImageExtension(imageUrl: string) {
     const pathname = new URL(imageUrl).pathname;
     const matched = pathname.match(/\.([a-zA-Z0-9]+)$/);
     if (!matched) return 'jpg';
-    return matched[1].toLowerCase();
+    return normalizeFileExtension(matched[1]);
   } catch {
     return 'jpg';
   }
@@ -60,11 +62,22 @@ function getContentType(extension: string) {
   }
 }
 
-async function downloadImageBuffer(imageUrl: string): Promise<Buffer> {
+function getExtensionFromContentType(contentType: string, fallback: string) {
+  const normalized = contentType.toLowerCase();
+  if (normalized.includes('image/png')) return 'png';
+  if (normalized.includes('image/webp')) return 'webp';
+  if (normalized.includes('image/gif')) return 'gif';
+  if (normalized.includes('image/bmp')) return 'bmp';
+  if (normalized.includes('image/jpeg') || normalized.includes('image/jpg')) return 'jpg';
+  return fallback;
+}
+
+async function downloadImageBuffer(imageUrl: string, pageUrl: string): Promise<{ buffer: Buffer; contentType: string; extension: string }> {
   const response = await fetch(imageUrl, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      Referer: imageUrl,
+      Referer: pageUrl || imageUrl,
+      Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
     },
   });
 
@@ -72,8 +85,26 @@ async function downloadImageBuffer(imageUrl: string): Promise<Buffer> {
     throw new Error(`无法下载图片资源 (${response.status})`);
   }
 
+  const responseContentType = response.headers.get('content-type') || '';
+  if (!responseContentType.toLowerCase().startsWith('image/')) {
+    throw new Error(`当前资源不是图片，无法保存 (${responseContentType || 'unknown'})`);
+  }
+
   const arrayBuffer = await response.arrayBuffer();
-  return Buffer.from(arrayBuffer);
+  const fallbackExtension = getImageExtension(imageUrl);
+  const extension = getExtensionFromContentType(responseContentType, fallbackExtension);
+  return {
+    buffer: Buffer.from(arrayBuffer),
+    contentType: getContentType(extension),
+    extension,
+  };
+}
+
+function normalizeLocalMaterialUrl(url: string) {
+  if (url.startsWith('/plugin-capture/') || url.startsWith('/material-editor/')) {
+    return `/api/material-file${url}`;
+  }
+  return url;
 }
 
 async function saveToLocalPublic(buffer: Buffer, fileName: string) {
@@ -120,10 +151,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const extension = getImageExtension(imageUrl);
-    const contentType = getContentType(extension);
+    const downloadedImage = await downloadImageBuffer(imageUrl, pageUrl);
+    const { buffer: imageBuffer, contentType, extension } = downloadedImage;
     const fileName = `plugin-capture/${userId}/${Date.now()}-${Math.floor(Math.random() * 10000)}-${imageType}.${extension}`;
-    const imageBuffer = await downloadImageBuffer(imageUrl);
     let uploadedUrl = ''
 
     try {
@@ -132,7 +162,7 @@ export async function POST(request: NextRequest) {
       console.warn('[插件采集] 对象存储上传失败，回退到本地 public 存储:', error)
       const localFileName = `plugin-capture/${userId}/${Date.now()}-${Math.floor(Math.random() * 10000)}-${imageType}.${extension}`
       const localPath = await saveToLocalPublic(imageBuffer, localFileName)
-      uploadedUrl = localPath
+      uploadedUrl = normalizeLocalMaterialUrl(localPath)
     }
 
     console.log('[插件采集] 采集成功:', {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { normalizeFileExtension, normalizeFolder, saveBufferToLocalMaterialFile } from '@/lib/localUploadStorage';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '图片上传失败';
@@ -14,6 +15,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { imageData, folder = 'color-extraction' } = body;
+    const normalizedFolder = normalizeFolder(folder);
 
     // 参数验证
     if (!imageData) {
@@ -39,8 +41,8 @@ export async function POST(request: NextRequest) {
     // 生成文件名
     const timestamp = Date.now();
     const random = Math.floor(Math.random() * 10000);
-    const extension = mimeType.split('/')[1] || 'jpg';
-    const fileName = `${folder}/${timestamp}_${random}.${extension}`;
+    const extension = normalizeFileExtension(mimeType.split('/')[1] || 'jpg');
+    const fileName = `${normalizedFolder}/${timestamp}_${random}.${extension}`;
 
     // 使用Coze对象存储上传（1年有效期）
     try {
@@ -78,14 +80,16 @@ export async function POST(request: NextRequest) {
         },
       });
     } catch (cozeError) {
-      console.error('[图片上传] Coze对象存储上传失败:', cozeError);
-      return NextResponse.json(
-        {
-          success: false,
-          message: '图片上传失败：Coze对象存储不可用',
+      console.warn('[图片上传] Coze对象存储上传失败，回退到本地 public 存储:', cozeError);
+      const localUrl = await saveBufferToLocalMaterialFile(buffer, fileName);
+      return NextResponse.json({
+        success: true,
+        data: {
+          key: fileName,
+          url: localUrl,
+          storage: 'local',
         },
-        { status: 500 }
-      );
+      });
     }
 
   } catch (error: unknown) {

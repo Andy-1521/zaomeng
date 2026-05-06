@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
+import { showToast } from '@/lib/toast';
 
 // 使用种子生成一致的随机值
 function seededRandom(seed: number) {
@@ -32,7 +33,9 @@ export default function AuthPage() {
 
   // 确保只在客户端渲染粒子效果
   useEffect(() => {
-    setIsClient(true);
+    queueMicrotask(() => {
+      setIsClient(true);
+    });
   }, []);
 
   // 生成一致的粒子样式，避免 hydration 错误
@@ -97,16 +100,17 @@ export default function AuthPage() {
       const result = await response.json();
 
       if (result.success) {
-        alert('验证码已发送');
+        showToast('验证码已发送，请查看邮箱', 'success');
       } else {
-        alert(result.message || '发送失败');
+        showToast(result.message || '验证码发送失败', 'error');
         setCountdown(0);
       }
     } catch (error) {
       console.error('发送验证码失败:', error);
       // 开发模式下使用模拟验证码
       console.log('开发模式：验证码为 123456');
-      alert('开发模式：验证码为 123456');
+      showToast('验证码发送失败，请稍后重试', 'error');
+      setCountdown(0);
     }
 
     const timer = setInterval(() => {
@@ -172,15 +176,17 @@ export default function AuthPage() {
 
       if (result.success) {
         localStorage.setItem('user', JSON.stringify(result.data));
-        alert(`注册成功！欢迎${result.data.username}，您已获得 ${result.data.points} 积分！`);
+        showToast(`注册成功，已获得 ${result.data.points} 积分`, 'success');
         // 注册成功后跳转到首页
-        window.location.href = '/home';
+        window.setTimeout(() => {
+          window.location.href = '/home';
+        }, 500);
       } else {
-        alert(result.message || '注册失败');
+        showToast(result.message || '注册失败', 'error');
       }
     } catch (error) {
       console.error('注册失败:', error);
-      alert('注册失败，请稍后重试');
+      showToast('注册失败，请稍后重试', 'error');
     }
   };
 
@@ -201,15 +207,17 @@ export default function AuthPage() {
 
       if (result.success) {
         localStorage.setItem('user', JSON.stringify(result.data));
-        alert(`登录成功！欢迎回来，${result.data.username}`);
+        showToast(`登录成功，欢迎回来，${result.data.username}`, 'success');
         // 登录成功后跳转到首页
-        window.location.href = '/home';
+        window.setTimeout(() => {
+          window.location.href = '/home';
+        }, 500);
       } else {
-        alert(result.message || '登录失败');
+        showToast(result.message || '登录失败', 'error');
       }
     } catch (error) {
       console.error('登录失败:', error);
-      alert('登录失败，请稍后重试');
+      showToast('登录失败，请稍后重试', 'error');
     }
   };
 
@@ -230,15 +238,15 @@ export default function AuthPage() {
       const result = await response.json();
 
       if (result.success) {
-        alert('密码重置成功，请使用新密码登录');
+        showToast('密码重置成功，请使用新密码登录', 'success');
         setMode('login');
         setFormData({ email: '', username: '', password: '', confirmPassword: '', verifyCode: '', newPassword: '' });
       } else {
-        alert(result.message || '密码重置失败');
+        showToast(result.message || '密码重置失败', 'error');
       }
     } catch (error) {
       console.error('密码重置失败:', error);
-      alert('密码重置失败，请稍后重试');
+      showToast('密码重置失败，请稍后重试', 'error');
     }
   };
 
@@ -368,7 +376,7 @@ export default function AuthPage() {
               </div>
             </div>
             <h1 className="text-3xl font-bold text-white mb-2 bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
-              造梦Ai
+              造梦AI
             </h1>
             <p className="text-neutral-400 text-sm">
               {mode === 'login' ? '欢迎回来，继续创作' : mode === 'register' ? '开启你的AI创作之旅' : '重置密码'}

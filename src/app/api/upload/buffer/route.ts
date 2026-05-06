@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { normalizeFileExtension, normalizeFolder, saveBufferToLocalMaterialFile } from '@/lib/localUploadStorage';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '文件上传失败';
@@ -21,7 +22,7 @@ export async function POST(request: NextRequest) {
     const bufferData = formData.get('buffer') as string; // Base64编码的Buffer
     const fileName = (formData.get('fileName') as string) || 'result.png';
     const contentType = (formData.get('contentType') as string) || 'image/png';
-    const folder = (formData.get('folder') as string) || 'grsai';
+    const folder = normalizeFolder((formData.get('folder') as string) || 'grsai');
 
     // 参数验证
     if (!bufferData) {
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest) {
     // 生成文件路径
     const timestamp = Date.now();
     const random = Math.floor(Math.random() * 10000);
-    const extension = fileName.split('.').pop() || 'png';
+    const extension = normalizeFileExtension(fileName.split('.').pop() || 'png');
     const filePath = `${folder}/${timestamp}_${random}.${extension}`;
 
     // 使用Coze对象存储上传（1年有效期）
@@ -78,14 +79,16 @@ export async function POST(request: NextRequest) {
         },
       });
     } catch (cozeError) {
-      console.error('[Buffer上传] Coze对象存储上传失败:', cozeError);
-      return NextResponse.json(
-        {
-          success: false,
-          message: '文件上传失败：Coze对象存储不可用',
+      console.warn('[Buffer上传] Coze对象存储上传失败，回退到本地 public 存储:', cozeError);
+      const localUrl = await saveBufferToLocalMaterialFile(buffer, filePath);
+      return NextResponse.json({
+        success: true,
+        data: {
+          key: filePath,
+          url: localUrl,
+          storage: 'local',
         },
-        { status: 500 }
-      );
+      });
     }
 
   } catch (error: unknown) {

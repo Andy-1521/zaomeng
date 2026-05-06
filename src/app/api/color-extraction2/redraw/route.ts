@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { transactionManager, userManager } from '@/storage/database';
-import { S3Storage } from 'coze-coding-dev-sdk';
+import { getCozeStorage } from '@/lib/cozeStorage';
 import {
   createTask,
   waitForTaskComplete,
@@ -12,15 +12,6 @@ import { uploadFromUrlToCozeStorage } from '@/lib/dualStorage';
 // Coze工作流API配置（局部重绘）
 const REDRAW_WORKFLOW_URL = 'https://frzr6k4qcc.coze.site/run';
 const REDRAW_WORKFLOW_TOKEN = 'eyJhbGciOiJSUzI1NiIsImtpZCI6IjlkOGYxNGZiLTM3M2MtNDRjMS1hZTJjLTcxMmRkMDk3OWFiYyJ9.eyJpc3MiOiJodHRwczovL2FwaS5jb3plLmNuIiwiYXVkIjpbIjE0Sm9lYVpCZkJmaXEzUHRQbWQ5QUlIMm5wbDJSV3RmIl0sImV4cCI6ODIxMDI2Njg3Njc5OSwiaWF0IjoxNzc2MjU5NzQ0LCJzdWIiOiJzcGlmZmU6Ly9hcGkuY296ZS5jbi93b3JrbG9hZF9pZGVudGl0eS9pZDo3NjI4OTE4NjY5NzgyODEwNjcwIiwic3JjIjoiaW5ib3VuZF9hdXRoX2FjY2Vzc190b2tlbl9pZDo3NjI4OTc3NTEzNzcwNzc4NjYwIn0.s5Y1qtl40GwKdVIkFEmYVyc_cpbzem4i1rxpHOfQQUpoeITkCZxSUIT-wz4l1GFBpVHWF4E5ktwZkkfddCt3Ft3cNJfXUql7SL5oZJyVYS0qkkp6gGnhvIykUaQnYrPB9XmOPeQsQumY8GmXLOixx1AQM5wxzlFjYlwibCAndLB-4O2Y4NEsJ571dBiF9cyF2eROVeNBXyhBLA7y9q_tXkAP2cukEDjfdhBTYDrILRMWz53zlVbKD0SYhDUM7xgDJYys3xPkv-VqjHLDrqt7drTyhoJ0GBvRpK_LnX-206KJScSHDQ27eWBuiykaEk3O2U2HrMV33Zrm_9daRClAdA';
-
-// 初始化Coze对象存储（用于PSD文件上传）
-const cozeStorage = new S3Storage({
-  endpointUrl: process.env.COZE_BUCKET_ENDPOINT_URL,
-  accessKey: process.env.COZE_ACCESS_KEY,
-  secretKey: process.env.COZE_SECRET_KEY,
-  bucketName: process.env.COZE_BUCKET_NAME,
-  region: 'cn-beijing',
-});
 
 // 超时配置
 const FETCH_TIMEOUT = 600000; // 10分钟
@@ -65,6 +56,7 @@ async function processRunningHubLayeringAndPsd(extractionImageUrl: string, order
   console.log(`[局部重绘-PSD] 订单号: ${orderId}`);
 
   try {
+    const cozeStorage = getCozeStorage();
     // 步骤1: 下载提取图片并上传到对象存储
     console.log(`[局部重绘-PSD] 步骤1: 下载图片并上传到对象存储`);
     const uploadedImageUrl = await uploadImageToStorage(extractionImageUrl, orderId);
@@ -134,6 +126,7 @@ async function processRunningHubLayeringAndPsd(extractionImageUrl: string, order
 
 export async function POST(request: NextRequest) {
   try {
+    const cozeStorage = getCozeStorage();
     const body = await request.json();
     const { userId, originalImageUrl, maskImageBase64, prompt, description } = body;
 

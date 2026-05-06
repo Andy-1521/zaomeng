@@ -9,6 +9,11 @@
   chrome.runtime.onMessage.addListener((message) => {
     if (message?.type === 'ZAOMENG_CAPTURE_IMAGE') {
       postToPage('ZAOMENG_CAPTURE_IMAGE', message.payload)
+      return
+    }
+
+    if (message?.type === 'ZAOMENG_CAPTURE_IMAGE_SAVED') {
+      postToPage('ZAOMENG_CAPTURE_IMAGE_SAVED', message.payload)
     }
   })
 

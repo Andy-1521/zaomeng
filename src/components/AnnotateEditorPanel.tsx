@@ -1,11 +1,12 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
+import { showToast } from '@/lib/toast';
 
 type Props = {
   imageUrl: string;
   onClose: () => void;
-  onComplete: (resultUrl: string) => void;
+  onComplete: (resultUrl: string) => void | Promise<void>;
 };
 
 export default function AnnotateEditorPanel({ imageUrl, onClose, onComplete }: Props) {
@@ -66,44 +67,39 @@ export default function AnnotateEditorPanel({ imageUrl, onClose, onComplete }: P
     const image = imageRef.current;
     const canvas = canvasRef.current;
     if (!image || !canvas || !image.naturalWidth || !image.naturalHeight) {
+      showToast('图片还没有加载完成，请稍后再试', 'error');
       return;
     }
 
     setIsExporting(true);
 
     try {
-      const exportCanvas = document.createElement('canvas');
-      exportCanvas.width = image.naturalWidth;
-      exportCanvas.height = image.naturalHeight;
-      const ctx = exportCanvas.getContext('2d');
-      if (!ctx) {
-        throw new Error('无法创建导出画布');
-      }
-
-      ctx.drawImage(image, 0, 0, exportCanvas.width, exportCanvas.height);
-      ctx.drawImage(canvas, 0, 0, exportCanvas.width, exportCanvas.height);
-
-      const dataUrl = exportCanvas.toDataURL('image/png');
-      const response = await fetch('/api/upload/image', {
+      const annotationData = canvas.toDataURL('image/png');
+      const response = await fetch('/api/material-editor', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          imageData: dataUrl,
-          folder: 'material-annotate',
+          action: 'annotate',
+          imageUrl,
+          annotationData,
         }),
       });
 
       const data = await response.json();
       if (!response.ok || !data.success || !data.data?.url) {
-        throw new Error(data.message || '标注结果上传失败');
+        throw new Error(data.message || '标注结果生成失败');
       }
 
-      onComplete(data.data.url);
+      await onComplete(data.data.url);
       onClose();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '标注结果生成失败';
+      showToast(message, 'error');
     } finally {
       setIsExporting(false);
     }
-  }, [onClose, onComplete]);
+  }, [imageUrl, onClose, onComplete]);
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/65 backdrop-blur-sm px-4">

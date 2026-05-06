@@ -361,93 +361,65 @@ export default function ColorExtraction2Page() {
         orderId: tempOrderId,
       };
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 300000);
-
-      let response: Response;
-      try {
-        response = await fetch('/api/color-extraction2/workflow', {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-          signal: controller.signal,
-        });
-      } catch (error) {
-        clearTimeout(timeoutId);
-        if (error instanceof Error && error.name === 'AbortError') {
-          throw new Error('处理时间过长，请稍后在历史记录中查看结果');
-        }
-        throw error;
-      }
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        let errorMessage = `请求失败 (${response.status} ${response.statusText})`;
-        try {
-          const responseText = await response.text();
+      void fetch('/api/color-extraction2/workflow', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      }).then(async (response) => {
+        if (!response.ok) {
+          let errorMessage = `请求失败 (${response.status} ${response.statusText})`;
           try {
-            const errorData = JSON.parse(responseText) as { message?: string; debug?: { error?: string } };
-            errorMessage = errorData.message || errorData.debug?.error || errorMessage;
-          } catch {
-            if (responseText && responseText.length < 200) {
-              errorMessage = responseText;
+            const responseText = await response.text();
+            try {
+              const errorData = JSON.parse(responseText) as { message?: string; debug?: { error?: string } };
+              errorMessage = errorData.message || errorData.debug?.error || errorMessage;
+            } catch {
+              if (responseText && responseText.length < 200) {
+                errorMessage = responseText;
+              }
             }
+          } catch (error) {
+            console.error('[彩绘提取2] 读取响应失败:', error);
           }
-        } catch (error) {
-          console.error('[彩绘提取2] 读取响应失败:', error);
+          throw new Error(errorMessage);
         }
 
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json() as {
-        success?: boolean;
-        message?: string;
-        data?: {
-          imageUrl?: string;
-          remainingPoints?: number;
+        const data = await response.json() as {
+          success?: boolean;
+          message?: string;
+          data?: {
+            imageUrl?: string;
+            remainingPoints?: number;
+          };
         };
-      };
 
-      if (!data.success) {
-        throw new Error(data.message || '生成失败');
-      }
+        if (!data.success) {
+          throw new Error(data.message || '生成失败');
+        }
 
-      const imageResultUrl = data.data?.imageUrl || null;
-      if (data.data?.remainingPoints !== undefined) {
-        setPoints(data.data.remainingPoints);
-      }
+        window.dispatchEvent(new Event('taskHistoryUpdated'));
+        setTimeout(() => {
+          void loadOrders(false);
+        }, 1000);
+      }).catch((error: unknown) => {
+        console.error('[彩绘提取2] 异步处理失败:', error);
+        const message = error instanceof Error ? error.message : '生成失败，请稍后重试';
+        setOrders((prevOrders) =>
+          prevOrders.map((order) =>
+            order.orderNumber === tempOrderId
+              ? { ...order, status: '失败' }
+              : order
+          )
+        );
+        showToast(message, 'error');
+        window.dispatchEvent(new Event('taskHistoryUpdated'));
+      });
 
-      const duration = (Date.now() - startTime) / 1000;
-      setOrders((prevOrders) =>
-        prevOrders.map((order) =>
-          order.orderNumber === tempOrderId
-            ? {
-                ...order,
-                status: '成功',
-                resultData: imageResultUrl,
-                remainingPoints: data.data?.remainingPoints ?? order.remainingPoints,
-              }
-            : order
-        )
-      );
-
-      showToast(`彩绘提取成功！耗时 ${duration.toFixed(1)} 秒`, 'success');
-
-      if (imageResultUrl && isValidImageUrl(imageResultUrl)) {
-        setPreviewImageUrl(imageResultUrl);
-      }
-
-      setTimeout(() => {
-        void loadOrders(false);
-      }, 5000);
-
-      showPointsToast(`剩余积分 ${data.data?.remainingPoints ?? user.points}`);
-      return imageResultUrl;
+      showToast('彩绘提取任务已提交，结果会自动刷新', 'info');
+      return null;
     } catch (error) {
       console.error('[彩绘提取2] 生图失败:', error);
       const message = error instanceof Error ? error.message : '生成失败，请稍后重试';
@@ -835,6 +807,19 @@ export default function ColorExtraction2Page() {
       });
     }
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const hasProcessingOrder = orders.some((order) => order.status === '处理中');
+    if (!hasProcessingOrder) return;
+
+    const intervalId = window.setInterval(() => {
+      void loadOrders(false);
+    }, 4000);
+
+    return () => window.clearInterval(intervalId);
+  }, [orders, user?.id]);
 
   return (
     <div className="flex-1 px-6 py-4 overflow-y-auto">

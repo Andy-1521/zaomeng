@@ -42,12 +42,12 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
   }, []);
 
   return (
-    <nav className="bg-black backdrop-blur-md px-6 py-4">
-      <div className="max-w-7xl mx-auto flex items-center justify-between">
+    <nav className="sticky top-0 z-40 border-b border-white/[0.08] bg-black/72 px-6 py-3 backdrop-blur-2xl shadow-[0_12px_32px_rgba(0,0,0,0.22)]">
+      <div className="max-w-[92vw] 2xl:max-w-[1780px] mx-auto flex items-center justify-between">
         {/* Logo - 点击回到首页 */}
         <button
           onClick={handleLogoClick}
-          className="flex items-center gap-2 group"
+          className="flex items-center gap-2.5 group rounded-full px-2 py-1 transition-colors hover:bg-white/[0.04]"
         >
           <img
             src="/assets/32.png"
@@ -55,15 +55,15 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
             className="w-8 h-8 rounded-lg object-cover border border-purple-500/30"
           />
           <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent group-hover:from-purple-300 group-hover:to-blue-300 transition-all">
-            造梦Ai
+            造梦AI
           </h1>
         </button>
 
         {/* 右侧用户菜单 */}
         {showUserMenu && user && (
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <div className="relative group">
-              <div className={`px-3 py-1 rounded-full border text-xs flex items-center gap-2 ${pluginReady ? 'bg-green-500/15 border-green-500/30 text-green-300' : 'bg-white/10 border-white/20 text-white/60'}`}>
+              <div className={`px-3 py-1.5 rounded-full border text-xs flex items-center gap-2 ${pluginReady ? 'bg-green-500/15 border-green-500/30 text-green-300' : 'bg-white/[0.055] border-white/10 text-white/58'}`}>
                 <span className={`w-2 h-2 rounded-full ${pluginReady ? 'bg-green-400' : 'bg-white/40'}`}></span>
                 插件{pluginReady ? '已连接' : '未连接'}
               </div>
@@ -82,7 +82,7 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
             {/* 用户头像和用户名 */}
             <button
               onClick={() => router.push('/profile')}
-              className="flex items-center gap-3 bg-white/10 backdrop-blur-md rounded-full pl-1 pr-4 py-1 border border-white/20 hover:bg-white/20 transition-all"
+              className="flex items-center gap-3 rounded-full border border-white/10 bg-white/[0.06] py-1 pl-1 pr-4 backdrop-blur-md transition-all hover:border-white/18 hover:bg-white/[0.12]"
             >
               <img
                 src={user.avatar || '/images/avatar.png'}
@@ -93,15 +93,20 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
             </button>
 
             {/* 积分显示 */}
-            <div className="bg-yellow-600/20 px-3 py-1 rounded-full border border-yellow-500/30 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => router.push('/profile')}
+              className="flex items-center gap-1.5 rounded-full border border-yellow-500/25 bg-yellow-500/12 px-3 py-1.5 transition-colors hover:bg-yellow-500/18"
+              title="查看积分明细"
+            >
               <img src="/points-icon.png" alt="积分" className="w-4 h-4" />
               <span className="text-yellow-300 text-sm">{user.points}</span>
-            </div>
+            </button>
 
             {/* 退出登录按钮 */}
             <button
               onClick={handleLogout}
-              className="text-white/60 hover:text-white transition-colors"
+              className="rounded-full px-3 py-1.5 text-sm text-white/48 transition-colors hover:bg-white/[0.06] hover:text-white"
             >
               退出登录
             </button>

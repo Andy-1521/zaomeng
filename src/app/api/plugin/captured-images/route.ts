@@ -13,13 +13,20 @@ function getCookieUserId(request: NextRequest): string | null {
   }
 }
 
+function isLikelyDisplayableImage(imageUrl: string) {
+  const normalized = imageUrl.split('?')[0].toLowerCase()
+  if (normalized.includes('/api/material-file/')) return !/\.(mp4|webm|mov|m4v|avi)$/.test(normalized)
+  if (normalized.startsWith('/')) return !/\.(mp4|webm|mov|m4v|avi)$/.test(normalized)
+  return /\.(jpg|jpeg|png|webp|gif|bmp|svg)$/.test(normalized)
+}
+
 export async function GET(request: NextRequest) {
   const userId = getCookieUserId(request)
   if (!userId) {
     return NextResponse.json({ success: false, error: '未登录' }, { status: 401 })
   }
 
-  const images = await capturedImageManager.getUserCapturedImages(userId)
+  const images = (await capturedImageManager.getUserCapturedImages(userId)).filter((image) => isLikelyDisplayableImage(image.imageUrl))
   return NextResponse.json({ success: true, data: images })
 }
 

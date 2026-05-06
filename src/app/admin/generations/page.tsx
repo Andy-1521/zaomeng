@@ -93,17 +93,31 @@ function getResultErrorMessage(data: ResultDataValue): string {
 
 export default function AdminGenerationsPage() {
   const router = useRouter();
+  const initialLocalAdmin = (() => {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    try {
+      const userStr = localStorage.getItem('user');
+      if (!userStr) return null;
+      const parsed = JSON.parse(userStr) as { id?: string; isAdmin?: boolean };
+      return parsed.isAdmin ? parsed : null;
+    } catch {
+      return null;
+    }
+  })();
   const [activeTab, setActiveTab] = useState<TabType>('generations');
   const [records, setRecords] = useState<GenerationRecord[]>([]);
   const [users, setUsers] = useState<UserInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialLocalAdmin);
   const [error, setError] = useState<string | null>(null);
   const [previewImages, setPreviewImages] = useState<string[]>([]);
   const [previewIndex, setPreviewIndex] = useState(0);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
-  const [currentAdminId, setCurrentAdminId] = useState<string | null>(null);
-  const [sessionRefreshed, setSessionRefreshed] = useState(false);
+  const [currentAdminId, setCurrentAdminId] = useState<string | null>(initialLocalAdmin?.id || null);
+  const [sessionRefreshed, setSessionRefreshed] = useState(!!initialLocalAdmin);
 
   // 详情模态框状态
   const [detailModal, setDetailModal] = useState<{ open: boolean; record: GenerationRecord | null }>({
@@ -337,11 +351,21 @@ export default function AdminGenerationsPage() {
     try {
       const userStr = localStorage.getItem('user');
       if (!userStr) {
+        showToast('登录状态已失效，请重新登录', 'error');
         router.push('/login');
         return;
       }
 
       const user = JSON.parse(userStr);
+
+      if (user?.id) {
+        setCurrentAdminId(user.id);
+      }
+
+      if (user?.isAdmin) {
+        setSessionRefreshed(true);
+      }
+
       const response = await fetch('/api/auth/refresh', {
         method: 'POST',
         credentials: 'include',
@@ -357,14 +381,40 @@ export default function AdminGenerationsPage() {
         setSessionRefreshed(true);
 
         if (!data.data.isAdmin) {
+          showToast('当前账号暂无管理员权限', 'error');
           router.push('/home');
           return;
         }
       } else {
-        router.push('/login');
+        if (response.status === 401) {
+          if (user?.isAdmin) {
+            console.warn('[Admin] refresh 返回 401，继续使用本地管理员状态');
+            return;
+          }
+
+          showToast('登录状态已失效，请重新登录', 'error');
+          router.push('/login');
+          return;
+        }
+
+        showToast(data.message || '管理员权限校验失败', 'error');
+        if (!user?.isAdmin) {
+          router.push('/home');
+        }
       }
-    } catch {
-      router.push('/login');
+    } catch (error) {
+      console.error('[Admin] 刷新管理员会话失败:', error);
+      const userStr = localStorage.getItem('user');
+      const localUser = userStr ? JSON.parse(userStr) : null;
+      if (localUser?.isAdmin) {
+        console.warn('[Admin] refresh 异常，继续使用本地管理员状态');
+        setCurrentAdminId(localUser.id);
+        setSessionRefreshed(true);
+        return;
+      }
+
+      showToast('管理员会话校验失败，请稍后重试', 'error');
+      router.push('/home');
     }
   }, [router]);
 

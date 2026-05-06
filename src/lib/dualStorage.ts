@@ -3,17 +3,8 @@
  * 只上传到Coze对象存储
  */
 
-import { S3Storage } from 'coze-coding-dev-sdk';
 import { compressImageFromUrl } from './imageCompression';
-
-// 初始化Coze S3存储
-const cozeStorage = new S3Storage({
-  endpointUrl: process.env.COZE_BUCKET_ENDPOINT_URL,
-  accessKey: process.env.COZE_ACCESS_KEY,
-  secretKey: process.env.COZE_SECRET_KEY,
-  bucketName: process.env.COZE_BUCKET_NAME,
-  region: 'cn-beijing',
-});
+import { getCozeStorage } from './cozeStorage';
 
 /**
  * 存储上传结果
@@ -35,6 +26,7 @@ export async function uploadToCozeStorage(
   contentType: string
 ): Promise<string> {
   console.log(`[对象存储] 开始上传: ${fileName}, 大小: ${buffer.length} bytes`);
+  const cozeStorage = getCozeStorage();
 
   // 上传到Coze对象存储
   const cozeKey = await cozeStorage.uploadFile({
@@ -66,6 +58,7 @@ export async function uploadFromUrlToCozeStorage(
   contentType?: string
 ): Promise<string> {
   console.log(`[对象存储] 开始从URL上传: ${url.substring(0, 80)}...`);
+  const cozeStorage = getCozeStorage();
 
   // 判断是否需要压缩（仅对图片进行压缩）
   const isImage = contentType?.startsWith('image/') ||

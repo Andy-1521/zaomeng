@@ -97,7 +97,7 @@ export class UserManager {
 
     await db
       .update(users)
-      .set({ ...validated, updatedAt: new Date().toISOString() })
+      .set({ ...validated, updatedAt: sql`UTC_TIMESTAMP()` })
       .where(eq(users.id, id));
 
     return this.getUserById(id);
@@ -108,7 +108,7 @@ export class UserManager {
 
     await db
       .update(users)
-      .set({ points, updatedAt: new Date().toISOString() })
+      .set({ points, updatedAt: sql`UTC_TIMESTAMP()` })
       .where(eq(users.id, id));
 
     return this.getUserById(id);
@@ -156,7 +156,7 @@ export class UserManager {
 
     await db
       .update(users)
-      .set({ password, updatedAt: new Date().toISOString() })
+      .set({ password, updatedAt: sql`UTC_TIMESTAMP()` })
       .where(eq(users.id, id));
 
     return this.getUserById(id);
@@ -171,7 +171,7 @@ export class UserManager {
     const db = await getDb();
     const result = await db
       .update(users)
-      .set({ isActive: false, updatedAt: new Date().toISOString() })
+      .set({ isActive: false, updatedAt: sql`UTC_TIMESTAMP()` })
       .where(eq(users.id, id));
 
     return result[0].affectedRows !== 0;

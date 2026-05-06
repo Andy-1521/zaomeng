@@ -2,6 +2,7 @@
 export { userManager } from "./userManager";
 export { transactionManager } from "./transactionManager";
 export { capturedImageManager } from "./capturedImageManager";
+export { materialFolderManager } from "./materialFolderManager";
 export { getDb, getMysqlPool } from "./client";
 
 // 导出类型和schema（从schema.ts）

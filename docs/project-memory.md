@@ -1,170 +1,178 @@
 # 项目记忆文档
 
-## 项目定位
+## 项目概览
 
-这是一个基于 Next.js 16 的 AI 图片工具网站，当前重点已经从“多页面工具站”转为“素材管理 + 选图后直接加工”的工作流。
+造梦AI是一个基于 Next.js 16 的 AI 图片工作台，当前已经从“多页面工具集合”收敛为“素材库 + 选图后直接加工”的单入口工作流。
 
-当前对外主能力：
+当前对外的核心能力：
 
-- 素材库
-- AI生图（当前先做前端交互占位）
+- 素材库管理
 - 彩绘提取
+- AI生图 / 图生图
+- 局部改图 / 局部编辑
+- 局部重绘
 - 去除水印
 - 高清放大
-- 模板提取 API
+- PSD 下载
+- 插件采图
+- 订单历史与任务中心
 
-当前核心目标：
+当前产品目标：
 
-- 先把前端交互体验完善
-- 后端功能接口后续按用户提供的真实 API 再接
-- 保持公网入口稳定可访问
-- 保持生产构建通过
+- 让用户先采集 / 上传素材，再直接在同一页面完成加工
+- 保持主入口稳定在 `/home`
+- 让所有任务统一进入右侧任务中心
+- 让前端交互尽量顺滑，后端工作流按真实 API 逐步接入
+- 所有功能以“适合生产 / 适合工厂 / 适合打印”为导向，而不是单纯做展示
 
-## 当前产品状态
+## 当前目录结构
 
-### 首页主链路
+### 主应用
 
-当前首页真实主链路：
+- `src/app/home/page.tsx`：主工作台入口
+- `src/app/login/page.tsx`：登录页
+- `src/app/profile/page.tsx`：个人中心 / 管理员入口
+- `src/app/admin/generations/page.tsx`：管理员后台
 
-- 左侧只保留一个入口：`素材库`
-- 主内容固定为 `QuickCreatePage`
-- 用户先收集 / 上传图片素材
-- 再在素材上进行多选
-- 选图后图片区域下方悬浮出加工按钮条
-- 任务状态统一去右侧 `TaskHistory` 查看
+### 核心组件
 
-### 当前首页交互特征
+- `src/components/QuickCreatePage.tsx`：素材库主页面
+- `src/components/TaskHistory.tsx`：右侧任务中心 / 历史记录
+- `src/components/ColorExtraction2Page.tsx`：彩绘提取工作页
+- `src/components/CropEditorPanel.tsx`：裁切工具
+- `src/components/AnnotateEditorPanel.tsx`：画笔标注
+- `src/components/LocalEditPanel.tsx`：局部改图（画笔 / 标签 / Agent）
+- `src/components/RedrawAnnotation.tsx`：局部重绘标注
+- `src/components/Navbar.tsx`：顶部导航
+- `src/components/Sidebar.tsx`：左侧导航
+- `src/components/GlobalEventHandler.tsx`：全局事件初始化
+- `src/components/ServiceWorkerRegister.tsx`：服务工作线程注册
+- `src/components/ui/ImageThumbnail.tsx`：图片缩略图
+- `src/components/ui/StatusBadge.tsx`：状态徽章
 
-- 整个页面支持拖拽本地图片上传
-- 右上角 `+` 按钮支持手动上传素材
-- 素材按日期分组显示：
-  - 今天
-  - 昨天
-  - 更早
-- 顶部筛选已简化为一个日期下拉框：
-  - 全部日期
-  - 今天
-  - 昨天
-  - 更早
-- 图片卡片上不再直接压日期浮层
-- 日期与时间信息仅在 hover 内容中显示
-- 顶部工具条右侧固定放置：
-  - 删除重复
-  - 删除所选
-  - 日期筛选下拉框
+### 关键服务与工具
 
-### 当前加工按钮条
+- `src/storage/database/*`：MySQL 数据层
+- `src/lib/psydoImageEdits.ts`：Psydo 图像编辑封装
+- `src/lib/dualStorage.ts`：对象存储上传 / 回退逻辑
+- `src/lib/localUploadStorage.ts`：本地 public 回退存储
+- `src/lib/color-extraction-api/*`：彩绘提取 Coze 工作流封装
+- `src/lib/layer-decomposition/*`：PSD 分层逻辑
+- `src/lib/psd-generator/*`：PSD 合成
+- `src/lib/taskPollingManager.ts`：任务轮询管理器
+- `src/lib/taskEventHandler.ts`：任务事件全局处理
+- `src/lib/globalRecordManager.ts`：历史缓存 / 同步
 
-当前顺序：
+## 当前功能清单
 
-1. AI生图
-2. 彩绘提取
+### 1. 素材库主链路
+
+入口：`src/components/QuickCreatePage.tsx`
+
+能力：
+
+- 插件采图导入素材库
+- 本地上传素材
+- 整页拖拽上传
+- 素材按日期分组
+- 日期筛选下拉
+- 收藏 / 取消收藏
+- 文件夹管理
+- 删除重复
+- 删除所选
+- 缩略图大小滑块
+- 素材卡片大图预览
+- 选图后出现悬浮加工按钮条
+- 任务中心统一展示任务状态
+
+悬浮加工按钮：
+
+1. 彩绘提取
+2. AI生图
 3. 去除水印
 4. 高清放大
 
-说明：
+编辑类按钮：
 
-- `AI生图` 当前是前端交互优先模式
-- 点击后先弹提示词输入框
-- 暂不依赖最终正式后端接口
-- 当前可以作为前端交互占位继续完善
+1. 裁切工具
+2. 画笔标注
+3. 局部改图
 
-### 删除类操作
+### 2. 彩绘提取
 
-删除类操作不在悬浮加工按钮条里，而在素材区右下角：
-
-- 删除重复
-- 删除所选
-
-当前规则：
-
-- `删除重复` 只有检测到确实存在重复素材时才显示
-- 两个删除按钮 hover 都是明显红色反馈
-
-## 当前关键页面与组件状态
-
-### 当前主链路组件
-
-- `src/app/home/page.tsx`
-- `src/components/Sidebar.tsx`
-- `src/components/Navbar.tsx`
-- `src/components/QuickCreatePage.tsx`
-- `src/components/TaskHistory.tsx`
-- `src/components/ColorExtraction2Page.tsx`
-- `src/components/RedrawAnnotation.tsx`
-- `src/components/GlobalEventHandler.tsx`
-- `src/components/ServiceWorkerRegister.tsx`
-- `src/components/ui/ImageThumbnail.tsx`
-- `src/components/ui/StatusBadge.tsx`
-
-### QuickCreatePage
-
-文件：
-
-- `src/components/QuickCreatePage.tsx`
-
-当前状态：
-
-- 已完成从“采集图库”到“素材库”的命名切换
-- 是当前首页主链路核心组件
-- 已支持：
-  - 插件采图
-  - 本地上传
-  - 整页拖拽上传
-  - 多选
-  - 日期分组
-  - 日期下拉筛选
-  - 删除重复
-  - 删除所选
-  - 悬浮加工按钮条
-  - AI生图提示词弹窗
-
-当前明确策略：
-
-- 后端接口不作为当前这轮的重点
-- 先把前端交互做顺
-- `AI生图` 按图生图交互来设计，但接口后续再接真实 API
-
-### TaskHistory
-
-文件：
-
-- `src/components/TaskHistory.tsx`
-
-当前状态：
-
-- 仍是右侧历史记录面板
-- 仍负责合并临时前端任务和数据库订单记录
-- 提交任务后会自动展开
-- 最新任务会高亮数秒
-- 状态显示已增强：
-  - 处理中、成功、失败、超时、部分成功
-  - 不仅有徽章，还有卡片左侧状态色条
-
-### ColorExtraction2Page
-
-文件：
+相关文件：
 
 - `src/components/ColorExtraction2Page.tsx`
 - `src/app/api/color-extraction2/workflow/route.ts`
-- `src/app/api/color-extraction2/regenerate/route.ts`
 - `src/app/api/color-extraction2/redraw/route.ts`
+- `src/app/api/color-extraction2/regenerate/route.ts`
 - `src/app/api/color-extraction2/identify/route.ts`
 
-当前状态：
+当前定位：
 
-- 仍是项目里最完整的功能页实现
-- 支持订单读取、局部重绘、重新生成、PSD 下载
-- 当前仍是项目中最成熟的主能力页
+- 这是项目里最完整、最成熟的核心业务页
+- 支持订单记录、局部重绘、重新生成、PSD 下载
+- 当前彩绘提取已改为使用 Psydo `gpt-image-2`
+- 固定生成参数为 `9:16 / 2K`
+- 目标是将商品主图中的手机壳彩绘提取成适合工厂打印的平面稿
 
-## 当前技术与数据架构
+### 3. AI生图 / 图生图
+
+相关文件：
+
+- `src/app/api/image-to-image/run/route.ts`
+- `src/lib/psydoImageEdits.ts`
+- `src/components/QuickCreatePage.tsx`
+
+当前定位：
+
+- AI生图已经不是前端占位，而是真实接口
+- 使用 Psydo `gpt-image-2`
+- 结果会写入订单和素材库
+- 仍然沿用任务中心统一展示
+
+### 4. 局部改图 / 局部编辑
+
+相关文件：
+
+- `src/components/LocalEditPanel.tsx`
+- `src/app/api/material-editor/route.ts`
+- `src/app/api/material-editor/compose-prompt/route.ts`
+
+当前定位：
+
+- 支持画笔模式和标签模式
+- Agent 会把用户输入、识别标签和约束整理成更精准提示词
+- 同样走 Psydo `gpt-image-2`
+- 局部改图通过 `mask_image` 进行局部编辑
+
+### 5. 任务中心
+
+相关文件：
+
+- `src/components/TaskHistory.tsx`
+- `src/lib/taskPollingManager.ts`
+- `src/lib/taskEventHandler.ts`
+
+当前职责：
+
+- 统一展示所有加工任务
+- 展示处理中 / 成功 / 失败 / 超时 / 部分成功
+- 作为右侧固定信息面板
+- 支持单条删除 / 清空历史 / 下载 / PSD 下载
+
+当前最新交互原则：
+
+- 处理中任务不能删除
+- 工具筛选已改成下拉
+- 失败任务优先显示，避免被埋掉
+
+## 当前技术架构
 
 ### 数据层
 
-当前真实主链路：
-
-- MySQL：用户、订单、素材、认证主数据
-- Redis：验证码及相关临时状态
+- MySQL：用户、订单、素材、文件夹、认证主数据
+- Redis：验证码 / 临时状态
 
 关键文件：
 
@@ -173,196 +181,107 @@
 - `src/storage/database/userManager.ts`
 - `src/storage/database/transactionManager.ts`
 - `src/storage/database/capturedImageManager.ts`
+- `src/storage/database/materialFolderManager.ts`
 - `src/storage/database/init-db.ts`
-- `src/lib/db-init.ts`
-- `src/lib/app-init.ts`
-- `src/lib/redis.ts`
-- `src/utils/verifyCodeStore.ts`
 
-### 对象存储与工作流
+### 对象存储与回退策略
 
-当前仍沿用：
-
-- Coze 对象存储
-- RunningHub / Coze 工作流
+- 主存储：Coze 对象存储
+- 备份存储：腾讯云 COS
+- 兜底：本地 `public/` 目录 / `api/material-file`
 
 当前原则：
 
-- 不在本轮把旧接口全部重构
-- 不把临时可用的老接口当最终产品方案
-- 后续按用户提供的正式 API 逐项替换
+- 不依赖单一对象存储成功
+- 只要生成模型成功，结果必须尽量可持久化
+- 若对象存储缺 token，则自动回退本地，保证功能可用
 
-## 当前部署状态
+### 工作流与模型
 
-### 当前公网主入口
+- Psydo：`gpt-image-2`，用于彩绘提取、AI生图、局部改图
+- Coze 工作流：保留历史链路和兼容逻辑
+- RunningHub：用于 PSD 分层 / 生成流程
+
+## 组件与状态关系
+
+### 首页链路
+
+- `HomePage` 负责整体布局
+- `Navbar` 顶部展示账号、插件状态、头像、积分
+- `Sidebar` 左侧导航
+- `QuickCreatePage` 是素材库主工作区
+- `TaskHistory` 作为右侧常驻任务中心
+
+### 任务事件流
+
+- `TaskPollingManager` 定期轮询后台订单状态
+- `TaskHistory` 负责读数据库订单并合并本地缓存
+- `taskHistoryUpdated` 事件用于触发右侧任务中心刷新
+- `taskCompleted` / `taskFailed` / `taskTimeout` 用于任务状态联动
+
+## 当前部署与发布
+
+### 公网主入口
 
 - `http://124.223.26.206/home`
 
-### 当前域名状态
+### 服务托管
 
-- 已绑定：`www.zaomengai.icu`
-- 当前不作为正式验收入口
-- HTTP 可访问过，但 HTTPS 和正式切换未收口
+- `zaomeng-web.service`
+- `next start` 由 systemd 托管
+- Nginx 反代到 `127.0.0.1:5000`
 
-### Nginx 状态
+### 发布规则
 
-当前仍是默认 HTTP 反代：
+固定发布顺序：
 
-- `80 -> 127.0.0.1:5000`
+1. `sudo systemctl stop zaomeng-web`
+2. `rm -rf .next`
+3. `pnpm build`
+4. `sudo systemctl start zaomeng-web`
+5. 验证 `/login`、`/`、`/home`
 
-### 应用进程状态
+注意：
 
-当前网站仍依赖手动后台启动，不稳定因素较大：
+- 不能在构建过程中并行 restart
+- 不能一边运行一边删除 `.next`
+- 不能未验证 chunk / css 就通知验收
 
-- 当前曾多次出现：
-  - 服务器重启后 502
-  - 应用进程退出后 502
-  - `.next` 构建产物不完整时启动失败
+## 当前已清理的冗余
 
-根因：
+已明确清理的旧页面 / 组件：
 
-- 还没有正式启用 `systemd` 或 `pm2` 做进程托管
+- `src/components/AIGeneratePage.tsx`
+- `src/components/CustomPage.tsx`
+- `src/components/AutoRemoveBackgroundPage.tsx`
+- `src/components/RemoveBackgroundPage.tsx`
+- `src/components/RemoveWatermarkPage.tsx`
+- `src/components/ImageUpsamplingPage.tsx`
 
-### 已准备的 systemd 模板
+已清理的部分临时脚本 / 文件：
 
-文件：
-
-- `docs/zaomeng-web.service`
-
-作用：
-
-- 为网站提供开机自启和自动重启能力
-- 当前模板尚未确认完成系统级启用
-
-## 当前构建状态
-
-- `pnpm build` 当前可通过
-
-这是当前非常重要的基线，说明项目代码已能稳定完成生产构建。
-
-## 当前已完成的重要修复
-
-本轮已完成：
-
-- 修复大量历史 TypeScript / build 问题
-- 当前生产构建已通过
-- 修复 `template-extract` 脚本路径问题
-- 修复多个 migration / admin / profile / API 的类型问题
-- 首页结构收缩为单入口素材库主链路
-- 完成素材库命名切换
-- 完成日期分组显示
-- 完成日期下拉筛选简化
-- 删除按钮已上移到日期筛选左侧，避免素材较多时被挤到页面下方
-- 完成整页拖拽上传
-- 恢复悬浮加工按钮条交互
-- 删除按钮分离为右下角独立操作区
-- 删除重复逻辑已按稳定键归一化处理
-- 历史记录自动展开 + 最新任务高亮
-
-## 当前已完成的冗余清理
-
-本轮已经清理：
-
-- 旧独立功能页组件：
-- 上述旧独立页面组件已清理完毕
-- 顶层调试/抓取脚本：
-  - `debug_tmall.py`
-  - `extractor_server.py`
-  - `extractor_v2.py`
-  - `product_image_extractor.py`
-  - `test-watermark.html`
-  - `debug_login.png`
-- tmp 临时文件：
-  - `tmp/AI_IMAGE_API_MIGRATION.md`
-  - `tmp/COLOR_EXTRACTION_CONCURRENT_FIX.md`
-  - `tmp/check-watermark-orders.sql`
-  - `tmp/check_orders.js`
+- `debug_tmall.py`
+- `extractor_server.py`
+- `extractor_v2.py`
+- `product_image_extractor.py`
+- `test-watermark.html`
+- 若干 `tmp/*` 临时文件
 
 说明：
 
-- 当前代码库已经移除主链路不再使用的旧独立页面
-- 运行中的素材资源目录 `public/plugin-capture` 不再纳入“冗余清理”范围，避免再次误删用户素材
+- `public/plugin-capture/`、`public/material-editor/`、`public/color-extraction/` 这类运行时素材目录不是冗余内容，不能随便删除
 
-### 当前仍明确使用的脚本
+## 当前开发约束
 
-- `scripts/template-extract.mjs`
+1. 首页已收敛为单入口素材库工作流，不再回到旧多页面模式
+2. `AI生图` 和 `局部改图` 已经是正式可用功能，不再按占位处理
+3. 任务中心必须保留，因为它是用户看进度和结果的主入口
+4. 局部编辑优先使用统一的模型入口和 Agent 提示词，不再新增多条复杂分支
+5. 发布前必须先确保页面正常和构建通过
 
-### 需人工确认的脚本
+## 目前优先级
 
-- `scripts/replace_prod_users.py`
-
-## 备份记录
-
-### Git 备份仓库
-
-- `git@github.com:Andy-1521/zaomeng.git`
-
-### 已知旧备份记录
-
-- Commit: `8d1fafa`
-- Time: `2026-04-27 17:14`
-- Message: `backup: 2026-04-27 17:14 project snapshot`
-- Tag: `backup-2026-04-27-1714`
-
-### 当前本地备份
-
-- `/home/ubuntu/Downloads/zaomeng/project/projects-backup-20260429-zaomengai.tar.gz`
-- `/home/ubuntu/Downloads/zaomeng/project/projects-source-backup-20260429.tar.gz`
-
-## 当前工作规则
-
-### 功能修改后的默认动作
-
-每次完成功能修改后，默认需要：
-
-1. 确认本地可访问
-2. 确认公网入口可访问
-3. 若涉及构建链路，优先保证 `pnpm build` 通过
-4. 再交由人工验收
-
-### 当前协作原则
-
-用户已经明确说明：
-
-- 先不要深度依赖后端
-- 每个功能的正式 API 后续会再给
-- 当前优先完善整个前端交互体验
-
-因此后续实现时应遵守：
-
-- 前端交互优先
-- 后端接口占位可临时存在，但不要当最终方案
-- 不要为了临时后端可用性破坏页面稳定性
-
-### 关于备份
-
-以后当用户说“先备份”时，默认至少执行源码级备份，并保留：
-
-- 时间
-- 备份文件路径
-- 如有 Git 提交，则记录 commit / tag / message
-
-## 下一步建议
-
-推荐按下面顺序继续推进：
-
-1. 先把网站进程托管切到 `systemd`
-2. 再继续做素材库体验增强：
-   - 排序方式
-   - 搜索
-   - 日期分组折叠
-3. 再完善 `AI生图` 的纯前端交互流：
-   - 提示词输入体验
-   - 示例提示词
-   - 提交前确认信息
-4. 最后等待用户给正式 API，再接入真正后端
-
-## 接手提醒
-
-后续继续接手时优先记住这些事实：
-
-1. 当前首页已经不是旧的多页面入口模式，而是“素材库 + 选图后直接加工”
-2. 当前 `AI生图` 应该先按前端占位式交互处理，不要强绑临时后端
-3. 当前生产构建已通过，但运行稳定性仍受“进程未托管”影响
-4. 当前公网主验收入口仍应优先使用 `http://124.223.26.206/home`
-5. 域名和 HTTPS 暂时不是当前最高优先级
+1. 保持素材库主页面稳定
+2. 优化局部改图 / 彩绘提取的提示词和交互
+3. 优化任务中心可读性和失败可见性
+4. 等用户继续提供正式 API 后，再逐步替换历史兼容逻辑

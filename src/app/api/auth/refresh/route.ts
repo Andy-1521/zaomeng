@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     // 使用Next.js标准方法设置cookie
     response.cookies.set('user', userData, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: false,
       sameSite: 'lax',
       maxAge: 60 * 60 * 24 * 7, // 7天
       path: '/',

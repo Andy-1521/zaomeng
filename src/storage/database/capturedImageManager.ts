@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 import { getDb } from './client'
 import { capturedImages, insertCapturedImageSchema } from './shared/schema'
 import type { CapturedImage, InsertCapturedImage } from './shared/schema'
@@ -19,6 +19,8 @@ export class CapturedImageManager {
       pageTitle: validated.pageTitle ?? null,
       sourceHost: validated.sourceHost ?? null,
       imageType: validated.imageType ?? 'main',
+      folderId: validated.folderId ?? null,
+      isFavorite: validated.isFavorite ?? false,
     })
 
     const [record] = await db.select().from(capturedImages).where(eq(capturedImages.id, id)).limit(1)
@@ -52,6 +54,62 @@ export class CapturedImageManager {
 
     await db.delete(capturedImages).where(and(eq(capturedImages.id, id), eq(capturedImages.userId, userId)))
     return true
+  }
+
+  async updateCapturedImages(
+    ids: string[],
+    userId: string,
+    updates: { folderId?: string | null; isFavorite?: boolean }
+  ): Promise<number> {
+    if (ids.length === 0) {
+      return 0
+    }
+
+    const db = await getDb()
+    const updateData: Record<string, string | boolean | null> = {}
+    if ('folderId' in updates) {
+      updateData.folderId = updates.folderId ?? null
+    }
+    if ('isFavorite' in updates && typeof updates.isFavorite === 'boolean') {
+      updateData.isFavorite = updates.isFavorite
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return 0
+    }
+
+    const result = await db
+      .update(capturedImages)
+      .set(updateData)
+      .where(and(eq(capturedImages.userId, userId), inArray(capturedImages.id, ids)))
+
+    return result[0].affectedRows ?? 0
+  }
+
+  async updateCapturedImagesByFolder(
+    folderId: string,
+    userId: string,
+    updates: { folderId?: string | null; isFavorite?: boolean }
+  ): Promise<number> {
+    const db = await getDb()
+    const updateData: Record<string, string | boolean | null> = {}
+    if ('folderId' in updates) {
+      updateData.folderId = updates.folderId ?? null
+    }
+    if ('isFavorite' in updates && typeof updates.isFavorite === 'boolean') {
+      updateData.isFavorite = updates.isFavorite
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return 0
+    }
+
+    const result = await db
+      .update(capturedImages)
+      .set(updateData)
+      .where(and(eq(capturedImages.userId, userId), eq(capturedImages.folderId, folderId)))
+
+    return result[0].affectedRows ?? 0
   }
 
   async clearUserCapturedImages(userId: string): Promise<number> {

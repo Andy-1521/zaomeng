@@ -3,10 +3,46 @@
  * 创建 MySQL 所需表结构
  */
 
-import { getDb } from "./client";
+import { getDb, getMysqlPool } from "./client";
 import { sql } from "drizzle-orm";
 
 let initialized = false;
+
+async function ensureColumn(tableName: string, columnName: string, alterSql: string) {
+  const pool = await getMysqlPool();
+  const [rows] = await pool.query(
+    `
+      SELECT COUNT(*) AS count
+      FROM information_schema.columns
+      WHERE table_schema = DATABASE()
+        AND table_name = ?
+        AND column_name = ?
+    `,
+    [tableName, columnName]
+  );
+
+  if (Number((rows as Array<{ count?: number }>)[0]?.count ?? 0) === 0) {
+    await pool.query(alterSql);
+  }
+}
+
+async function ensureIndex(tableName: string, indexName: string, createSql: string) {
+  const pool = await getMysqlPool();
+  const [rows] = await pool.query(
+    `
+      SELECT COUNT(*) AS count
+      FROM information_schema.statistics
+      WHERE table_schema = DATABASE()
+        AND table_name = ?
+        AND index_name = ?
+    `,
+    [tableName, indexName]
+  );
+
+  if (Number((rows as Array<{ count?: number }>)[0]?.count ?? 0) === 0) {
+    await pool.query(createSql);
+  }
+}
 
 export async function initializeDatabase() {
   if (initialized) {
@@ -85,10 +121,32 @@ export async function initializeDatabase() {
       page_title TEXT NULL,
       source_host VARCHAR(255) NULL,
       image_type VARCHAR(20) NOT NULL DEFAULT 'main',
+      folder_id VARCHAR(36) NULL,
+      is_favorite BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      KEY captured_images_user_created_idx (user_id, created_at)
+      KEY captured_images_user_created_idx (user_id, created_at),
+      KEY captured_images_user_folder_idx (user_id, folder_id),
+      KEY captured_images_user_favorite_idx (user_id, is_favorite)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS material_folders (
+      id VARCHAR(36) PRIMARY KEY NOT NULL,
+      user_id VARCHAR(36) NOT NULL,
+      name VARCHAR(80) NOT NULL,
+      sort_order INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NULL DEFAULT NULL,
+      UNIQUE KEY material_folders_user_name_unique (user_id, name),
+      KEY material_folders_user_idx (user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await ensureColumn('captured_images', 'folder_id', 'ALTER TABLE captured_images ADD COLUMN folder_id VARCHAR(36) NULL');
+  await ensureColumn('captured_images', 'is_favorite', 'ALTER TABLE captured_images ADD COLUMN is_favorite BOOLEAN NOT NULL DEFAULT FALSE');
+  await ensureIndex('captured_images', 'captured_images_user_folder_idx', 'CREATE INDEX captured_images_user_folder_idx ON captured_images (user_id, folder_id)');
+  await ensureIndex('captured_images', 'captured_images_user_favorite_idx', 'CREATE INDEX captured_images_user_favorite_idx ON captured_images (user_id, is_favorite)');
 
   initialized = true;
 }

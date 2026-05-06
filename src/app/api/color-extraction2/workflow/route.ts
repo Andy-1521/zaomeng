@@ -1,33 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { userManager, transactionManager } from '@/storage/database';
 import {
-  createTask,
-  waitForTaskComplete,
-  getTaskOutputs,
-} from '@/lib/runningHub';
-import { mergeImagesToPsd, PsdLayerConfig } from '@/lib/psdMerge';
-import { uploadFromUrlToCozeStorage } from '@/lib/dualStorage';
-import { S3Storage } from 'coze-coding-dev-sdk';
-
-// Coze工作流API配置（彩绘提取）
-const COZE_WORKFLOW_URL = 'https://frzr6k4qcc.coze.site/run';
-const COZE_WORKFLOW_TOKEN = 'eyJhbGciOiJSUzI1NiIsImtpZCI6IjlkOGYxNGZiLTM3M2MtNDRjMS1hZTJjLTcxMmRkMDk3OWFiYyJ9.eyJpc3MiOiJodHRwczovL2FwaS5jb3plLmNuIiwiYXVkIjpbIjE0Sm9lYVpCZkJmaXEzUHRQbWQ5QUlIMm5wbDJSV3RmIl0sImV4cCI6ODIxMDI2Njg3Njc5OSwiaWF0IjoxNzc2MjU5NzQ0LCJzdWIiOiJzcGlmZmU6Ly9hcGkuY296ZS5jbi93b3JrbG9hZF9pZGVudGl0eS9pZDo3NjI4OTE4NjY5NzgyODEwNjcwIiwic3JjIjoiaW5ib3VuZF9hdXRoX2FjY2Vzc190b2tlbl9pZDo3NjI4OTc3NTEzNzcwNzc4NjYwIn0.s5Y1qtl40GwKdVIkFEmYVyc_cpbzem4i1rxpHOfQQUpoeITkCZxSUIT-wz4l1GFBpVHWF4E5ktwZkkfddCt3Ft3cNJfXUql7SL5oZJyVYS0qkkp6gGnhvIykUaQnYrPB9XmOPeQsQumY8GmXLOixx1AQM5wxzlFjYlwibCAndLB-4O2Y4NEsJ571dBiF9cyF2eROVeNBXyhBLA7y9q_tXkAP2cukEDjfdhBTYDrILRMWz53zlVbKD0SYhDUM7xgDJYys3xPkv-VqjHLDrqt7drTyhoJ0GBvRpK_LnX-206KJScSHDQ27eWBuiykaEk3O2U2HrMV33Zrm_9daRClAdA';
-
-// Coze工作流API配置（去除背景 - 镂空图模式）
-const COZE_REMOVE_BG_WORKFLOW_URL = 'https://jzc4k83fbz.coze.site/run';
-const COZE_REMOVE_BG_WORKFLOW_TOKEN = 'eyJhbGciOiJSUzI1NiIsImtpZCI6ImNhMmQ5ZWNiLTcwYTMtNDNhYS1hYjhkLTJkYWM3MWMzNDIyYSJ9.eyJpc3MiOiJodHRwczovL2FwaS5jb3plLmNuIiwiYXVkIjpbIjJXMlFKNGhaNGpmbGhBTUpGZFpGVXRLalExemJEbmplIl0sImV4cCI6ODIxMDI2Njg3Njc5OSwiaWF0IjoxNzY5NzA1OTg1LCJzdWIiOiJzcGlmZmU6Ly9hcGkuY296ZS5jbi93b3JrbG9hZF9pZGVudGl0eS9pZDo3NjAwNzEzNTEwMDcwMjU1NjUxIiwic3JjIjoiaW5ib3VuZF9hdXRoX2FjY2Vzc190b2tlbl9pZDo3NjAwODI5MzMwMzMxMDA5MDU4In0.ww0zvjayPMw0o0OF5d9e1uNBT65mh0Wos06zmd0_jC9niZmY0eliM7EOuOqycBMnfgrV4sbXnqY1o8RTgRQB-pSO1g_WadfhftzVXDevVn-x47QVkDHDrqmAYoe1aeCrhR3_DiCVQeDvk0h9D-iGRLkFxxhpr2HiM_dfshRYa6DKSAPRyZloZfRwhErZH4u83C06oQlWBPSCm6XfgDrP3aE7SzbkeUjnZpW_fbvyYG5MJPKwT-xuN2iYM8G3CZhUEzI-tpX44nSqPsdX0Kft53D6FUyW3u-Jg4nvGnD3iDHkZy4tuP7XVfC0HBgi8TwiSdNDtKjPDYrRhOluKYonWw';
-
-// 初始化Coze对象存储（用于PSD文件上传）
-const cozeStorage = new S3Storage({
-  endpointUrl: process.env.COZE_BUCKET_ENDPOINT_URL,
-  accessKey: process.env.COZE_ACCESS_KEY,
-  secretKey: process.env.COZE_SECRET_KEY,
-  bucketName: process.env.COZE_BUCKET_NAME,
-  region: 'cn-beijing',
-});
+  runColorExtractionWorkflow,
+  runRemoveBgWorkflow,
+} from '@/lib/color-extraction-api/cozeWorkflows';
+import {
+  uploadFileUrlToCozeOpenApi,
+  type CozeWorkflowInputImage,
+} from '@/lib/cozeOpenApiFiles';
+import { getCozeStorage } from '@/lib/cozeStorage';
+import { readFile } from 'fs/promises';
+import path from 'path';
+import sharp from 'sharp';
+import { decomposeLayersWithRunningHub } from '@/lib/layer-decomposition';
+import { generatePsdFromDecomposition } from '@/lib/psd-generator';
+import { uploadFromUrlToCozeStorage, uploadToCozeStorage } from '@/lib/dualStorage';
+import { localUploadRoots, saveBufferToLocalMaterialFile } from '@/lib/localUploadStorage';
+import { runPsydoImageEditFromUrl } from '@/lib/psydoImageEdits';
 
 // 超时配置
-const FETCH_TIMEOUT = 60000;
 const POLLING_INTERVAL = 5000;
 const MAX_POLLING_TIME = 600000; // 超时时间：600秒（10分钟）
 const MAX_POLLING_ATTEMPTS = Math.floor(MAX_POLLING_TIME / POLLING_INTERVAL);
@@ -36,134 +27,79 @@ const BACKEND_TOTAL_TIMEOUT = 1200000;
 // 积分配置
 const REQUIRED_POINTS = 30;
 
-// 彩绘提取提示词（专业版）
-const COLOR_EXTRACTION_PROMPT = '专业提取手机壳表面的完整彩绘图案，执行以下强制要求：\n1. 移除所有手机硬件元素（重点删除摄像头开孔及边框），仅保留彩绘图案本体；\n2. 若原手机壳为透明材质，直接输出**完全透明底PNG图像（带alpha通道，无任何白色/灰色底色）**；若为非透明壳，保留图案原始背景；\n3. 图像分辨率≥300 DPI，图案必须100%铺满整个画布，无留白、无缩放裁剪；\n4. 严格保留原图所有细节：包括彩绘的纹理、笔触、渐变色彩层次、微小图案元素，边缘轮廓锐利无模糊、无锯齿、无像素化；\n5. 色彩完全还原原图，无偏色、无饱和度损失，达到专业彩绘打印的精度标准；\n6. 最终输出图像无水印、无噪点、无压缩失真，可直接用于喷绘制作。';
+// 彩绘提取提示词（Psydo 图生图版）
+const COLOR_EXTRACTION_PROMPT = '请将商品主图中的手机壳背面彩绘图案精准提取为可直接用于工厂打印的平面印刷稿，并严格执行以下要求：\n1. 只保留手机壳背面的彩绘/印刷图案区域，彻底移除所有与手机壳硬件结构相关的内容，包括但不限于摄像头开孔、镜头边框、壳体边缘、侧边、按键位、孔位、阴影、高光、反射、手持道具、背景布景及其他非图案元素；\n2. 将原商品图中的透视角度、倾斜变形、弯曲展示效果自动校正为正视、平整、无透视畸变的二维平面图；\n3. 输出结果必须是手机壳背面图案的完整平面印刷稿，不是商品效果图，不要保留产品摄影感、立体感、材质反光或展示场景；\n4. 严格保留原图中的全部设计内容与细节，包括纹理、笔触、线条、渐变、边缘、图案层次、细小装饰元素，禁止擅自增删、重绘、简化、脑补或风格化；\n5. 色彩必须高度还原原商品图中的设计颜色，禁止出现偏色、灰化、过饱和、失真或对比度异常；\n6. 图案内容必须完整覆盖整个输出画布，边界完整，不留白，不内缩，不裁掉边缘图案；\n7. 如果原商品主图中图案区域本身没有独立背景，请自动补出与主体设计清晰区分、适合打印生产识别的纯色平整背景；如果原本已有明确背景设计，则完整保留原背景设计；\n8. 输出图像必须清晰、干净、无水印、无噪点、无压缩痕迹、无模糊、无锯齿，达到印刷生产可用标准；\n9. 输出结果为高精度、高清晰度、适合后续喷绘、UV打印、彩绘生产使用的手机壳背面平面图。\n这是一个生产提取任务，不是创意生成任务。禁止风格迁移、禁止自动美化、禁止重新设计、禁止脑补缺失内容、禁止增加原图中不存在的元素，只允许在提取与校正范围内进行最小必要处理。';
 
-// 带超时的fetch函数
-async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout = FETCH_TIMEOUT): Promise<Response> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
+// ========== Psydo 图生图 API - 彩绘提取（唯一接口） ==========
+
+/**
+ * 调用 Psydo gpt-image-2 进行彩绘提取
+ */
+async function submitCozeWorkflowExtractionTask(imageUrl: string): Promise<{ success: boolean; resultUrl?: string; errorMsg?: string; isTimeout?: boolean }> {
+  console.log(`[Psydo彩绘提取] ========== 开始彩绘提取 ==========`);
+  console.log(`[Psydo彩绘提取] 图片URL: ${imageUrl.substring(0, 80)}...`);
 
   try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
+    const resultBuffer = await runPsydoImageEditFromUrl({
+      imageUrl,
+      prompt: COLOR_EXTRACTION_PROMPT,
+      size: '1024x1792',
+      quality: 'high',
     });
-    clearTimeout(timeoutId);
-    return response;
-  } catch (error: any) {
-    clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
-      throw new Error(`请求超时（${timeout}ms）: ${url}`);
+
+    const fileName = `color-extraction-temp/${Date.now()}-${Math.floor(Math.random() * 10000)}.png`;
+    let persistedUrl = '';
+
+    try {
+      persistedUrl = await uploadToCozeStorage(resultBuffer, fileName, 'image/png');
+    } catch (error) {
+      console.warn('[Psydo彩绘提取] 对象存储上传失败，回退本地 material-file:', error);
+      persistedUrl = await saveBufferToLocalMaterialFile(resultBuffer, fileName.replace('color-extraction-temp/', 'color-extraction/'));
+      persistedUrl = `http://124.223.26.206${persistedUrl}`;
     }
-    throw error;
+
+    console.log(`[Psydo彩绘提取] ========== 彩绘提取成功 ==========`);
+    console.log(`[Psydo彩绘提取] 提取图片URL: ${persistedUrl.substring(0, 80)}...`);
+    return {
+      success: true,
+      resultUrl: persistedUrl,
+    };
+  } catch (error: unknown) {
+    console.error(`[Psydo彩绘提取] ========== 彩绘提取失败 ==========`);
+    console.error(`[Psydo彩绘提取] 错误:`, error instanceof Error ? error.message : error);
+
+    // 检测是否为超时错误
+    const isTimeout = error instanceof Error && (error.message?.includes('超时') || error.name === 'AbortError');
+
+    return {
+      success: false,
+      errorMsg: error instanceof Error ? error.message : 'Psydo 彩绘提取失败',
+      isTimeout,
+    };
   }
 }
 
-// ========== Coze工作流API - 彩绘提取（唯一接口） ==========
-
-/**
- * 调用Coze工作流API进行彩绘提取
- */
-async function submitCozeWorkflowExtractionTask(imageUrl: string): Promise<{ success: boolean; resultUrl?: string; errorMsg?: string; isTimeout?: boolean }> {
-  console.log(`[Coze工作流] ========== 开始彩绘提取 ==========`);
-  console.log(`[Coze工作流] API URL: ${COZE_WORKFLOW_URL}`);
-  console.log(`[Coze工作流] Token前缀: ${COZE_WORKFLOW_TOKEN.substring(0, 30)}...`);
-  console.log(`[Coze工作流] 图片URL: ${imageUrl.substring(0, 80)}...`);
-
+async function createCozeWorkflowInputImage(
+  imageUrl: string,
+  fallbackFileName: string
+): Promise<CozeWorkflowInputImage> {
   try {
-    const requestBody = JSON.stringify({
-      input_image: {
-        url: imageUrl,
-      },
+    const uploadedFile = await uploadFileUrlToCozeOpenApi(imageUrl, fallbackFileName);
+    console.log('[彩绘提取2工作流] 已上传 Coze OpenAPI 文件:', {
+      fileId: uploadedFile.id,
+      fileName: uploadedFile.fileName,
+      bytes: uploadedFile.bytes,
     });
-    console.log(`[Coze工作流] 请求体: ${requestBody.substring(0, 200)}...`);
 
-    const response = await fetchWithTimeout(
-      COZE_WORKFLOW_URL,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${COZE_WORKFLOW_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: requestBody,
-      },
-      MAX_POLLING_TIME  // 使用10分钟超时
-    );
-
-    console.log(`[Coze工作流] 响应状态: ${response.status} ${response.statusText}`);
-    console.log(`[Coze工作流] 响应头:`, Object.fromEntries(response.headers.entries()));
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[Coze工作流] 提交任务失败:`, response.status);
-      console.error(`[Coze工作流] 错误响应体:`, errorText);
-      console.error(`[Coze工作流] 错误响应体长度:`, errorText.length);
-      throw new Error(`Coze工作流调用失败: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    console.log(`[Coze工作流] 响应数据:`, JSON.stringify(data, null, 2));
-
-    // Coze工作流可能直接返回结果，也可能返回异步任务
-    // 支持两种格式：
-    // 1. 直接格式: { result_url: "...", run_id: "..." }
-    // 2. 嵌套格式: { data: { output: { image_url: "..." } } }
-
-    // 先尝试直接格式
-    if (data.result_url) {
-      console.log(`[Coze工作流] ========== 彩绘提取成功 ==========`);
-      console.log(`[Coze工作流] 提取图片URL: ${data.result_url.substring(0, 80)}...`);
-      return {
-        success: true,
-        resultUrl: data.result_url,
-      };
-    }
-
-    // 再尝试嵌套格式
-    if (data.data && data.data.output) {
-      let resultUrl: string | undefined;
-
-      // 尝试从不同字段提取图片URL
-      if (data.data.output.image_url) {
-        resultUrl = data.data.output.image_url;
-      } else if (data.data.output.imageUrl) {
-        resultUrl = data.data.output.imageUrl;
-      } else if (data.data.output.url) {
-        resultUrl = data.data.output.url;
-      } else if (Array.isArray(data.data.output) && data.data.output.length > 0) {
-        resultUrl = data.data.output[0];
-      }
-
-      if (resultUrl) {
-        console.log(`[Coze工作流] ========== 彩绘提取成功 ==========`);
-        console.log(`[Coze工作流] 提取图片URL: ${resultUrl.substring(0, 80)}...`);
-        return {
-          success: true,
-          resultUrl: resultUrl,
-        };
-      }
-    }
-
-    // 如果没有找到结果URL，可能是异步模式或错误
-    console.error(`[Coze工作流] 未能从响应中提取图片URL`);
     return {
-      success: false,
-      errorMsg: 'Coze工作流返回格式异常，未找到图片URL',
+      file_id: uploadedFile.id,
+      file_type: 'image',
     };
-
-  } catch (error: any) {
-    console.error(`[Coze工作流] ========== 彩绘提取失败 ==========`);
-    console.error(`[Coze工作流] 错误:`, error.message);
-
-    // 检测是否为超时错误
-    const isTimeout = error.message?.includes('超时') || error.name === 'AbortError';
-
+  } catch (error) {
+    console.warn('[彩绘提取2工作流] Coze OpenAPI 文件上传失败，回退 URL 输入:', error);
     return {
-      success: false,
-      errorMsg: error.message || 'Coze工作流彩绘提取失败',
-      isTimeout,
+      url: imageUrl,
+      file_type: 'image',
     };
   }
 }
@@ -177,119 +113,38 @@ async function submitCozeWorkflowExtractionTask(imageUrl: string): Promise<{ suc
  */
 async function submitCozeRemoveBgWorkflowTask(imageUrl: string): Promise<{ success: boolean; resultUrl?: string; removedBgUrl?: string; processedImageUrl?: string; errorMsg?: string; isTimeout?: boolean }> {
   console.log(`[Coze去除背景] ========== 开始去除背景 ==========`);
-  console.log(`[Coze去除背景] API URL: ${COZE_REMOVE_BG_WORKFLOW_URL}`);
-  console.log(`[Coze去除背景] Token前缀: ${COZE_REMOVE_BG_WORKFLOW_TOKEN.substring(0, 30)}...`);
   console.log(`[Coze去除背景] 图片URL: ${imageUrl.substring(0, 80)}...`);
 
   try {
-    const requestBody = JSON.stringify({
-      input_image: {
-        url: imageUrl,
-      },
-    });
-    console.log(`[Coze去除背景] 请求体: ${requestBody.substring(0, 200)}...`);
+    const workflowInputImage = await createCozeWorkflowInputImage(imageUrl, 'remove-bg-input.jpg');
+    const result = await runRemoveBgWorkflow(workflowInputImage);
 
-    const response = await fetchWithTimeout(
-      COZE_REMOVE_BG_WORKFLOW_URL,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${COZE_REMOVE_BG_WORKFLOW_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: requestBody,
-      },
-      MAX_POLLING_TIME  // 使用10分钟超时
-    );
-
-    console.log(`[Coze去除背景] 响应状态: ${response.status} ${response.statusText}`);
-    console.log(`[Coze去除背景] 响应头:`, Object.fromEntries(response.headers.entries()));
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[Coze去除背景] 提交任务失败:`, response.status);
-      console.error(`[Coze去除背景] 错误响应体:`, errorText);
-      console.error(`[Coze去除背景] 错误响应体长度:`, errorText.length);
-      throw new Error(`Coze去除背景调用失败: ${response.status} ${response.statusText}`);
+    if (result.success) {
+      console.log(`[Coze去除背景] ========== 去除背景成功 ==========`);
+      return {
+        success: true,
+        resultUrl: result.resultUrl,
+        removedBgUrl: result.removedBgUrl,
+        processedImageUrl: result.processedImageUrl,
+      };
     }
 
-    const data = await response.json();
-    console.log(`[Coze去除背景] 响应数据:`, JSON.stringify(data, null, 2));
-
-    // Coze工作流可能直接返回结果，也可能返回异步任务
-    // 支持两种格式：
-    // 1. 直接格式: { result_url: "...", removed_bg_url: "...", processed_image_url: "..." }
-    // 2. 嵌套格式: { data: { output: { result_url: "...", removed_bg_url: "...", processed_image_url: "..." } } }
-
-    // 先尝试直接格式
-    if (data.result_url || data.removed_bg_url || data.processed_image_url) {
-      const resultUrl = data.result_url;
-      const removedBgUrl = data.removed_bg_url;
-      const processedImageUrl = data.processed_image_url;
-
-      // 如果至少有removedBgUrl，就认为成功
-      if (removedBgUrl || processedImageUrl) {
-        console.log(`[Coze去除背景] ========== 去除背景成功 ==========`);
-        console.log(`[Coze去除背景] resultUrl: ${resultUrl ? resultUrl.substring(0, 80) : 'none'}...`);
-        console.log(`[Coze去除背景] removedBgUrl: ${removedBgUrl ? removedBgUrl.substring(0, 80) : 'none'}...`);
-        console.log(`[Coze去除背景] processedImageUrl: ${processedImageUrl ? processedImageUrl.substring(0, 80) : 'none'}...`);
-        return {
-          success: true,
-          resultUrl,
-          removedBgUrl,
-          processedImageUrl,
-        };
-      }
-    }
-
-    // 再尝试嵌套格式
-    if (data.data && data.data.output) {
-      let resultUrl: string | undefined;
-      let removedBgUrl: string | undefined;
-      let processedImageUrl: string | undefined;
-
-      // 提取三个URL字段
-      if (data.data.output.result_url) {
-        resultUrl = data.data.output.result_url;
-      }
-      if (data.data.output.removed_bg_url) {
-        removedBgUrl = data.data.output.removed_bg_url;
-      }
-      if (data.data.output.processed_image_url) {
-        processedImageUrl = data.data.output.processed_image_url;
-      }
-
-      if (removedBgUrl && processedImageUrl) {
-        console.log(`[Coze去除背景] ========== 去除背景成功 ==========`);
-        console.log(`[Coze去除背景] resultUrl: ${resultUrl ? resultUrl.substring(0, 80) : 'none'}...`);
-        console.log(`[Coze去除背景] removedBgUrl: ${removedBgUrl.substring(0, 80)}...`);
-        console.log(`[Coze去除背景] processedImageUrl: ${processedImageUrl.substring(0, 80)}...`);
-        return {
-          success: true,
-          resultUrl,
-          removedBgUrl,
-          processedImageUrl,
-        };
-      }
-    }
-
-    // 如果没有找到结果URL，可能是异步模式或错误
-    console.error(`[Coze去除背景] 未能从响应中提取图片URL`);
     return {
       success: false,
-      errorMsg: 'Coze去除背景返回格式异常，未找到图片URL',
+      errorMsg: result.errorMsg,
+      isTimeout: result.isTimeout,
     };
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error(`[Coze去除背景] ========== 去除背景失败 ==========`);
-    console.error(`[Coze去除背景] 错误:`, error.message);
+    console.error(`[Coze去除背景] 错误:`, error instanceof Error ? error.message : error);
 
     // 检测是否为超时错误
-    const isTimeout = error.message?.includes('超时') || error.name === 'AbortError';
+    const isTimeout = error instanceof Error && (error.message?.includes('超时') || error.name === 'AbortError');
 
     return {
       success: false,
-      errorMsg: error.message || 'Coze去除背景失败',
+      errorMsg: error instanceof Error ? error.message : 'Coze去除背景失败',
       isTimeout,
     };
   }
@@ -360,78 +215,168 @@ async function uploadImageToStorage(imageUrl: string, orderId: string): Promise<
   }
 }
 
+function getPublicBaseUrl(request: NextRequest): string {
+  const forwardedProto = request.headers.get('x-forwarded-proto');
+  const forwardedHost = request.headers.get('x-forwarded-host');
+  const host = forwardedHost || request.headers.get('host');
+
+  if (host) {
+    return `${forwardedProto || request.nextUrl.protocol.replace(':', '') || 'http'}://${host}`;
+  }
+
+  return process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
+}
+
+async function normalizeWorkflowSourceImage(imageUrl: string, orderId: string, publicBaseUrl: string): Promise<string> {
+  console.log(`[彩绘提取2工作流] 开始标准化工作流输入图片: ${imageUrl.substring(0, 80)}...`);
+  let sourceBuffer: Buffer;
+
+  const localMaterialPrefix = '/api/material-file/';
+  if (imageUrl.includes(localMaterialPrefix)) {
+    const url = new URL(imageUrl);
+    const relativePath = decodeURIComponent(url.pathname.slice(localMaterialPrefix.length));
+    const segments = relativePath.split('/').filter(Boolean);
+    const root = segments[0];
+
+    if (!root || !localUploadRoots.has(root)) {
+      throw new Error('工作流输入图片路径无效');
+    }
+
+    const publicRoot = path.join(process.cwd(), 'public');
+    const filePath = path.join(publicRoot, ...segments);
+    if (!filePath.startsWith(publicRoot)) {
+      throw new Error('工作流输入图片路径无效');
+    }
+
+    sourceBuffer = await readFile(filePath);
+  } else {
+    const response = await fetch(imageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Referer: imageUrl,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`下载工作流输入图片失败 (${response.status})`);
+    }
+
+    sourceBuffer = Buffer.from(await response.arrayBuffer());
+  }
+
+  const normalizedBuffer = await sharp(sourceBuffer)
+    .rotate()
+    .flatten({ background: '#ffffff' })
+    .jpeg({ quality: 92, mozjpeg: true })
+    .toBuffer();
+
+  const fileName = `color-extraction/${orderId}-workflow-source.jpg`;
+
+  try {
+    const uploadedUrl = await uploadToCozeStorage(normalizedBuffer, fileName, 'image/jpeg');
+    console.log(`[彩绘提取2工作流] 工作流输入图片已上传到对象存储: ${uploadedUrl.substring(0, 80)}...`);
+    return uploadedUrl;
+  } catch (error) {
+    console.warn('[彩绘提取2工作流] 工作流输入图上传对象存储失败，回退本地存储:', error);
+    const localUrl = await saveBufferToLocalMaterialFile(normalizedBuffer, fileName);
+    console.log(`[彩绘提取2工作流] 工作流输入图片已保存到本地: ${localUrl}`);
+    return new URL(localUrl, publicBaseUrl).toString();
+  }
+}
+
+async function persistExternalResultImage(
+  sourceUrl: string,
+  relativeFilePath: string,
+  publicBaseUrl: string
+): Promise<string> {
+  try {
+    return await uploadFromUrlToCozeStorage(sourceUrl, relativeFilePath, 'image/png');
+  } catch (error) {
+    console.warn('[彩绘提取2工作流] 结果图上传对象存储失败，回退本地存储:', error);
+
+    const response = await fetch(sourceUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Referer: sourceUrl,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`下载结果图片失败 (${response.status})`);
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const localUrl = await saveBufferToLocalMaterialFile(buffer, relativeFilePath);
+    return new URL(localUrl, publicBaseUrl).toString();
+  }
+}
+
+async function persistImageBestEffort(
+  sourceUrl: string,
+  relativeFilePath: string,
+  publicBaseUrl: string
+): Promise<{ url: string; persisted: boolean; error?: string }> {
+  try {
+    const url = await persistExternalResultImage(sourceUrl, relativeFilePath, publicBaseUrl);
+    return { url, persisted: true };
+  } catch (error) {
+    console.error('[彩绘提取2工作流] 持久化图片失败，保留原始结果URL:', error);
+    return {
+      url: sourceUrl,
+      persisted: false,
+      error: error instanceof Error ? error.message : '持久化图片失败',
+    };
+  }
+}
+
 /**
- * 使用RunningHub API进行分层，并生成PSD文件
+ * 使用分层接口层进行分层，并生成PSD文件
  * @param extractionImageUrl 提取的图片URL（用于分层）
  * @param orderId 订单号
  * @param additionalImageUrl 额外图片URL（可选，将作为额外图层添加到PSD中）
  * @returns PSD文件的URL
  */
 async function processRunningHubLayeringAndPsd(extractionImageUrl: string, orderId: string, additionalImageUrl?: string): Promise<{ psdUrl?: string; error?: string }> {
-  console.log(`[RunningHub分层+PSD] ========== 开始RunningHub分层工作流 ==========`);
+  console.log(`[RunningHub分层+PSD] ========== 开始分层与PSD工作流 ==========`);
   console.log(`[RunningHub分层+PSD] 输入图片URL: ${extractionImageUrl.substring(0, 80)}...`);
   console.log(`[RunningHub分层+PSD] 订单号: ${orderId}`);
 
   try {
+    const cozeStorage = getCozeStorage();
     // 步骤1: 下载提取图片并上传到对象存储（与彩绘提取1保持一致）
     console.log(`[RunningHub分层+PSD] 步骤1: 下载图片并上传到对象存储`);
     const uploadedImageUrl = await uploadImageToStorage(extractionImageUrl, orderId);
     console.log(`[RunningHub分层+PSD] 图片已上传: ${uploadedImageUrl.substring(0, 80)}...`);
 
-    // 步骤2: 创建RunningHub分层任务（使用上传后的URL）
-    console.log(`[RunningHub分层+PSD] 步骤2: 创建RunningHub分层任务`);
-    const taskId = await createTask(uploadedImageUrl);
-    console.log(`[RunningHub分层+PSD] 任务创建成功: ${taskId}`);
+    // 步骤2: 获取分层结果
+    console.log(`[RunningHub分层+PSD] 步骤2: 调用分层接口层`);
+    const decomposition = await decomposeLayersWithRunningHub(uploadedImageUrl);
+    console.log(`[RunningHub分层+PSD] 分层来源: ${decomposition.source}, 图层数量: ${decomposition.layers.length}`);
 
-    // 步骤3: 轮询等待任务完成
-    console.log(`[RunningHub分层+PSD] 步骤3: 轮询等待任务完成（最多9分钟）`);
-    await waitForTaskComplete(taskId, 9);
-    console.log(`[RunningHub分层+PSD] 任务完成: ${taskId}`);
-
-    // 步骤4: 获取分层结果
-    console.log(`[RunningHub分层+PSD] 步骤4: 获取分层结果`);
-    const outputs = await getTaskOutputs(taskId);
-    console.log(`[RunningHub分层+PSD] 获取到分层结果，数量: ${outputs.length}`);
-
-    if (!outputs || outputs.length === 0) {
-      throw new Error('RunningHub分层任务未返回任何结果');
-    }
-
-    // 提取PNG图片URL
-    const layerUrls = outputs
-      .filter((output: any) => output.fileType === 'png' && output.fileUrl)
-      .map((output: any) => output.fileUrl);
-    console.log(`[RunningHub分层+PSD] 提取到PNG图层数量: ${layerUrls.length}`);
-
-    if (layerUrls.length === 0) {
-      throw new Error('RunningHub分层任务未返回PNG图片');
-    }
+    const layers = [...decomposition.layers];
 
     // 如果有额外图片URL，将其添加到图层列表中
     if (additionalImageUrl) {
       console.log(`[RunningHub分层+PSD] 添加额外图层: ${additionalImageUrl.substring(0, 80)}...`);
-      layerUrls.push(additionalImageUrl);
-      console.log(`[RunningHub分层+PSD] 图层总数（含额外图层）: ${layerUrls.length}`);
+      layers.push({
+        name: '背景图（原图）',
+        kind: 'background',
+        imageUrl: additionalImageUrl,
+        zIndex: layers.length,
+      });
+      console.log(`[RunningHub分层+PSD] 图层总数（含额外图层）: ${layers.length}`);
     }
 
-    // 步骤5: 合并图层为PSD文件
-    console.log(`[RunningHub分层+PSD] 步骤5: 合并图层为PSD文件`);
-
-    // 构建图层信息，标记额外图层
-    const layerInfos: PsdLayerConfig[] = layerUrls.map((url, index) => {
-      const isAdditional = index === layerUrls.length - 1 && additionalImageUrl;
-      return {
-        url,
-        name: isAdditional ? '背景图（原图）' : `Layer ${index + 1}`,
-        ...(isAdditional && { isBackground: true }),
-      };
+    // 步骤3: 合并图层为PSD文件
+    console.log(`[RunningHub分层+PSD] 步骤3: 合并图层为PSD文件`);
+    const psdBuffer = await generatePsdFromDecomposition({
+      ...decomposition,
+      layers,
     });
-
-    const psdBuffer = await mergeImagesToPsd(layerInfos);
     console.log(`[RunningHub分层+PSD] PSD文件生成成功，大小: ${psdBuffer.length} bytes`);
 
-    // 步骤6: 上传PSD文件到对象存储
-    console.log(`[RunningHub分层+PSD] 步骤6: 上传PSD文件到对象存储`);
+    // 步骤4: 上传PSD文件到对象存储
+    console.log(`[RunningHub分层+PSD] 步骤4: 上传PSD文件到对象存储`);
     const fileName = `cjkch_PSD/${orderId}.psd`;
     const psdKey = await cozeStorage.uploadFile({
       fileContent: psdBuffer,
@@ -526,10 +471,13 @@ export async function POST(request: NextRequest) {
     }
 
     finalOrderId = orderId || `ORD${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+    const publicBaseUrl = getPublicBaseUrl(request);
+    const workflowInputImageUrl = await normalizeWorkflowSourceImage(imageUrl, finalOrderId, publicBaseUrl);
 
     console.log(`[彩绘提取2工作流] 开始处理订单: ${finalOrderId}`);
     console.log(`[彩绘提取2工作流] 用户: ${userId}, 积分: ${currentPoints}`);
     console.log(`[彩绘提取2工作流] 图片URL: ${imageUrl.substring(0, 80)}...`);
+    console.log(`[彩绘提取2工作流] 工作流输入URL: ${workflowInputImageUrl.substring(0, 80)}...`);
 
     await transactionManager.createTransaction({
       userId: userId,
@@ -542,6 +490,7 @@ export async function POST(request: NextRequest) {
       resultData: null,
       requestParams: JSON.stringify({
         imageUrl: imageUrl,
+        workflowInputImageUrl,
         extractionMode: extractionMode,
         actualExtractionMode: 'pending', // 后续更新
         workflow: extractionMode === 'hollow'
@@ -566,18 +515,18 @@ export async function POST(request: NextRequest) {
     
     if (extractionMode === 'hollow') {
       console.log(`[彩绘提取2工作流] 使用镂空图模式（去除背景API）`);
-      extractionResult = await submitCozeRemoveBgWorkflowTask(imageUrl);
+      extractionResult = await submitCozeRemoveBgWorkflowTask(workflowInputImageUrl);
       
       // 如果镂空图模式失败，自动降级到全屏图模式
       if (!extractionResult.success) {
         console.warn(`[彩绘提取2工作流] ========== 镂空图模式失败，自动降级到全屏图模式 ==========`);
         console.warn(`[彩绘提取2工作流] 失败原因: ${extractionResult.errorMsg}`);
         actualExtractionMode = 'full';
-        extractionResult = await extractColorExtractionWithFallback(imageUrl, workflowStartTime);
+        extractionResult = await extractColorExtractionWithFallback(workflowInputImageUrl, workflowStartTime);
       }
     } else {
-      console.log(`[彩绘提取2工作流] 使用全屏图模式（彩绘提取API）`);
-      extractionResult = await extractColorExtractionWithFallback(imageUrl, workflowStartTime);
+      console.log(`[彩绘提取2工作流] 使用全屏图模式（Psydo 图生图彩绘提取API）`);
+      extractionResult = await extractColorExtractionWithFallback(workflowInputImageUrl, workflowStartTime);
     }
 
     console.log(`[彩绘提取2工作流] ========== 提取函数返回结果 ==========`);
@@ -610,23 +559,27 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // 步骤1.5: 下载图片并上传到对象存储
-      console.log('[彩绘提取2工作流] 步骤1.5: 下载生成的图片并上传到对象存储');
-      const fileName = `cjkch_result/${finalOrderId}.png`;
-      const dualStorageResult = await uploadFromUrlToCozeStorage(extractionImageUrl, fileName, 'image/png');
-      console.log(`[彩绘提取2工作流] 提取图片已保存到对象存储: ${dualStorageResult.substring(0, 80)}...`);
+      // 步骤1.5: 尽力持久化结果图片，但不能影响主结果成功
+      console.log('[彩绘提取2工作流] 步骤1.5: 持久化生成的图片（失败则保留原始结果URL）');
+      const fileName = `color-extraction/${finalOrderId}-result.png`;
+      const persistedResult = await persistImageBestEffort(extractionImageUrl, fileName, publicBaseUrl);
+      extractionImageUrl = persistedResult.url;
+      if (persistedResult.persisted) {
+        console.log(`[彩绘提取2工作流] 提取图片已持久化: ${extractionImageUrl.substring(0, 80)}...`);
+      } else {
+        console.warn(`[彩绘提取2工作流] 提取图片持久化失败，继续使用原始结果URL: ${persistedResult.error}`);
+      }
 
-      // 使用对象存储的URL替换原始URL
-      extractionImageUrl = dualStorageResult;
-
-      // 如果是镂空图模式，也需要将额外图层保存到双存储
+      // 如果是镂空图模式，也尽力持久化额外图层，但不能影响主流程成功
       if (actualExtractionMode === 'hollow' && processingImageUrl) {
-        const additionalFileName = `cjkch_result/${finalOrderId}_additional.png`;
-        const additionalStorageResult = await uploadFromUrlToCozeStorage(processingImageUrl, additionalFileName, 'image/png');
-        console.log(`[彩绘提取2工作流] 额外图层已保存到对象存储: ${additionalStorageResult.substring(0, 80)}...`);
-
-        // 使用对象存储的URL替换原始URL
-        processingImageUrl = additionalStorageResult;
+        const additionalFileName = `color-extraction/${finalOrderId}-additional.png`;
+        const persistedAdditional = await persistImageBestEffort(processingImageUrl, additionalFileName, publicBaseUrl);
+        processingImageUrl = persistedAdditional.url;
+        if (persistedAdditional.persisted) {
+          console.log(`[彩绘提取2工作流] 额外图层已持久化: ${processingImageUrl.substring(0, 80)}...`);
+        } else {
+          console.warn(`[彩绘提取2工作流] 额外图层持久化失败，继续使用原始结果URL: ${persistedAdditional.error}`);
+        }
       }
     } else {
       errorMsg = extractionResult.errorMsg || '彩绘提取失败';

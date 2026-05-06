@@ -6,7 +6,7 @@ import { showToast } from '@/lib/toast';
 import { clearCache } from '@/lib/globalRecordManager';
 import { ImageThumbnail } from '@/components/ui/ImageThumbnail';
 
-export type TabType = 'color-extraction' | 'auto-remove-bg' | 'watermark' | 'custom';
+export type TabType = 'color-extraction' | 'auto-remove-bg' | 'watermark' | 'custom' | 'ai-generate';
 export type FilterType = 'all' | TabType;
 type TaskCenterFilter = 'all' | 'processing' | 'success' | 'failed';
 export type TaskStatus = '处理中' | '成功' | '失败' | '超时' | '部分成功';
@@ -27,6 +27,7 @@ export interface TaskRecord {
   aspectRatio?: string; // 图像比例
   imageSize?: string; // 分辨率
   generateCount?: number; // 【新增】预期生成数量（用于判断部分成功）
+  errorMessage?: string; // 失败原因
 }
 
 interface TaskHistoryProps {
@@ -100,14 +101,6 @@ function getOrderSuffix(orderId?: string) {
   return orderId.slice(-6);
 }
 
-function isToday(timestamp: number) {
-  const date = new Date(timestamp);
-  const now = new Date();
-  return date.getFullYear() === now.getFullYear()
-    && date.getMonth() === now.getMonth()
-    && date.getDate() === now.getDate();
-}
-
 function getTaskDateGroup(timestamp: number) {
   const date = new Date(timestamp);
   const now = new Date();
@@ -121,33 +114,12 @@ function getTaskDateGroup(timestamp: number) {
 }
 
 function getTaskStatusLabel(task: TaskRecord) {
-  if (task.status === '成功') return '生成成功';
-  if (task.status === '失败') return '生成失败';
-  if (task.status === '超时') return '已超时';
+  if (task.status === '成功') return '成功';
+  if (task.status === '失败') return '失败';
+  if (task.status === '超时') return '超时';
   if (task.status === '部分成功') return '部分成功';
-  if (task.status === '处理中' && Date.now() - task.time < 15000) return '排队中';
   if (task.status === '处理中') return '处理中';
-  return '生成成功';
-}
-
-function getTaskProgressText(task: TaskRecord) {
-  if (task.status === '成功') return '结果已生成，可查看或下载。';
-  if (task.status === '失败') return '任务失败，可回到对应工具重新提交。';
-  if (task.status === '超时') return '处理时间过长，建议刷新或重新提交。';
-  if (task.status === '部分成功') return '部分结果已生成，可先查看可用结果。';
-
-  switch (task.tab) {
-    case 'color-extraction':
-      return '正在提取彩绘图案...';
-    case 'watermark':
-      return '正在清理水印...';
-    case 'custom':
-      return '正在增强图片细节...';
-    case 'auto-remove-bg':
-      return '等待生成接口处理...';
-    default:
-      return '正在处理任务...';
-  }
+  return '成功';
 }
 
 function getStatusClasses(status?: TaskStatus) {
@@ -158,11 +130,26 @@ function getStatusClasses(status?: TaskStatus) {
   return 'border-blue-400/50 bg-blue-500/12 text-blue-200';
 }
 
+function getTaskCardClasses(status?: TaskStatus) {
+  if (status === '成功') return 'border-emerald-400/16 bg-emerald-500/[0.055] hover:border-emerald-300/28 hover:bg-emerald-500/[0.075]';
+  if (status === '失败') return 'border-red-400/18 bg-red-500/[0.05] hover:border-red-300/28 hover:bg-red-500/[0.07]';
+  if (status === '超时') return 'border-amber-400/18 bg-amber-500/[0.05] hover:border-amber-300/28 hover:bg-amber-500/[0.07]';
+  if (status === '部分成功') return 'border-orange-400/18 bg-orange-500/[0.05] hover:border-orange-300/28 hover:bg-orange-500/[0.07]';
+  return 'border-blue-400/18 bg-blue-500/[0.05] hover:border-blue-300/28 hover:bg-blue-500/[0.07]';
+}
+
 function matchesTaskCenterFilter(task: TaskRecord, filter: TaskCenterFilter) {
   if (filter === 'all') return true;
   if (filter === 'processing') return task.status === '处理中';
   if (filter === 'success') return task.status === '成功' || task.status === '部分成功' || !task.status;
   return task.status === '失败' || task.status === '超时';
+}
+
+function getStatusPriority(status?: TaskStatus) {
+  if (status === '处理中') return 0;
+  if (status === '失败' || status === '超时') return 1;
+  if (status === '部分成功') return 2;
+  return 3;
 }
 
 function getStoredUserId(): string | null {
@@ -212,12 +199,20 @@ export const getCachedTasks = () => {
   return getTaskCache();
 };
 
-// 清理过期的缓存记录（超过10分钟）
+// 清理缓存中已经没有意义的临时记录。
+// 这里只移除没有订单号、且超过24小时的临时前端占位记录，
+// 已入库的历史任务应长期保留并始终由后端接口返回。
 const cleanExpiredCache = (userId?: string) => {
   const now = Date.now();
-  const tenMinutes = 10 * 60 * 1000;
+  const oneDay = 24 * 60 * 60 * 1000;
   const currentRecords = getTaskCache(userId);
-  const filteredRecords = currentRecords.filter((record) => now - record.time <= tenMinutes);
+  const filteredRecords = currentRecords.filter((record) => {
+    if (record.orderId) {
+      return true;
+    }
+
+    return now - record.time <= oneDay;
+  });
   setTaskCache(filteredRecords, userId);
 
   if (filteredRecords.length < currentRecords.length) {
@@ -328,7 +323,7 @@ const loadTasksFromDatabase = async (userId?: string): Promise<TaskRecord[]> => 
     // 【优化】先尝试从缓存加载
     let response: Response;
     try {
-      response = await fetch(`/api/user/transactions?userId=${userData.id}`, {
+      response = await fetch(`/api/user/transactions?userId=${userData.id}&limit=200`, {
         credentials: 'include',
       });
       } catch (fetchError: unknown) {
@@ -415,6 +410,7 @@ export const forceRefreshCache = (userId?: string) => {
 
       // 解析 resultData 获取图片 URL（支持多图片数组）
       let imageUrl: string | string[] = '';
+      let errorMessage: string | undefined;
       if (item.resultData) {
         if (Array.isArray(item.resultData)) {
           // 【新增】如果resultData已经是数组（多图片），直接使用
@@ -424,6 +420,10 @@ export const forceRefreshCache = (userId?: string) => {
           // 如果resultData是对象，尝试获取imageUrl字段
           const resultDataObject = item.resultData as ResultDataObject;
           imageUrl = resultDataObject.imageUrl || resultDataObject.image_url || resultDataObject.result_image_url || '';
+          const errorValue = resultDataObject.error;
+          if (typeof errorValue === 'string' && errorValue.trim()) {
+            errorMessage = errorValue.trim();
+          }
           console.log('[TaskHistory] resultData是对象，提取imageUrl');
         } else if (typeof item.resultData === 'string') {
           // 如果resultData是字符串，可能是单个URL或JSON数组
@@ -441,6 +441,9 @@ export const forceRefreshCache = (userId?: string) => {
           } catch {
             // 不是JSON格式，直接使用字符串
             imageUrl = item.resultData;
+            if (!item.resultData.startsWith('http://') && !item.resultData.startsWith('https://') && !item.resultData.startsWith('/')) {
+              errorMessage = item.resultData;
+            }
             console.log('[TaskHistory] resultData无法解析为JSON，使用原始字符串');
           }
         }
@@ -564,7 +567,10 @@ export const forceRefreshCache = (userId?: string) => {
       let tabName: string = '彩绘提取';
 
       // AI生图判断：兼容旧的“智能抠图”数据和订单号前缀
-      if (item.toolPage === '智能抠图' || item.orderNumber?.startsWith('ARB-')) {
+      if (item.toolPage === 'AI生图' || item.toolPage === 'AI生图（图生图）' || item.description?.includes('AI生图') || item.orderNumber?.startsWith('AIG')) {
+        tab = 'ai-generate';
+        tabName = 'AI生图';
+      } else if (item.toolPage === '智能抠图' || item.orderNumber?.startsWith('ARB-')) {
         tab = 'auto-remove-bg';
         tabName = 'AI生图';
       } else if (item.toolPage === '彩绘提取' || item.toolPage === '彩绘提取2' || item.description?.includes('彩绘提取')) {
@@ -612,9 +618,14 @@ export const forceRefreshCache = (userId?: string) => {
         aspectRatio,
         imageSize,
         generateCount, // 【新增】预期生成数量
+        errorMessage,
       };
     })
-    .sort((a: TaskRecord, b: TaskRecord) => b.time - a.time); // 按时间倒序排列
+    .sort((a: TaskRecord, b: TaskRecord) => {
+      const statusDiff = getStatusPriority(a.status) - getStatusPriority(b.status);
+      if (statusDiff !== 0) return statusDiff;
+      return b.time - a.time;
+    }); // 处理中在前，失败紧跟其后
 
   return tasks;
 };
@@ -674,19 +685,33 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   const [showCopySuccessForOrder, setShowCopySuccessForOrder] = useState<string | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [deletingOrder, setDeletingOrder] = useState<string | null>(null);
+  const [generatingPsdOrder, setGeneratingPsdOrder] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState<FilterType>('all');
   const [statusFilter, setStatusFilter] = useState<TaskCenterFilter>('all');
+  const [showAllHistory, setShowAllHistory] = useState(false);
   const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null);
   const taskCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const processingCount = tasks.filter((task) => task.status === '处理中').length;
-  const completedTodayCount = tasks.filter((task) => (task.status === '成功' || task.status === '部分成功') && isToday(task.time)).length;
   const failedCount = tasks.filter((task) => task.status === '失败' || task.status === '超时').length;
-  const visibleTasks = tasks.filter((task) =>
+
+  const historySourceTasks = showAllHistory ? tasks : tasks.slice(0, 20);
+  const visibleTasks = historySourceTasks.filter((task) =>
     (filterTab === 'all' || task.tab === filterTab) && matchesTaskCenterFilter(task, statusFilter)
   );
   const groupedVisibleTasks = visibleTasks.reduce<Array<{ label: string; tasks: TaskRecord[] }>>((groups, task) => {
-    const label = getTaskDateGroup(task.time);
+    let label = '历史';
+
+    if (task.status === '处理中') {
+      label = '处理中';
+    } else if (task.status === '失败' || task.status === '超时') {
+      label = '失败';
+    } else if (task.status === '成功' || task.status === '部分成功') {
+      label = '成功';
+    } else {
+      label = getTaskDateGroup(task.time);
+    }
+
     const existing = groups.find((group) => group.label === label);
     if (existing) {
       existing.tasks.push(task);
@@ -695,6 +720,17 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     }
     return groups;
   }, []);
+  const groupOrder = ['处理中', '失败', '成功'];
+  groupedVisibleTasks.sort((a, b) => {
+    const aIndex = groupOrder.indexOf(a.label);
+    const bIndex = groupOrder.indexOf(b.label);
+    if (aIndex !== -1 || bIndex !== -1) {
+      const normalizedA = aIndex === -1 ? 999 : aIndex;
+      const normalizedB = bIndex === -1 ? 999 : bIndex;
+      return normalizedA - normalizedB;
+    }
+    return 0;
+  });
 
   // 自动隐藏定时器
   const autoHideTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -819,6 +855,25 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     };
   }, [highlightTaskId, isCollapsed]);
 
+  useEffect(() => {
+    if (isCollapsed) {
+      return;
+    }
+
+    const hasProcessingTask = tasks.some((task) => task.status === '处理中');
+    if (!hasProcessingTask) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadTasks(userId);
+    }, 4000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isCollapsed, loadTasks, tasks, userId]);
+
 
 
   // 格式化时间
@@ -905,14 +960,40 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     }
   };
 
-  const openTaskResult = (task: TaskRecord) => {
-    const resultImage = getFirstImage(task.imageUrl);
-    if (!isImageValue(resultImage)) {
-      showToast('该任务暂无可查看结果', 'error');
+  const handleGeneratePsd = async (task: TaskRecord) => {
+    if (!task.orderId) {
+      showToast('订单号缺失，无法生成PSD', 'error');
       return;
     }
 
-    setPreviewImageUrl(resultImage);
+    const resultImage = getFirstImage(task.imageUrl);
+    if (!isImageValue(resultImage)) {
+      showToast('该订单暂无可用于分层的结果图', 'error');
+      return;
+    }
+
+    setGeneratingPsdOrder(task.orderId);
+    try {
+      const response = await fetch('/api/color-extraction2/generate-psd', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ orderNumber: task.orderId }),
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || 'PSD生成失败');
+      }
+
+      showToast(result.message || 'PSD生成成功', 'success');
+      await loadTasks();
+    } catch (error) {
+      console.error('[TaskHistory] 手动生成PSD失败:', error);
+      showToast(error instanceof Error ? error.message : 'PSD生成失败，请重试', 'error');
+    } finally {
+      setGeneratingPsdOrder(null);
+    }
   };
 
   const openPsdUrl = (task: TaskRecord) => {
@@ -1042,8 +1123,9 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       'all': '全部',
       'color-extraction': '彩绘提取',
       'auto-remove-bg': 'AI生图',
+      'ai-generate': 'AI生图',
       'watermark': '去除水印',
-      'custom': '自定义',
+      'custom': '其他工具',
     };
     return labels[filter] || filter;
   };
@@ -1133,8 +1215,6 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                 <span className="[writing-mode:vertical-rl] text-xs font-medium tracking-[0.22em] text-white/78">任务中心</span>
                 {processingCount > 0 ? (
                   <span className="rounded-full bg-blue-500/20 px-1.5 py-1 text-[10px] text-blue-200 [writing-mode:vertical-rl]">处理中{processingCount}</span>
-                ) : failedCount > 0 ? (
-                  <span className="rounded-full bg-red-500/18 px-1.5 py-1 text-[10px] text-red-200 [writing-mode:vertical-rl]">失败{failedCount}</span>
                 ) : (
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                 )}
@@ -1154,11 +1234,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                     <p className="text-xs text-white/42">订单进度、结果与下载</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="rounded-full border border-blue-400/25 bg-blue-500/12 px-2 py-1 text-blue-200">处理中 {processingCount}</span>
-                  <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2 py-1 text-emerald-200">今日完成 {completedTodayCount}</span>
-                  {failedCount > 0 && <span className="rounded-full border border-red-400/20 bg-red-500/10 px-2 py-1 text-red-200">失败 {failedCount}</span>}
-                </div>
+              
               </div>
               <svg className="h-5 w-5 rotate-180 text-white/45" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -1187,23 +1263,25 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                   </button>
                 ))}
               </div>
-              <div className="mt-3 flex gap-2 overflow-x-auto pb-1 history-scrollbar">
-                {(['all', 'color-extraction', 'auto-remove-bg', 'watermark', 'custom'] as FilterType[]).map((filter) => (
-                  <button
-                    key={filter}
-                    type="button"
-                    onClick={() => setFilterTab(filter)}
-                    className={`shrink-0 rounded-full border px-3 py-1.5 text-xs transition-colors ${filterTab === filter ? 'border-purple-300/45 bg-purple-500/20 text-purple-100' : 'border-white/8 bg-white/[0.04] text-white/45 hover:text-white/75'}`}
+              <div className="mt-3 flex items-center gap-2">
+                <label className="flex items-center gap-2 rounded-full border border-white/8 bg-white/[0.04] px-3 py-2 text-xs text-white/55">
+                  <span>工具</span>
+                  <select
+                    value={filterTab}
+                    onChange={(event) => setFilterTab(event.target.value as FilterType)}
+                    className="bg-transparent text-white outline-none"
                   >
-                    {getFilterLabel(filter)}
-                  </button>
-                ))}
+                    {(['all', 'color-extraction', 'ai-generate', 'auto-remove-bg', 'watermark', 'custom'] as FilterType[]).map((filter) => (
+                      <option key={filter} value={filter} className="bg-[#111]">{getFilterLabel(filter)}</option>
+                    ))}
+                  </select>
+                </label>
               </div>
             </div>
 
             <div className="max-h-[680px] overflow-y-auto px-3 py-3 history-scrollbar">
-              {visibleTasks.length === 0 ? (
-                <div className="rounded-2xl border border-white/8 bg-white/[0.035] px-5 py-10 text-center">
+                {visibleTasks.length === 0 ? (
+                  <div className="rounded-2xl border border-white/8 bg-white/[0.035] px-5 py-10 text-center">
                   <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-white/8 text-white/36">
                     <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -1221,11 +1299,13 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                         <span className="h-px flex-1 bg-white/8" />
                       </div>
                       {group.tasks.map((task) => {
-                        const inputImage = getFirstImage(task.uploadedImage);
                         const resultImage = getFirstImage(task.imageUrl);
                         const hasResult = isImageValue(resultImage);
-                        const isProcessing = task.status === '处理中';
                         const statusLabel = getTaskStatusLabel(task);
+                        const isSuccessTask = task.status === '成功' || task.status === '部分成功' || !task.status;
+                        const isFailedTask = task.status === '失败' || task.status === '超时';
+
+                        const canDelete = task.status !== '处理中';
 
                         return (
                           <div
@@ -1234,93 +1314,94 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                               taskCardRefs.current[task.id] = node;
                             }}
                             onClick={() => onTaskClick?.(task)}
-                            className={`group rounded-2xl border p-3 transition-all ${task.tab === activeTab ? 'border-white/22 bg-white/[0.075]' : 'border-white/10 bg-white/[0.045] hover:border-white/18 hover:bg-white/[0.065]'} ${highlightTaskId === task.id ? 'ring-2 ring-purple-300/70 shadow-[0_0_0_1px_rgba(196,181,253,0.26),0_0_32px_rgba(139,92,246,0.24)]' : ''}`}
+                            className={`group rounded-2xl border p-3 transition-all ${task.status === '失败' || task.status === '超时' ? 'border-red-300/35 bg-red-500/[0.075] hover:border-red-200/50 hover:bg-red-500/[0.095]' : task.tab === activeTab ? 'border-white/22 bg-white/[0.075]' : getTaskCardClasses(task.status)} ${highlightTaskId === task.id ? 'ring-2 ring-purple-300/70 shadow-[0_0_0_1px_rgba(196,181,253,0.26),0_0_32px_rgba(139,92,246,0.24)]' : ''}`}
                           >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex min-w-0 items-center gap-2">
-                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/8 text-purple-200">
-                                  {getTabIcon(task.tab)}
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <h4 className="truncate text-sm font-medium text-white">{task.tabName}</h4>
-                                    <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${getStatusClasses(task.status)}`}>{statusLabel}</span>
-                                  </div>
-                                  <div className="mt-1 flex items-center gap-2 text-[11px] text-white/38">
-                                    <span>{formatTime(task.time)}</span>
-                                    <span>订单#{getOrderSuffix(task.orderId)}</span>
-                                    {task.duration && <span>{task.duration.toFixed(1)}秒</span>}
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-1 text-white/35">
-                                <button type="button" onClick={(e) => copyOrderId(task, e)} className="rounded-lg p-1.5 transition-colors hover:bg-white/10 hover:text-white" title="复制订单号">
-                                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                  </svg>
-                                </button>
-                                <button type="button" onClick={(e) => task.orderId && void deleteTask(task.orderId, e)} disabled={!task.orderId || deletingOrder === task.orderId} className="rounded-lg p-1.5 transition-colors hover:bg-red-500/15 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-40" title="删除记录">
-                                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                  </svg>
+                            <div className="flex items-center gap-3">
+                              <div className="w-[88px] shrink-0 overflow-hidden rounded-xl border border-white/8 bg-black/30 self-start transition-colors group-hover:border-white/16">
+                                <button type="button" onClick={(e) => { e.stopPropagation(); if (hasResult) setPreviewImageUrl(resultImage); }} className="block w-full text-left">
+                                  {hasResult ? (
+                                    <ImageThumbnail src={resultImage} alt="结果图" width={88} height={88} thumbnailSize="small" className="h-[88px] w-[88px] object-cover transition duration-200 group-hover:scale-[1.02] group-hover:opacity-90" />
+                                  ) : (
+                                    <div className="flex h-[88px] w-[88px] items-center justify-center text-[11px] text-white/32 text-center leading-tight px-2">
+                                      {task.status === '处理中' ? '处理中' : '暂无结果'}
+                                    </div>
+                                  )}
                                 </button>
                               </div>
-                            </div>
 
-                            <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-                              <div className="overflow-hidden rounded-xl border border-white/8 bg-black/30">
-                                {isImageValue(inputImage) ? (
-                                  <ImageThumbnail src={inputImage} alt="原图" width={120} height={82} thumbnailSize="small" className="h-[82px] w-full object-cover" />
-                                ) : (
-                                  <div className="flex h-[82px] items-center justify-center text-xs text-white/28">原图</div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-start justify-between gap-2.5">
+                                  <div className="flex min-w-0 items-center gap-2">
+                                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/8 text-purple-200">
+                                      {getTabIcon(task.tab)}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-1.5">
+                                        <h4 className="truncate text-sm font-medium text-white/95 leading-tight">{task.tabName}</h4>
+                                        <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] leading-tight tracking-[0.02em] ${getStatusClasses(task.status)}`}>{statusLabel}</span>
+                                      </div>
+                                      <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-white/30 flex-wrap leading-tight">
+                                        <div className="inline-flex items-center gap-1">
+                                          <span>订单#{getOrderSuffix(task.orderId)}</span>
+                                          <button type="button" onClick={(e) => copyOrderId(task, e)} className="rounded p-0.5 transition-colors hover:bg-white/8 hover:text-white/80" title="复制订单号">
+                                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                            </svg>
+                                          </button>
+                                        </div>
+                                        <span>{formatTime(task.time)}</span>
+                                        {task.duration && <span>{task.duration.toFixed(1)}秒</span>}
+                                      </div>
+                                      {task.status !== '成功' && task.errorMessage && (
+                                        <div className="mt-1 text-[11px] text-red-300/80 line-clamp-2 leading-tight">
+                                          失败原因: {task.errorMessage}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                    <div className="flex items-center gap-1 text-white/35">
+                                     <button type="button" onClick={(e) => task.orderId && canDelete && void deleteTask(task.orderId, e)} disabled={!task.orderId || deletingOrder === task.orderId || !canDelete} className="rounded-lg p-1.5 transition-colors hover:bg-red-500/15 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-40" title={canDelete ? '删除记录' : '处理中任务不能删除'}>
+                                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                      </svg>
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {isSuccessTask && (
+                                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                                    <button type="button" onClick={(e) => { e.stopPropagation(); void downloadTaskImages(task); }} disabled={!hasResult} className="rounded-full border border-white/8 bg-white/[0.05] px-2.5 py-1 text-[11px] text-white/72 transition-colors hover:bg-white/12 disabled:cursor-not-allowed disabled:opacity-40">
+                                      下载
+                                    </button>
+                                    {task.tab === 'color-extraction' && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (task.psdUrl) {
+                                            openPsdUrl(task);
+                                          } else {
+                                            void handleGeneratePsd(task);
+                                          }
+                                        }}
+                                        disabled={generatingPsdOrder === task.orderId}
+                                        className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${task.psdUrl ? 'border-[#31a8ff]/20 bg-[#001e36] text-[#31a8ff] hover:bg-[#001e36]/80' : 'border-amber-300/25 bg-amber-500/15 text-amber-200 hover:bg-amber-500/22'}`}
+                                        title={generatingPsdOrder === task.orderId ? 'PSD生成中' : task.psdUrl ? '下载PSD文件' : '点击生成PSD'}
+                                      >
+                                        {generatingPsdOrder === task.orderId ? '生成中...' : task.psdUrl ? '下载PSD' : '生成PSD'}
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+
+                                {isFailedTask && (
+                                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                                    <button type="button" onClick={(e) => { e.stopPropagation(); showToast('请回到对应工具重新提交该任务', 'info'); }} className="rounded-full border border-red-300/18 bg-red-500/14 px-2.5 py-1 text-[11px] text-red-200 transition-colors hover:bg-red-500/22">
+                                      重新提交
+                                    </button>
+                                  </div>
                                 )}
                               </div>
-                              <div className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-white/35">
-                                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                </svg>
-                              </div>
-                              <button type="button" onClick={(e) => { e.stopPropagation(); if (hasResult) setPreviewImageUrl(resultImage); }} className="overflow-hidden rounded-xl border border-white/8 bg-black/30 text-left">
-                                {hasResult ? (
-                                  <ImageThumbnail src={resultImage} alt="结果图" width={120} height={82} thumbnailSize="small" className="h-[82px] w-full object-cover transition-opacity hover:opacity-80" />
-                                ) : (
-                                  <div className="relative flex h-[82px] items-center justify-center text-xs text-white/32">
-                                    {isProcessing && <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/[0.07] to-transparent animate-pulse" />}
-                                    <span>{isProcessing ? '结果生成中' : '暂无结果'}</span>
-                                  </div>
-                                )}
-                              </button>
-                            </div>
-
-                            <div className="mt-3 rounded-xl border border-white/8 bg-black/18 px-3 py-2">
-                              <div className="flex items-center gap-2 text-xs text-white/58">
-                                {isProcessing && <span className="h-2 w-2 rounded-full bg-blue-400 shadow-[0_0_12px_rgba(96,165,250,0.8)] animate-pulse" />}
-                                <span>{getTaskProgressText(task)}</span>
-                              </div>
-                              {isProcessing && (
-                                <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/8">
-                                  <div className="h-full w-2/3 rounded-full bg-gradient-to-r from-blue-500 via-purple-400 to-blue-500 animate-pulse" />
-                                </div>
-                              )}
-                            </div>
-
-                            <div className="mt-3 flex gap-2">
-                              <button type="button" onClick={(e) => { e.stopPropagation(); openTaskResult(task); }} disabled={!hasResult} className="flex-1 rounded-xl bg-white/8 px-3 py-2 text-xs text-white/72 transition-colors hover:bg-white/14 disabled:cursor-not-allowed disabled:opacity-40">
-                                查看结果
-                              </button>
-                              <button type="button" onClick={(e) => { e.stopPropagation(); void downloadTaskImages(task); }} disabled={!hasResult} className="flex-1 rounded-xl bg-white/8 px-3 py-2 text-xs text-white/72 transition-colors hover:bg-white/14 disabled:cursor-not-allowed disabled:opacity-40">
-                                下载
-                              </button>
-                              {task.tab === 'color-extraction' && (
-                                <button type="button" onClick={(e) => { e.stopPropagation(); openPsdUrl(task); }} disabled={!task.psdUrl} className="rounded-xl bg-[#001e36] px-3 py-2 text-xs text-[#31a8ff] transition-colors hover:bg-[#001e36]/80 disabled:cursor-not-allowed disabled:opacity-40">
-                                  PSD
-                                </button>
-                              )}
-                              {(task.status === '失败' || task.status === '超时') && (
-                                <button type="button" onClick={(e) => { e.stopPropagation(); showToast('请回到对应工具重新提交该任务', 'info'); }} className="rounded-xl bg-red-500/14 px-3 py-2 text-xs text-red-200 transition-colors hover:bg-red-500/22">
-                                  重试
-                                </button>
-                              )}
                             </div>
                           </div>
                         );
@@ -1334,10 +1415,10 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
             {tasks.length > 0 && (
               <div className="flex gap-2 border-t border-white/10 p-3">
                 <button
-                  onClick={() => void loadTasks(userId)}
+                  onClick={() => setShowAllHistory((current) => !current)}
                   className="flex-1 rounded-xl bg-white/8 px-4 py-2 text-sm text-white/75 transition-colors hover:bg-white/14"
                 >
-                  刷新任务
+                  {showAllHistory ? '只看最近20条' : '显示全部历史'}
                 </button>
                 <button
                   onClick={clearHistory}

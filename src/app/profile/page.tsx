@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 import { useUser } from '@/contexts/UserContext';
+import { showToast } from '@/lib/toast';
 
 type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
 
@@ -40,11 +41,12 @@ export default function ProfilePage() {
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [isOpeningAdmin, setIsOpeningAdmin] = useState(false);
 
   // 错误和成功消息
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // 获取用户信息和消费记录
+  // 获取用户信息和积分明细
   useEffect(() => {
     if (isLoading) return;
     if (!user) {
@@ -57,7 +59,7 @@ export default function ProfilePage() {
         // 刷新用户信息
         await refreshUser();
 
-        // 获取消费记录
+        // 获取积分明细
         const transResponse = await fetch(`/api/user/transactions?userId=${user!.id}`);
         const transResult = await transResponse.json();
 
@@ -79,6 +81,54 @@ export default function ProfilePage() {
   const showMessage = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 3000);
+  };
+
+  const handleOpenAdmin = async () => {
+    if (!user?.id || isOpeningAdmin) {
+      return;
+    }
+
+    if (user.isAdmin) {
+      window.location.href = '/admin/generations';
+      return;
+    }
+
+    setIsOpeningAdmin(true);
+
+    try {
+      const response = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      });
+
+      const result = await response.json() as {
+        success?: boolean;
+        data?: { isAdmin?: boolean } & typeof user;
+        message?: string;
+      };
+
+      if (!response.ok || !result.success || !result.data) {
+        showToast(result.message || '管理员会话校验失败，请重新登录', 'error');
+        router.push('/login');
+        return;
+      }
+
+      setUser({ ...user, ...result.data });
+
+      if (!result.data.isAdmin) {
+        showToast('当前账号暂无管理员权限', 'error');
+        return;
+      }
+
+      window.location.href = '/admin/generations';
+    } catch (error) {
+      console.error('[Profile] 打开管理员后台失败:', error);
+      showToast('打开管理员后台失败，请稍后重试', 'error');
+    } finally {
+      setIsOpeningAdmin(false);
+    }
   };
 
   // 获取状态标签
@@ -291,19 +341,20 @@ export default function ProfilePage() {
             <h1 className="text-3xl font-bold text-white mb-2 bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
               个人中心
             </h1>
-            <p className="text-neutral-400">管理您的账号信息和设置</p>
+            <p className="text-neutral-400">管理账号、安全设置与积分信息</p>
 
             {/* 管理员入口 - 仅管理员可见 */}
             {user.isAdmin && (
               <div className="mt-4">
                 <button
-                  onClick={() => router.push('/admin/generations')}
-                  className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg text-sm font-medium text-white hover:from-purple-700 hover:to-blue-700 transition-all shadow-lg shadow-purple-500/30 flex items-center gap-2"
+                  onClick={() => void handleOpenAdmin()}
+                  disabled={isOpeningAdmin}
+                  className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg text-sm font-medium text-white hover:from-purple-700 hover:to-blue-700 transition-all shadow-lg shadow-purple-500/30 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                   </svg>
-                  进入管理员后台
+                  {isOpeningAdmin ? '校验权限中...' : '进入管理员后台'}
                 </button>
               </div>
             )}
@@ -319,7 +370,7 @@ export default function ProfilePage() {
           {/* 复制成功提示 */}
           {showCopySuccess && (
             <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-black/80 backdrop-blur-md text-white px-6 py-3 rounded-lg text-sm shadow-2xl">
-              ✓ 订单号已复制
+              ✓ 编号已复制
             </div>
           )}
 
@@ -328,7 +379,7 @@ export default function ProfilePage() {
             {([
               { key: 'info', label: '基本信息' },
               { key: 'security', label: '安全设置' },
-              { key: 'transactions', label: '消费记录' },
+              { key: 'transactions', label: '积分明细' },
             ] as Array<{ key: ProfileTab; label: string }>).map((tab) => (
               <button
                 key={tab.key}
@@ -494,14 +545,25 @@ export default function ProfilePage() {
             </div>
           )}
 
-          {/* 消费记录标签页 */}
+          {/* 积分明细标签页 */}
           {activeTab === 'transactions' && (
             <div className="bg-white/10 backdrop-blur-2xl rounded-2xl p-8 border border-white/20 shadow-2xl">
-              <h3 className="text-xl font-bold text-white mb-6">消费记录</h3>
+              <div className="mb-6 flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-xl font-bold text-white">积分明细</h3>
+                  <p className="mt-1 text-sm text-white/42">这里查看每笔积分变化；任务进度、结果图和下载入口请到首页右侧任务中心查看。</p>
+                </div>
+                <button
+                  onClick={() => router.push('/home')}
+                  className="shrink-0 rounded-full border border-white/10 bg-white/6 px-3 py-2 text-xs text-white/72 transition-colors hover:bg-white/12 hover:text-white"
+                >
+                  前往任务中心
+                </button>
+              </div>
 
               {transactions.length === 0 ? (
                 <div className="text-center py-12">
-                  <p className="text-neutral-400">暂无消费记录</p>
+                  <p className="text-neutral-400">暂无积分明细</p>
                 </div>
               ) : (
                 <div className="max-h-[600px] overflow-y-auto space-y-3 pr-2 history-scrollbar">
@@ -516,7 +578,7 @@ export default function ProfilePage() {
                           <svg className="w-3 h-3 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                           </svg>
-                          <p className="text-neutral-500 text-xs truncate">{trans.orderNumber}</p>
+                          <p className="text-neutral-500 text-xs truncate">编号 {trans.orderNumber}</p>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -530,7 +592,7 @@ export default function ProfilePage() {
                               }
                             }}
                             className="hover:bg-white/10 rounded p-1 transition-colors cursor-pointer text-neutral-500"
-                            title="复制订单号"
+                            title="复制编号"
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
@@ -554,7 +616,7 @@ export default function ProfilePage() {
                               <img src="/points-icon.png" alt="积分" className="w-3 h-3" />
                             </div>
                           )}
-                          <p className="text-neutral-500 text-xs">剩余: {trans.remainingPoints}</p>
+                          <p className="text-neutral-500 text-xs">剩余积分: {trans.remainingPoints}</p>
                         </div>
                         {getStatusBadge(trans.status)}
                       </div>

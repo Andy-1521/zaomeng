@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const requestedUserId = searchParams.get('userId');
     let userId = requestedUserId;
-    const limit = Math.min(parseInt(searchParams.get('limit') || '50'), 100);
+    const limit = Math.min(parseInt(searchParams.get('limit') || '200'), 200);
     const cursor = searchParams.get('cursor'); // 游标分页：上一页最后一条的 createdAt
     let cookieUserId: string | null = null;
 
