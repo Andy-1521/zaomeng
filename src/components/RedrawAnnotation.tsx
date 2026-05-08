@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react';
 interface RedrawAnnotationProps {
   imageUrl: string;
   onClose: () => void;
-  onSubmit: (data: { maskImageBase64: string; prompt: string }) => void;
+  onSubmit: (data: { maskImageBase64: string; prompt: string; sessionId: string }) => void;
   isSubmitting?: boolean;
 }
 
@@ -45,18 +45,6 @@ function getRegionSummary(region: SelectedRegion, index: number) {
   return target || `区域 ${index + 1}`;
 }
 
-function buildPrompt(regions: SelectedRegion[], instruction: string) {
-  const labels = regions.map((region, index) => getRegionTarget(region) || `第${index + 1}处区域`);
-
-  if (labels.length === 1) {
-    const base = `请只修改图片中“${labels[0]}”所在的局部区域，保持其他部分不变。`;
-    return instruction ? `${base}${instruction}` : `${base}按需要完成局部重绘。`;
-  }
-
-  const base = `请只修改以下局部区域：${labels.map((label) => `“${label}”`).join('、')}，保持其他部分不变。`;
-  return instruction ? `${base}${instruction}` : `${base}按需要完成统一的局部重绘。`;
-}
-
 export default function RedrawAnnotation({
   imageUrl,
   onClose,
@@ -66,6 +54,7 @@ export default function RedrawAnnotation({
   const imgRef = useRef<HTMLImageElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const identifyControllersRef = useRef<Record<string, AbortController>>({});
+  const sessionIdRef = useRef(`redraw-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
 
   const [imageReady, setImageReady] = useState(false);
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
@@ -75,8 +64,13 @@ export default function RedrawAnnotation({
   const [instruction, setInstruction] = useState('');
   const [maskRadius, setMaskRadius] = useState(DEFAULT_MASK_RADIUS);
   const [submitError, setSubmitError] = useState('');
+  const [isResolvingPrompt, setIsResolvingPrompt] = useState(false);
 
-  const activeRegion = regions.find((region) => region.id === activeRegionId) || null;
+  const resolvedActiveRegionId = activeRegionId && regions.some((region) => region.id === activeRegionId)
+    ? activeRegionId
+    : (regions[regions.length - 1]?.id || null);
+
+  const activeRegion = regions.find((region) => region.id === resolvedActiveRegionId) || null;
 
   const abortAllIdentify = () => {
     Object.values(identifyControllersRef.current).forEach((controller) => controller.abort());
@@ -97,35 +91,28 @@ export default function RedrawAnnotation({
   };
 
   useEffect(() => {
-    abortAllIdentify();
-    setImageReady(false);
-    setNaturalSize({ width: 0, height: 0 });
-    setDisplayScale(1);
-    setRegions([]);
-    setActiveRegionId(null);
-    setInstruction('');
-    setMaskRadius(DEFAULT_MASK_RADIUS);
-    setSubmitError('');
-  }, [imageUrl]);
-
-  useEffect(() => {
     return () => {
       abortAllIdentify();
     };
   }, []);
 
   useEffect(() => {
-    if (!regions.length) {
-      if (activeRegionId) {
-        setActiveRegionId(null);
-      }
-      return;
-    }
+    if (!imageUrl) return;
 
-    if (!activeRegionId || !regions.some((region) => region.id === activeRegionId)) {
-      setActiveRegionId(regions[regions.length - 1].id);
-    }
-  }, [regions, activeRegionId]);
+    const controller = new AbortController();
+
+    void fetch('/api/color-extraction2/identify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'prewarm', imageUrl, sessionId: sessionIdRef.current }),
+      signal: controller.signal,
+    }).catch((error) => {
+      if (controller.signal.aborted) return;
+      console.warn('[RedrawAnnotation] 预热识别资源失败:', error);
+    });
+
+    return () => controller.abort();
+  }, [imageUrl]);
 
   useEffect(() => {
     const updateScale = () => {
@@ -185,6 +172,7 @@ export default function RedrawAnnotation({
           clickY: naturalY,
           imageWidth,
           imageHeight,
+          sessionId: sessionIdRef.current,
         }),
         signal: controller.signal,
       });
@@ -347,7 +335,7 @@ export default function RedrawAnnotation({
     });
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const trimmedInstruction = instruction.trim();
 
     if (!regions.length) {
@@ -393,10 +381,14 @@ export default function RedrawAnnotation({
     });
 
     setSubmitError('');
+    setIsResolvingPrompt(true);
+
     onSubmit({
       maskImageBase64: canvas.toDataURL('image/png'),
-      prompt: buildPrompt(regions, trimmedInstruction),
+      prompt: trimmedInstruction,
+      sessionId: sessionIdRef.current,
     });
+    setIsResolvingPrompt(false);
   };
 
   return (
@@ -435,7 +427,7 @@ export default function RedrawAnnotation({
                 {imageReady && naturalSize.width > 0 ? (
                   <div className="pointer-events-none absolute inset-0">
                     {regions.map((region, index) => {
-                      const isActive = region.id === activeRegionId;
+                      const isActive = region.id === resolvedActiveRegionId;
                       const color = getRegionColor(index);
 
                       return (
@@ -643,12 +635,6 @@ export default function RedrawAnnotation({
                 <span>更宽松</span>
               </div>
 
-              {regions.length ? (
-                <div className="mt-4 rounded-2xl bg-slate-950 px-3 py-3 text-xs leading-6 text-slate-100">
-                  <p className="font-medium text-white/80">提交给重绘接口的指令</p>
-                  <p className="mt-2">{buildPrompt(regions, instruction.trim())}</p>
-                </div>
-              ) : null}
             </section>
           </div>
 
@@ -666,16 +652,16 @@ export default function RedrawAnnotation({
               >
                 取消
               </button>
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={isSubmitting}
-                className="flex-1 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isSubmitting ? '提交中...' : '提交重绘'}
-              </button>
+                <button
+                  type="button"
+                  onClick={handleSubmit}
+                  disabled={isSubmitting || isResolvingPrompt}
+                  className="flex-1 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSubmitting ? '提交中...' : isResolvingPrompt ? '处理中...' : '提交重绘'}
+                </button>
+              </div>
             </div>
-          </div>
         </aside>
       </div>
     </div>

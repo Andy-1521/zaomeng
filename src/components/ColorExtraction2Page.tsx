@@ -696,7 +696,7 @@ export default function ColorExtraction2Page() {
     }
   };
 
-  const handleRedrawSubmit = async (data: { maskImageBase64: string; prompt: string }) => {
+  const handleRedrawSubmit = async (data: { maskImageBase64: string; prompt: string; sessionId: string }) => {
     if (!user?.id) {
       showToast('请先登录', 'error');
       return;
@@ -714,6 +714,7 @@ export default function ColorExtraction2Page() {
           originalImageUrl: annotationImageUrl,
           maskImageBase64: data.maskImageBase64,
           prompt: data.prompt,
+          sessionId: data.sessionId,
           description: data.prompt ? `局部重绘: ${data.prompt.substring(0, 60)}` : '局部重绘',
         }),
       });
@@ -1135,6 +1136,7 @@ export default function ColorExtraction2Page() {
 
       {showAnnotation && annotationImageUrl && createPortal(
         <RedrawAnnotation
+          key={annotationImageUrl}
           imageUrl={annotationImageUrl}
           onClose={() => {
             setShowAnnotation(false);

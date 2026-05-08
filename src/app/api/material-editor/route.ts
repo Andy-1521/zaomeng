@@ -3,6 +3,7 @@ import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
 import sharp from 'sharp';
 import { uploadToCozeStorage } from '@/lib/dualStorage';
+import { composePromptFromImage } from '@/lib/materialEditorPrompt';
 import { capturedImageManager } from '@/storage/database';
 import { transactionManager, userManager } from '@/storage/database';
 import { runPsydoImageEditFromUrl } from '@/lib/psydoImageEdits';
@@ -41,8 +42,20 @@ type AnnotatePayload = {
 type RedrawPayload = {
   action?: 'redraw';
   imageUrl?: string;
+  sessionId?: string;
   maskImageBase64?: string;
   prompt?: string;
+  mode?: 'brush' | 'tag';
+  regions?: Array<{
+    id?: string;
+    type?: 'brush' | 'tag';
+    naturalX?: number;
+    naturalY?: number;
+    description?: string;
+    candidates?: string[];
+    selectedCandidate?: string;
+    customTarget?: string;
+  }>;
 };
 
 type EditorPayload = CropPayload | AnnotatePayload | RedrawPayload;
@@ -216,10 +229,27 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, message: `积分不足，当前积分：${user.points}，需要：${REQUIRED_POINTS}` }, { status: 400 });
       }
 
+      const promptResult = await composePromptFromImage({
+        request,
+        imageUrl: body.imageUrl,
+        mode: body.mode === 'tag' ? 'tag' : 'brush',
+        instruction: body.prompt.trim(),
+        regions: Array.isArray(body.regions) ? body.regions : [],
+        sessionId: body.sessionId,
+      });
+
+      console.info('[MaterialEditor] redraw-submit', {
+        sessionId: body.sessionId || 'unknown',
+        mode: body.mode === 'tag' ? 'tag' : 'brush',
+        regionCount: Array.isArray(body.regions) ? body.regions.length : 0,
+        promptSource: promptResult.source,
+      });
+
+      const finalPrompt = `${promptResult.prompt}${promptResult.negativePrompt ? `\n\n负面约束：${promptResult.negativePrompt}` : ''}`.trim();
       const orderNumber = `MD${Date.now()}_${Math.floor(Math.random() * 10000)}`;
       const resultBuffer = await runPsydoImageEditFromUrl({
         imageUrl: resolveImageUrl(body.imageUrl, request),
-        prompt: body.prompt.trim(),
+        prompt: finalPrompt,
         size: '1024x1792',
         quality: 'high',
         maskImageBase64: body.maskImageBase64,
@@ -243,12 +273,12 @@ export async function POST(request: NextRequest) {
         userId,
         orderNumber,
         toolPage: '局部改图',
-        description: `局部改图: ${body.prompt.trim().substring(0, 50)}`,
+        description: `局部改图: ${promptResult.summary.substring(0, 50)}`,
         points: REQUIRED_POINTS,
         actualPoints: REQUIRED_POINTS,
         remainingPoints: updatedUser.points,
         status: '成功',
-        prompt: body.prompt.trim(),
+        prompt: finalPrompt,
         resultData: editedUrl,
         uploadedImage: body.imageUrl,
       });

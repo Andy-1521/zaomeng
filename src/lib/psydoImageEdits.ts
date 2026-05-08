@@ -1,15 +1,7 @@
 import sharp from 'sharp';
+import { buildOpenAICompatUrl, requireOpenAICompatApiKey } from '@/lib/openaiCompatible';
 
-const PSYDO_BASE_URL = 'https://api.psydo.top/v1';
 const PSYDO_IMAGE_MODEL = 'gpt-image-2';
-
-function getRequiredEnv(name: string) {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`缺少环境变量: ${name}`);
-  }
-  return value;
-}
 
 async function fetchImageBuffer(imageUrl: string): Promise<Buffer> {
   const response = await fetch(imageUrl, {
@@ -37,7 +29,7 @@ export async function runPsydoImageEditFromUrl(params: {
   quality?: string;
   maskImageBase64?: string;
 }): Promise<Buffer> {
-  const apiKey = getRequiredEnv('PSYDO_API_KEY');
+  const apiKey = requireOpenAICompatApiKey();
   const sourceBuffer = await fetchImageBuffer(params.imageUrl);
   const normalizedBuffer = await sharp(sourceBuffer).rotate().png().toBuffer();
 
@@ -63,7 +55,7 @@ export async function runPsydoImageEditFromUrl(params: {
     form.append('quality', params.quality);
   }
 
-  const response = await fetch(`${PSYDO_BASE_URL}/images/edits`, {
+  const response = await fetch(buildOpenAICompatUrl('/images/edits'), {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -73,13 +65,13 @@ export async function runPsydoImageEditFromUrl(params: {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Psydo 图像编辑失败: ${response.status} ${errorText.substring(0, 200)}`);
+    throw new Error(`图像编辑失败: ${response.status} ${errorText.substring(0, 200)}`);
   }
 
   const data = await response.json() as { data?: Array<{ b64_json?: string; url?: string }> };
   const first = data.data?.[0];
   if (!first) {
-    throw new Error('Psydo 图像编辑未返回结果');
+    throw new Error('图像编辑未返回结果');
   }
 
   if (first.b64_json) {
@@ -90,5 +82,5 @@ export async function runPsydoImageEditFromUrl(params: {
     return fetchImageBuffer(first.url);
   }
 
-  throw new Error('Psydo 图像编辑返回格式不支持');
+  throw new Error('图像编辑返回格式不支持');
 }
