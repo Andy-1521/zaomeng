@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import sharp from 'sharp';
 import { buildOpenAICompatUrl, getOpenAICompatApiKey } from '@/lib/openaiCompatible';
+import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 
 const FAST_VISION_MODEL = 'gpt-5.4-mini';
 const FALLBACK_VISION_MODELS = ['gpt-5.4'];
@@ -99,29 +100,15 @@ async function callVisionModel(
   return result.choices?.[0]?.message?.content?.trim() || '';
 }
 
-async function fetchImageBuffer(imageUrl: string): Promise<{ buffer: Buffer; contentType: string }> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
-
-  try {
-    const response = await fetch(imageUrl, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`下载图片失败: ${response.status}`);
-    }
-
-    const contentType = response.headers.get('content-type') || 'image/jpeg';
-    const buffer = Buffer.from(await response.arrayBuffer());
-    return { buffer, contentType };
-  } finally {
-    clearTimeout(timeout);
-  }
+async function fetchImageBuffer(imageUrl: string, request: NextRequest): Promise<{ buffer: Buffer; contentType: string }> {
+  const image = await downloadSafeRemoteImage(imageUrl, {
+    timeoutMs: 30000,
+    maxBytes: 30 * 1024 * 1024,
+    accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+    allowLocalMaterialFile: true,
+    localMaterialOrigin: request.nextUrl.origin,
+  });
+  return { buffer: image.buffer, contentType: image.contentType };
 }
 
 function resolveImageUrl(imageUrl: string, request: NextRequest) {
@@ -151,7 +138,7 @@ function getFreshPreparedAssets(imageUrl: string) {
   return cached;
 }
 
-async function prepareImageAssets(imageUrl: string, forceRefresh = false) {
+async function prepareImageAssets(imageUrl: string, request: NextRequest, forceRefresh = false) {
   const startedAt = Date.now();
 
   if (!forceRefresh) {
@@ -164,7 +151,7 @@ async function prepareImageAssets(imageUrl: string, forceRefresh = false) {
     }
   }
 
-  const { buffer } = await fetchImageBuffer(imageUrl);
+  const { buffer } = await fetchImageBuffer(imageUrl, request);
   const normalizedBuffer = await sharp(buffer).rotate().png().toBuffer();
   const metadata = await sharp(normalizedBuffer).metadata();
   const width = metadata.width || 0;
@@ -387,7 +374,7 @@ export async function POST(request: NextRequest) {
     const resolvedImageUrl = resolveImageUrl(imageUrl, request);
 
     if (action === 'prewarm') {
-      const prepared = await prepareImageAssets(resolvedImageUrl, forceRefresh === true);
+      const prepared = await prepareImageAssets(resolvedImageUrl, request, forceRefresh === true);
       console.info('[Identify] prewarm-complete', {
         sessionId: sessionId || 'unknown',
         cached: prepared.cached,
@@ -412,7 +399,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const prepared = await prepareImageAssets(resolvedImageUrl, false);
+    const prepared = await prepareImageAssets(resolvedImageUrl, request, false);
     const sourceWidth = imageWidth || prepared.assets.width;
     const sourceHeight = imageHeight || prepared.assets.height;
 

@@ -28,6 +28,23 @@ type BrushMaskSegment = {
   color: string;
 };
 
+type ApiJsonObject = Record<string, unknown>;
+
+type IdentifyResponse = {
+  success?: boolean;
+  description?: string;
+  candidates?: string[];
+  error?: string;
+};
+
+type MaterialEditorResponse = {
+  success?: boolean;
+  message?: string;
+  data?: {
+    url?: string;
+  };
+};
+
 type ToolMode = 'brush' | 'tag';
 
 type Props = {
@@ -72,6 +89,17 @@ function withAlpha(hex: string, alpha: number) {
 
 function getRegionTarget(region: TagRegion) {
   return region.customTarget.trim() || region.confirmedCandidate.trim() || region.selectedCandidate.trim() || region.description.trim();
+}
+
+async function parseJsonApiResponse<T extends ApiJsonObject>(response: Response, fallbackMessage: string): Promise<T> {
+  const text = await response.text().catch(() => '');
+  if (!text.trim()) return {} as T;
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(fallbackMessage);
+  }
 }
 
 export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props) {
@@ -752,7 +780,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
         signal: controller.signal,
       });
 
-      const result = await response.json() as { success?: boolean; description?: string; candidates?: string[]; error?: string };
+      const result = await parseJsonApiResponse<IdentifyResponse>(response, '识别失败，请重试');
       if (!response.ok || !result.success) {
         throw new Error(toUserFacingErrorMessage(result.error, '识别失败，请重试'));
       }
@@ -1129,7 +1157,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
         }),
       });
 
-      const data = await response.json();
+      const data = await parseJsonApiResponse<MaterialEditorResponse>(response, '暂时未能完成处理，请稍后重试');
       if (!response.ok || !data.success || !data.data?.url) {
         throw new Error(toUserFacingErrorMessage(data.message, '暂时未能完成处理，请稍后重试'));
       }

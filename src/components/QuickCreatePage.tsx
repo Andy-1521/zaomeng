@@ -1237,13 +1237,55 @@ export default function QuickCreatePage() {
   }, [dispatchTaskHistoryUpdated]);
 
   const deleteSelectedImages = async () => {
-    if (libraryView !== 'gallery') {
-      clearSelectionState();
+    if (selectedImageList.length === 0) {
+      showToast(libraryView === 'gallery' ? '请先选择要删除的图片' : '请先选择要删除的订单记录', 'error');
       return;
     }
 
-    if (selectedImageList.length === 0) {
-      showToast('请先选择要删除的图片', 'error');
+    if (libraryView === 'orders') {
+      const selectedSet = new Set(selectedImageList);
+      const selectedOrders = Array.from(
+        new Map(
+          orderResults
+            .filter((image) => selectedSet.has(image.imageUrl) && image.statusLabel !== '处理中')
+            .map((image) => [image.orderNumber, image])
+        ).values()
+      );
+
+      if (selectedOrders.length === 0) {
+        showToast('请选择可删除的订单记录', 'error');
+        return;
+      }
+
+      const confirmed = window.confirm(`确定要删除所选 ${selectedOrders.length} 条订单记录吗？此操作不可恢复。`);
+      if (!confirmed) return;
+
+      try {
+        for (const order of selectedOrders) {
+          setDeletingOrderNumber(order.orderNumber);
+          const response = await fetch('/api/user/transactions/delete', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orderNumber: order.orderNumber }),
+          });
+          const data = await response.json().catch(() => ({} as { success?: boolean; message?: string }));
+          if (!response.ok || data.success === false) {
+            throw new Error(toUserFacingErrorMessage(data.message, '删除失败，请重试'));
+          }
+        }
+
+        const deletedOrderNumbers = new Set(selectedOrders.map((order) => order.orderNumber));
+        setOrderResults((prev) => prev.filter((item) => !deletedOrderNumbers.has(item.orderNumber)));
+        clearSelectionState();
+        dispatchTaskHistoryUpdated();
+        showToast(`已删除 ${selectedOrders.length} 条订单记录`, 'success');
+      } catch (error) {
+        showToast(toUserFacingErrorFromUnknown(error, '删除失败，请重试'), 'error');
+        void loadOrderResults({ silent: true });
+      } finally {
+        setDeletingOrderNumber(null);
+      }
       return;
     }
 
@@ -1258,8 +1300,8 @@ export default function QuickCreatePage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: target.id }),
         });
-        const data = await response.json();
-        if (!response.ok || !data.success) throw new Error(toUserFacingErrorMessage(data.error, '删除失败，请重试'));
+        const data = await response.json().catch(() => ({} as { success?: boolean; error?: string; message?: string }));
+        if (!response.ok || !data.success) throw new Error(toUserFacingErrorMessage(data.error || data.message, '删除失败，请重试'));
       }
 
       setCapturedImages((prev) => prev.filter((image) => !selectedImages.has(image.imageUrl)));
@@ -2190,10 +2232,10 @@ export default function QuickCreatePage() {
             {selectedImageList.length > 0 && (
               <button
                 onClick={() => void deleteSelectedImages()}
-                disabled={processingAction !== null}
+                disabled={processingAction !== null || deletingOrderNumber !== null}
                 className="rounded-full border border-red-300/10 bg-red-500/10 px-3 py-2 text-xs text-red-100/72 transition-colors hover:bg-red-500/22 hover:text-red-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {libraryView === 'gallery' ? '删除所选' : '清空选择'}
+                删除所选
               </button>
             )}
 

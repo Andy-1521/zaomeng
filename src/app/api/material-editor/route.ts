@@ -9,7 +9,7 @@ import { transactionManager, userManager } from '@/storage/database';
 import { isImageEditTimeoutError, runPsydoImageEditWithMetaFromUrl } from '@/lib/psydoImageEdits';
 import { saveBufferToLocalMaterialFile } from '@/lib/localUploadStorage';
 import { DEFAULT_SMART_EDIT_SIZE_OPTION, resolveSmartEditAspectRatio } from '@/lib/smartEditSize';
-import { buildBrowserImageHeaders } from '@/lib/browserFetch';
+import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 
 
 type CropPayload = {
@@ -146,16 +146,14 @@ function resolveImageUrl(imageUrl: string, request: NextRequest) {
   return imageUrl;
 }
 
-async function downloadImageBuffer(imageUrl: string): Promise<Buffer> {
-  const response = await fetch(imageUrl, {
-    headers: buildBrowserImageHeaders(imageUrl),
+async function downloadImageBuffer(imageUrl: string, request: NextRequest): Promise<Buffer> {
+  const image = await downloadSafeRemoteImage(imageUrl, {
+    timeoutMs: 30000,
+    maxBytes: 30 * 1024 * 1024,
+    allowLocalMaterialFile: true,
+    localMaterialOrigin: request.nextUrl.origin,
   });
-
-  if (!response.ok) {
-    throw new Error(`无法读取原图资源 (${response.status})`);
-  }
-
-  return Buffer.from(await response.arrayBuffer());
+  return image.buffer;
 }
 
 function parsePngDataUrl(dataUrl: string): Buffer {
@@ -308,6 +306,7 @@ export async function POST(request: NextRequest) {
         aspectRatio: resolvedAspectRatio,
         quality: 'high',
         maskImageBase64: body.maskImageBase64,
+        localMaterialOrigin: request.nextUrl.origin,
       });
       const resultBuffer = outputWidth && outputHeight
         ? await sharp(imageEditResult.buffer)
@@ -384,7 +383,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const sourceBuffer = await downloadImageBuffer(resolveImageUrl(body.imageUrl, request));
+    const sourceBuffer = await downloadImageBuffer(resolveImageUrl(body.imageUrl, request), request);
     const normalizedBuffer = await sharp(sourceBuffer).rotate().toBuffer();
     const baseImage = sharp(normalizedBuffer);
     const baseMetadata = await baseImage.metadata();

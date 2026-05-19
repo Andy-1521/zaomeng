@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import sharp from 'sharp';
 import { capturedImageManager, transactionManager, userManager } from '@/storage/database';
 import { uploadToCozeStorage } from '@/lib/dualStorage';
-import { buildBrowserImageHeaders } from '@/lib/browserFetch';
 import { isImageEditTimeoutError, runPsydoImageEditFromUrl } from '@/lib/psydoImageEdits';
 import { saveBufferToLocalMaterialFile } from '@/lib/localUploadStorage';
+import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 import { DEFAULT_SMART_EDIT_SIZE_OPTION, getSmartEditOutputSize, isSmartEditAspectRatioOption, isSmartEditResolution } from '@/lib/smartEditSize';
 
 const REQUIRED_POINTS = 30;
@@ -29,14 +29,15 @@ function normalizeSourceSize(sourceSize?: { width?: number | null; height?: numb
   return { width, height };
 }
 
-async function readRemoteImageSize(imageUrl: string) {
+async function readRemoteImageSize(imageUrl: string, request: NextRequest) {
   try {
-    const response = await fetch(imageUrl, {
-      headers: buildBrowserImageHeaders(imageUrl),
+    const image = await downloadSafeRemoteImage(imageUrl, {
+      timeoutMs: 30000,
+      maxBytes: 30 * 1024 * 1024,
+      allowLocalMaterialFile: true,
+      localMaterialOrigin: request.nextUrl.origin,
     });
-    if (!response.ok) return null;
-
-    const metadata = await sharp(Buffer.from(await response.arrayBuffer())).rotate().metadata();
+    const metadata = await sharp(image.buffer).rotate().metadata();
     if (!metadata.width || !metadata.height) return null;
     return { width: metadata.width, height: metadata.height };
   } catch (error) {
@@ -98,7 +99,7 @@ export async function POST(request: NextRequest) {
 
     const providedSourceSize = normalizeSourceSize(body.sourceSize);
     const sourceSize = requestedAspectRatio === 'auto' && !providedSourceSize
-      ? await readRemoteImageSize(imageUrl)
+      ? await readRemoteImageSize(imageUrl, request)
       : providedSourceSize;
     const targetOutputSize = getSmartEditOutputSize(requestedAspectRatio, requestedResolution, sourceSize || undefined);
     const finalPrompt = userPrompt
@@ -137,6 +138,7 @@ export async function POST(request: NextRequest) {
       prompt: finalPrompt,
       aspectRatio: targetOutputSize.resolvedAspectRatio,
       quality: 'high',
+      localMaterialOrigin: request.nextUrl.origin,
     });
     const editedBuffer = await sharp(imageEditBuffer)
       .resize({ width: targetOutputSize.width, height: targetOutputSize.height, fit: 'fill' })

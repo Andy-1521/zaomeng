@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'fs/promises';
+import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 
 export const localUploadRoots = new Set([
@@ -56,4 +56,58 @@ export async function saveBufferToLocalMaterialFile(buffer: Buffer, relativeFile
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, buffer);
   return `/api/material-file/${normalizedPath}`;
+}
+
+export function getLocalMaterialPathFromUrl(urlOrPath: string, options?: { allowedOrigin?: string | null }) {
+  const localMaterialPrefix = '/api/material-file/';
+  let pathname = '';
+
+  if (urlOrPath.startsWith(localMaterialPrefix)) {
+    pathname = new URL(urlOrPath, 'http://local').pathname;
+  } else {
+    try {
+      const url = new URL(urlOrPath);
+      if (!options?.allowedOrigin || url.origin !== options.allowedOrigin) {
+        return null;
+      }
+      pathname = url.pathname;
+    } catch {
+      return null;
+    }
+  }
+
+  if (!pathname.startsWith(localMaterialPrefix)) {
+    return null;
+  }
+
+  const relativePath = decodeURIComponent(pathname.slice(localMaterialPrefix.length));
+  const segments = relativePath
+    .split('/')
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  const root = segments[0];
+
+  if (!root || !localUploadRoots.has(root) || segments.some((segment) => segment === '.' || segment === '..' || segment.includes('..'))) {
+    throw new Error('本地素材路径无效');
+  }
+
+  return segments.join('/');
+}
+
+export async function readLocalMaterialFileFromUrl(urlOrPath: string, options?: { allowedOrigin?: string | null }) {
+  const localMaterialPath = getLocalMaterialPathFromUrl(urlOrPath, options);
+  if (!localMaterialPath) {
+    return null;
+  }
+
+  const publicRoot = path.join(process.cwd(), 'public');
+  const filePath = path.join(publicRoot, ...localMaterialPath.split('/'));
+  if (!filePath.startsWith(publicRoot)) {
+    throw new Error('本地素材路径无效');
+  }
+
+  return {
+    buffer: await readFile(filePath),
+    relativePath: localMaterialPath,
+  };
 }

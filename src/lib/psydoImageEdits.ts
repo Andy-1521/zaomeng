@@ -7,9 +7,11 @@ import {
   getOpenAICompatFallbackImageModel,
   getOpenAICompatImageModel,
 } from '@/lib/openaiCompatible';
-import { buildBrowserImageHeaders } from '@/lib/browserFetch';
+import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 
 const IMAGE_DOWNLOAD_TIMEOUT_MS = 30000;
+const IMAGE_DOWNLOAD_MAX_BYTES = 30 * 1024 * 1024;
+const IMAGE_RESULT_DOWNLOAD_MAX_BYTES = 80 * 1024 * 1024;
 const IMAGE_EDIT_TIMEOUT_MS = 300000;
 const IMAGE_EDIT_MAX_ATTEMPTS = 2;
 const IMAGE_EDIT_RETRY_DELAY_MS = 1500;
@@ -29,6 +31,7 @@ type ImageEditParams = {
   aspectRatio?: string;
   quality?: string;
   maskImageBase64?: string;
+  localMaterialOrigin?: string | null;
 };
 
 type ImageEditResponse = {
@@ -120,29 +123,14 @@ export function isImageEditTimeoutError(error: unknown) {
     || (error instanceof Error && isTimeoutLikeMessage(error.message));
 }
 
-async function fetchImageBuffer(imageUrl: string): Promise<Buffer> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), IMAGE_DOWNLOAD_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(imageUrl, {
-      headers: buildBrowserImageHeaders(imageUrl),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      throw new Error(`下载图片失败 (${response.status})`);
-    }
-
-    return Buffer.from(await response.arrayBuffer());
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error(`下载图片超时（${IMAGE_DOWNLOAD_TIMEOUT_MS}ms）`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
-  }
+async function fetchImageBuffer(imageUrl: string, maxBytes = IMAGE_DOWNLOAD_MAX_BYTES, localMaterialOrigin?: string | null): Promise<Buffer> {
+  const image = await downloadSafeRemoteImage(imageUrl, {
+    timeoutMs: IMAGE_DOWNLOAD_TIMEOUT_MS,
+    maxBytes,
+    allowLocalMaterialFile: true,
+    localMaterialOrigin,
+  });
+  return image.buffer;
 }
 
 function decodeImageBase64(data: string): Buffer {
@@ -248,7 +236,7 @@ async function runImageEditWithTarget(
       }
 
       if (first.url) {
-        return fetchImageBuffer(first.url);
+        return fetchImageBuffer(first.url, IMAGE_RESULT_DOWNLOAD_MAX_BYTES);
       }
 
       throw new Error('图像编辑返回格式不支持');
@@ -284,7 +272,7 @@ async function runImageEditWithTarget(
 
 export async function runPsydoImageEditWithMetaFromUrl(params: ImageEditParams): Promise<{ buffer: Buffer; meta: ImageEditMeta }> {
   const targets = getImageEditTargets();
-  const sourceBuffer = await fetchImageBuffer(params.imageUrl);
+  const sourceBuffer = await fetchImageBuffer(params.imageUrl, IMAGE_DOWNLOAD_MAX_BYTES, params.localMaterialOrigin);
   const normalizedBuffer = await sharp(sourceBuffer).rotate().png().toBuffer();
 
   let lastTimeoutError: ImageEditTimeoutError | null = null;

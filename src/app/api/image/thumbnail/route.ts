@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { S3Storage } from 'coze-coding-dev-sdk';
 import sharp from 'sharp';
+import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误';
@@ -34,24 +35,7 @@ const storage = new S3Storage({
   region: 'cn-beijing',
 });
 
-// 带超时的fetch
-async function fetchWithTimeout(url: string, timeout = 30000): Promise<Response> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    return response;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    throw error;
-  }
-}
-
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { imageUrl, width = 200, height = 200, quality = 80 } = body;
@@ -77,11 +61,13 @@ export async function POST(request: Request) {
     console.log('[缩略图API] 开始下载原图...');
     let imageBuffer: Buffer;
     try {
-      const response = await fetchWithTimeout(imageUrl, 30000);
-      if (!response.ok) {
-        throw new Error(`下载原图失败: ${response.status} ${response.statusText}`);
-      }
-      imageBuffer = Buffer.from(await response.arrayBuffer());
+      const downloadedImage = await downloadSafeRemoteImage(imageUrl, {
+        timeoutMs: 30000,
+        maxBytes: 30 * 1024 * 1024,
+        allowLocalMaterialFile: true,
+        localMaterialOrigin: request.nextUrl.origin,
+      });
+      imageBuffer = downloadedImage.buffer;
       console.log('[缩略图API] 原图下载成功，大小:', imageBuffer.length, 'bytes');
     } catch (error: unknown) {
       console.error('[缩略图API] 下载原图失败:', error);

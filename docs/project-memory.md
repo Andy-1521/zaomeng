@@ -582,6 +582,7 @@ OPENAI_COMPAT_FALLBACK_IMAGE_MODEL=gpt-image-2
 ### 插件采集接口安全与稳定性
 
 - 插件采集接口为 `src/app/api/plugin/capture-image/route.ts`
+- 2026-05-19 后，远程图片下载安全逻辑已集中到 `src/lib/safeRemoteImage.ts`，插件采集接口复用该 helper，不再维护私有 SSRF 检查实现
 - 当前已增加的最小安全控制：
   - `imageType` 只允许 `main` / `detail`，非法值回退 `main`
   - 只允许 `http:` / `https:` 图片地址
@@ -593,6 +594,31 @@ OPENAI_COMPAT_FALLBACK_IMAGE_MODEL=gpt-image-2
   - 拒绝非 `image/*` 响应，并暂不支持 SVG 采集
   - 本地回退存储统一使用 `saveBufferToLocalMaterialFile(...)`，不再写硬编码绝对路径
 - 当前仍需后续单独排期的架构级风险：插件 API 仍依赖未签名的 `user` JSON cookie，根治需要全站迁移到签名 session / JWT 或服务端 session
+
+### 远程图片安全下载 helper
+
+- 共享 helper：`src/lib/safeRemoteImage.ts`
+- 默认安全策略：
+  - 仅允许 `http:` / `https:`
+  - 拦截 localhost、私网 IPv4、私网/链路本地/组播 IPv6、组播 IPv4
+  - 下载前解析 DNS，拒绝解析到私网地址的域名
+  - 手动跟随最多 3 次重定向，每次重定向重新做安全校验
+  - 默认超时 `30000ms`
+  - 默认最大下载体积 30MB，先查 `content-length`，再按流式读取累计限制
+  - 用户输入图一般保持 30MB 上限；模型/放大结果图这类内部可信结果可由调用方显式放宽，例如 80MB
+  - 拒绝非 `image/*` 响应；默认不允许 SVG
+- `allowLocalMaterialFile: true` 只用于站内服务端读取 `/api/material-file/...` 回退素材，不能用于插件采集等外部 URL 入口
+- 当前已迁移复用的主要入口：
+  - `src/app/api/plugin/capture-image/route.ts`
+  - `src/app/api/smart-edit/identify/handler.ts`
+  - `src/app/api/image/thumbnail/route.ts`
+  - `src/app/api/image-to-image/run/route.ts`
+  - `src/app/api/material-editor/route.ts`
+  - `src/lib/psydoImageEdits.ts`
+  - `src/lib/outpaintUpsamplingRunner.ts`
+  - `src/app/api/color-extraction/run/handler.ts`
+- 后续新增外部图片 URL 读取，优先接入 `downloadSafeRemoteImage(...)`，不要新写裸 `fetch`
+- 仍需继续排查旧工具链内部下载点，例如 `dualStorage` 压缩/回退上传链路、PSD 合并旧工具和腾讯 COS URL fallback
 
 ### AI生图与智能改图比例策略
 
@@ -627,6 +653,9 @@ OPENAI_COMPAT_FALLBACK_IMAGE_MODEL=gpt-image-2
 - `src/app/api/image-to-image/run/route.ts` 的本地回退 URL 不再拼死 `http://124.223.26.206`，改为基于当前请求 origin 生成绝对 URL
 - `src/app/api/plugin/capture-image/route.ts` 不再使用 `/home/ubuntu/Downloads/.../public` 硬编码路径
 - 源码检索已清空旧公网 IP 与硬编码 RunningHub Key 的直接引用
+- 2026-05-19 修复主页面图库/项目多选删除文案不一致：按钮统一为 `删除所选`，项目视图不再用 `清空选择` 表达删除类操作
+- 2026-05-19 修复智能改图前端裸 `response.json()` 风险：`LocalEditPanel` 对识别和提交响应先读 `response.text()` 再解析 JSON，HTML/非 JSON 响应统一映射为泛化错误文案，不再向用户暴露 `Unexpected token '<'`
+- 2026-05-19 确认智能改图 HTML 错误根因是 nginx 默认请求体限制：`/api/material-editor` 上传较大 JSON mask 时会被 nginx 以 `413 Request Entity Too Large` 的 HTML 响应拦截，已在 `/etc/nginx/sites-enabled/default` 为该路由加 `client_max_body_size 32m` 和 300s proxy timeout，并执行 `nginx -t` / `systemctl reload nginx`
 
 ### 全站检查结论
 
@@ -635,6 +664,7 @@ OPENAI_COMPAT_FALLBACK_IMAGE_MODEL=gpt-image-2
 - P1：上传、素材、订单、插件列表等接口需要统一收口到服务端可信 session 后再逐项补授权校验
 - P1：外部 URL 下载类能力需要继续复用 SSRF 防护策略，不应在各接口内重复裸 `fetch`
 - P2：错误响应应继续保持用户友好，不向用户暴露底层 API、网关、模型、堆栈或密钥配置细节
+- P2：智能改图 mask 仍以 base64 JSON 方式提交，虽然 nginx 已放宽 `/api/material-editor` 到 32MB，但长期更稳的方案是改为 multipart/FormData 或先上传 mask 再提交引用 URL
 
 ### 后续建议
 

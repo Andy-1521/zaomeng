@@ -4,7 +4,7 @@ import { transactionManager, userManager } from '@/storage/database';
 import { uploadToCozeStorage } from '@/lib/dualStorage';
 import { runPsydoImageEditWithMetaFromUrl, isImageEditTimeoutError } from '@/lib/psydoImageEdits';
 import { createUpsamplingTask, waitForUpsamplingTaskComplete } from '@/lib/runningHubWatermark';
-import { buildBrowserImageHeaders } from '@/lib/browserFetch';
+import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 
 export type OutpaintUpsamplingRequest = {
   userId?: string;
@@ -45,6 +45,8 @@ type RouteOptions = {
 };
 
 const FINAL_LONG_EDGE_TARGET = 4096;
+const IMAGE_DOWNLOAD_MAX_BYTES = 30 * 1024 * 1024;
+const UPSAMPLING_RESULT_MAX_BYTES = 80 * 1024 * 1024;
 const EDIT_CANVAS_SPECS: EditCanvasSpec[] = [
   { width: 1024, height: 1024, size: '1024x1024', aspectRatio: 1 },
   { width: 1024, height: 1536, size: '1024x1536', aspectRatio: 1024 / 1536 },
@@ -71,16 +73,14 @@ function getResolvedImageUrl(imageUrl: string, request: NextRequest) {
   return imageUrl;
 }
 
-async function downloadImageBuffer(imageUrl: string): Promise<Buffer> {
-  const response = await fetch(imageUrl, {
-    headers: buildBrowserImageHeaders(imageUrl),
+async function downloadImageBuffer(imageUrl: string, maxBytes = IMAGE_DOWNLOAD_MAX_BYTES, localMaterialOrigin?: string | null): Promise<Buffer> {
+  const image = await downloadSafeRemoteImage(imageUrl, {
+    timeoutMs: 30000,
+    maxBytes,
+    allowLocalMaterialFile: true,
+    localMaterialOrigin,
   });
-
-  if (!response.ok) {
-    throw new Error(`无法读取原图资源 (${response.status})`);
-  }
-
-  return Buffer.from(await response.arrayBuffer());
+  return image.buffer;
 }
 
 function resolveEditCanvasSpec(width: number, height: number): EditCanvasSpec {
@@ -280,7 +280,7 @@ export async function runOutpaintUpsamplingRoute(request: NextRequest, options: 
         console.log(`[${options.logPrefix}] ========== 后台任务开始 ==========`);
         console.log(`[${options.logPrefix}] 订单号:`, orderId);
 
-        const sourceBuffer = await downloadImageBuffer(resolvedInputImageUrl);
+        const sourceBuffer = await downloadImageBuffer(resolvedInputImageUrl, IMAGE_DOWNLOAD_MAX_BYTES, request.nextUrl.origin);
         const sourceMetadata = await sharp(sourceBuffer).metadata();
         const sourceWidth = sourceMetadata.width || 0;
         const sourceHeight = sourceMetadata.height || 0;
@@ -321,6 +321,7 @@ export async function runOutpaintUpsamplingRoute(request: NextRequest, options: 
           size: canvas.size,
           quality: 'high',
           maskImageBase64: toPngDataUrl(maskBuffer),
+          localMaterialOrigin: request.nextUrl.origin,
         });
 
         imageEditMeta = imageEditResult.meta;
@@ -333,7 +334,7 @@ export async function runOutpaintUpsamplingRoute(request: NextRequest, options: 
         upsamplingResultUrl = await waitForUpsamplingTaskComplete(upsamplingTaskId, 5);
 
         console.log(`[${options.logPrefix}] 步骤5: 下载放大结果并规范到 4K 长边`);
-        const upsamplingBuffer = await downloadImageBuffer(upsamplingResultUrl);
+        const upsamplingBuffer = await downloadImageBuffer(upsamplingResultUrl, UPSAMPLING_RESULT_MAX_BYTES);
         final4kResult = await ensure4kLongEdge(upsamplingBuffer, finalOutputSize);
         finalResultUrl = await uploadToCozeStorage(final4kResult.buffer, `${options.routeStoragePrefix}/${orderId}.png`, 'image/png');
 
