@@ -642,3 +642,147 @@ OPENAI_COMPAT_FALLBACK_IMAGE_MODEL=gpt-image-2
 - 建立统一 `getAuthenticatedUser(request)` 和 `requireAdmin(request)` helper，避免每个 route 自己解析 cookie
 - 建立统一远程资源下载 helper，默认包含协议限制、DNS 私网拦截、重定向复检、timeout、content-type 与大小限制
 - 插件真实浏览器自动化仍受当前环境缺少 X server / headful Chromium 限制，最终安装链路建议用人工 Chrome / Edge / Brave 各跑一遍
+
+### 备份仓库操作记忆
+
+- 备份仓库用途是保存“已验证、可部署、可回滚”的代码版本，不是把服务器当前目录所有文件都上传
+- 远端仓库：`git@github.com:Andy-1521/zaomeng.git`
+- 当前主分支：`main`
+- 最近备份提交风格：`backup: YYYY-MM-DD ... snapshot`
+- 2026-05-19 已推送备份提交：`a13e933 backup: 2026-05-19 plugin and image workflow snapshot`
+- 服务器上可用的 GitHub SSH key 不是默认文件名：`/home/ubuntu/.ssh/id_ed25519_andy_1521`
+- 该 key 的公开指纹：`SHA256:v/k3z55UbXatQa+1Go3f+lx0TYPhrD1wZ0VmpDNmbXA Andy-1521-backup`
+- 普通 `git push origin main` 可能失败，因为当前 shell 没有 ssh-agent，且 SSH 默认不会自动使用这个非默认 key
+- 推送备份时使用一次性命令，不要改全局 git 配置：
+
+```bash
+GIT_SSH_COMMAND='ssh -i "/home/ubuntu/.ssh/id_ed25519_andy_1521" -o IdentitiesOnly=yes' git push origin main
+```
+
+- 备份提交应纳入：
+  - `src/` 代码
+  - `browser-extension/` 插件模板
+  - 必要配置文件，例如 `package.json`、`eslint.config.mjs`、`.env.local.example`
+  - 必要公开静态代码，例如 `public/sw.js`
+  - 必要项目文档，例如 `docs/project-memory.md`、`AGENTS.md`
+- 备份提交不应纳入：
+  - 真实 `.env.local`
+  - `.next`、`tsconfig.tsbuildinfo` 等构建缓存
+  - `tmp/`、`/tmp/opencode`、下载测试 zip、临时冒烟脚本
+  - `public/plugin-capture/`、`public/ai-generate/`、`public/material-editor/`、`public/uploads/` 等运行时素材和用户生成文件
+  - 日志、数据库 dump、真实密钥、第三方 token
+- 提交前固定检查：
+  - `git status --short`
+  - `git diff --cached --name-only`
+  - `git diff --cached --check`
+  - 确认 staged 清单没有运行时素材、临时文件、真实环境变量或密钥
+
+### API 路由索引说明
+
+- 以下索引记录当前代码的真实行为，不代表接口已经完成理想鉴权
+- “主调用”优先写当前前端或插件中能看到的调用点；未看到直接调用的接口会标为手工、兼容或调试用途
+- 多数旧接口仍存在是为了兼容历史数据或旧调用路径，新增前端不要继续接入旧路径
+- 当前 P0 风险仍是 raw `user` JSON cookie 和 body/header `userId` 混用，后续应统一到服务端可信 session
+
+### API 索引：认证与用户
+
+| 方法 | 路径 | 用途 | 主要调用 | 关键输入 | 当前鉴权/注意事项 |
+| --- | --- | --- | --- | --- | --- |
+| POST | `/api/auth/login` | 邮箱密码登录并写入 `user` cookie | 登录页 | `email`, `password` | 无登录要求；当前密码按明文比对；cookie 有效期 7 天 |
+| POST | `/api/auth/register` | 邮箱验证码注册并自动登录 | 登录页 | `verifyCode`, `email`, `username`, `password` | 无登录要求；验证码有效后创建用户，初始 100 积分 |
+| POST | `/api/auth/refresh` | 刷新当前登录 cookie | 首页、个人中心、管理页刷新会话 | `userId` | 需要已有 `user` cookie，且 cookie 内 `id` 等于 body 的 `userId` |
+| POST | `/api/auth/send-email` | 发送邮箱验证码 | 登录/注册/找回密码 | `email` | 无登录要求；验证码约 5 分钟有效；mock 模式会返回验证码 |
+| POST | `/api/auth/send-sms` | 发送短信验证码 | 当前前端未见稳定调用 | `phone` | 无登录要求；依赖短信配置；mock 模式会返回验证码 |
+| POST | `/api/auth/reset-password` | 用验证码重置密码 | 找回密码 | `email`, `verifyCode`, `newPassword` | 无登录要求；验证码成功后更新密码并删除验证码 |
+| GET | `/api/user/profile` | 读取用户资料和积分 | `UserContext`、首页积分校验、个人中心 | query `userId` 或 cookie | 查他人时要求与 cookie 一致；头像为空时回默认图 |
+| POST | `/api/user/update-username` | 修改用户名 | 个人中心 | `userId`, `newUsername` | 当前无强 session 归属校验；后续需补 |
+| POST | `/api/user/update-password` | 修改密码 | 个人中心 | `userId`, `oldPassword`, `newPassword` | 当前无强 session 归属校验；旧密码明文比对 |
+| POST | `/api/user/update-avatar` | 上传并更新头像 | 个人中心 | FormData `userId`, `file` | 当前无强 session 归属校验；限制常见图片类型和 5MB；对象存储失败回退本地 |
+| GET | `/api/user/users` | 管理端读取用户列表 | 管理后台用户列表 | `keyword` | 需要管理员 cookie，并重新查库确认 `isAdmin` |
+| POST | `/api/user/replace-users` | 批量替换用户表 | 手工迁移/导入 | `users[]` | 需要 `X-Admin-Secret` 或管理员 cookie；会先清空用户表，破坏性强 |
+
+### API 索引：订单、任务与交易
+
+| 方法 | 路径 | 用途 | 主要调用 | 关键输入 | 当前鉴权/注意事项 |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/api/user/transactions` | 读取用户消费/订单记录 | `TaskHistory`、个人中心 | `userId`, `limit`, `cursor` | requestedUserId 存在时需与 cookie 一致；limit 上限 200 |
+| POST | `/api/user/transactions` | 扣点并创建消费记录 | 偏内部/旧链路 | `userId`, `description`, `points`, `toolPage` 等 | 无强鉴权；扣点与写记录不是完整事务 |
+| POST | `/api/user/transactions/delete` | 删除单条订单历史 | `TaskHistory`、首页历史操作 | `orderNumber`, 可选 `userId` | 归属校验强度不一致，后续需统一 |
+| POST | `/api/user/transactions/clear` | 清空当前用户历史 | `TaskHistory` 清空历史 | `userId` 可来自 body/query/cookie | 来源混用，后续需统一只信服务端 session |
+| GET | `/api/task/orders` | 读取当前用户任务/订单列表 | `QuickCreatePage` 主页面项目区 | `userId`, `toolPage` | 需要 cookie；查询别人订单会 403；会 reconcile 处理中订单 |
+| GET | `/api/task/check` | 查询单个订单状态 | `taskPollingManager` | `orderId` | 当前无登录校验；知道订单号即可查状态 |
+| POST | `/api/task/clean-stucked-orders` | 清理超时处理中订单 | 运维/手工 | `userId`, `maxAgeMinutes` | 当前无登录校验；只更新状态，不退积分 |
+| POST | `/api/transaction/create-pending` | 预创建处理中订单 | 内部任务链路/旧链路 | `userId`, `orderId`, `toolPage`, `description` | 无强鉴权；`orderId` 实际写入订单号 |
+| POST | `/api/transaction/create` | 幂等创建订单 | 内部任务链路/旧链路 | `userId`, `orderNumber`, `toolPage` 等 | 无强鉴权；重复订单直接返回已有记录 |
+| GET | `/api/transaction/[orderNumber]` | 查询单个订单详情 | 调试/旧链路 | 路径参数 `orderNumber` | 当前无登录校验；知道订单号即可查 |
+| POST | `/api/transaction/update` | 更新订单状态/结果 | 旧任务更新链路 | `orderId`, `updateData` | 当前无强鉴权；可更新多个字段，后续需收口 |
+
+### API 索引：素材库、文件夹与上传
+
+| 方法 | 路径 | 用途 | 主要调用 | 关键输入 | 当前鉴权/注意事项 |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/api/plugin/captured-images` | 读取素材库图片记录 | `QuickCreatePage` 素材库加载 | cookie | 需要 `user` cookie；会过滤明显视频扩展 |
+| DELETE | `/api/plugin/captured-images` | 删除单条素材记录或清空素材记录 | `QuickCreatePage` 删除/清空/去重 | `id` 或 `clearAll` | 只删数据库记录，不删对象存储或本地实际文件 |
+| POST | `/api/plugin/capture-image` | 插件把远程图片保存到当前账号素材库 | 浏览器插件 `background.js` | `imageUrl`, `pageUrl`, `pageTitle`, `sourceHost`, `imageType` | 需要 `user` cookie；已有 SSRF/大小/超时/重定向防护；不支持 SVG |
+| GET | `/api/material-folders` | 获取素材文件夹列表 | `QuickCreatePage` 文件夹管理 | cookie | 需要 `user` cookie |
+| POST | `/api/material-folders` | 创建素材文件夹 | `QuickCreatePage` 文件夹管理 | `name` | 用户内名称唯一；最长 80 |
+| PATCH | `/api/material-folders` | 重命名素材文件夹 | `QuickCreatePage` 文件夹管理 | `id`, `name` | 只允许当前用户自己的文件夹 |
+| DELETE | `/api/material-folders` | 删除素材文件夹 | `QuickCreatePage` 文件夹管理 | `id` | 删除前把素材移到未分类，不删图片文件 |
+| POST | `/api/materials/update` | 批量移动素材/收藏/取消收藏 | `QuickCreatePage` 收藏和批量移动 | `ids`, `folderId`, `isFavorite` | 需要 cookie；只更新当前用户素材；校验文件夹归属 |
+| POST | `/api/upload/file` | multipart 文件上传到对象存储/本地回退，可选建素材记录 | 首页本地上传、AI 参考图上传 | FormData `file`, `folder`, `createMaterial`, `materialFolderId` | 上传本身未强制登录；`createMaterial=true` 时需 cookie 才建素材记录 |
+| POST | `/api/upload/buffer` | 上传 base64 buffer 到对象存储/本地回退 | `imageUploader.uploadBuffer` | FormData `buffer`, `fileName`, `contentType`, `folder` | 当前无登录校验；服务端大小/类型限制不足；返回 debug 信息需后续收敛 |
+| POST | `/api/upload/image` | 上传 data URL 图片到对象存储/本地回退 | 旧上传入口/当前少用 | `imageData`, `folder` | 当前无登录校验；不建素材记录；服务端大小限制不足 |
+| GET | `/api/material-file/[...path]` | 读取本地 public 回退存储图片 | 本地回退 URL 展示 | 路径首段必须是允许根目录 | 无登录校验；只允许图片 content-type；视频扩展返回 415 |
+
+### API 索引：彩绘提取、PSD 与智能编辑
+
+| 方法 | 路径 | 用途 | 主要调用 | 关键输入 | 当前鉴权/注意事项 |
+| --- | --- | --- | --- | --- | --- |
+| POST | `/api/color-extraction/run` | 彩绘提取主流程，生成结果图并后台尝试 PSD 分层 | `QuickCreatePage` 彩绘提取 | `userId`, `imageUrl`, `orderId`, `extractionMode` | 当前按 body `userId` 查用户和积分；成功扣 30；失败/超时不扣 |
+| POST | `/api/color-extraction/generate-psd` | 给已有彩绘提取订单手动补 PSD | `TaskHistory` 的“生成PSD” | `orderNumber` | 当前未校验登录/订单所属；已有 PSD 直接返回 |
+| POST | `/api/color-extraction2/workflow` | 旧兼容入口，转发正式彩绘提取 | 历史调用兼容 | 同 `/api/color-extraction/run` | 新前端不要接入；保留用于浸泡观察 |
+| POST | `/api/color-extraction2/generate-psd` | 旧兼容入口，转发正式 PSD 生成 | 历史调用兼容 | 同 `/api/color-extraction/generate-psd` | 新前端不要接入；保留用于浸泡观察 |
+| POST | `/api/color-extraction2/identify` | 旧兼容入口，转发智能改图识别 | 历史调用兼容 | 同 `/api/smart-edit/identify` | 新前端不要接入；保留用于浸泡观察 |
+| POST | `/api/smart-edit/identify` | 智能改图标记点识别和图片预热 | `LocalEditPanel` | `action`, `imageUrl`, `clickX`, `clickY`, `imageWidth`, `imageHeight`, `sessionId` | 当前无登录校验；有图片缓存；远程下载 SSRF 防护不足，需后续复用统一 helper |
+| POST | `/api/material-editor` | 素材编辑统一入口：裁切、标注、智能改图重绘 | 裁切面板、标注面板、智能改图面板 | `action`, `imageUrl`, 裁切/标注/遮罩/提示词/尺寸参数 | 需要 `user` cookie；`redraw` 成功扣 30；裁切/标注不扣 |
+| POST | `/api/material-editor/compose-prompt` | 单独生成智能改图最终 prompt | 当前前端少直接调用，主流程内置 | `imageUrl`, `mode`, `instruction`, `regions`, `sessionId` | 当前无登录/积分校验；只生成 prompt，不实际改图 |
+
+### API 索引：AI生图、扩图与缩略图
+
+| 方法 | 路径 | 用途 | 主要调用 | 关键输入 | 当前鉴权/注意事项 |
+| --- | --- | --- | --- | --- | --- |
+| POST | `/api/image-to-image/run` | AI生图/图生图，按比例和分辨率生成并入素材库 | `QuickCreatePage` AI生图面板 | `userId`, `imageUrl`, `prompt`, `aspectRatio`, `resolution`, `sourceSize`, `orderId` | 当前按 body `userId` 查用户和积分；成功扣 30；失败/超时写回订单且不扣 |
+| POST | `/api/outpaint-upsampling/run` | 高清+扩图主入口，后台执行扩图和 4K 放大 | `QuickCreatePage` 高清+扩图 | `userId`, `imageUrl` | 当前不扣积分；立即返回 queued，后台更新订单 |
+| POST | `/api/outpaint-upsampling-2/run` | 高清+扩图2实验/对比入口 | 当前主页面已下线，后端保留 | `userId`, `imageUrl` | 仍走同一共享 runner；不是 RunningHub `AI扩图` 降级 |
+| POST | `/api/image/thumbnail` | 远程图生成 JPEG 缩略图并上传 | 当前前端少用 | `imageUrl`, `width`, `height`, `quality` | 当前无登录校验；远程下载 SSRF 防护不足 |
+| POST | `/api/template/extract` | 从淘宝/天猫/拼多多链接提取商品标题和图片 | 当前前端少用/模板提取实验 | `url` | 无登录校验；通过子进程脚本执行，90 秒超时 |
+
+### API 索引：插件下载与站点桥接
+
+| 方法 | 路径 | 用途 | 主要调用 | 关键输入 | 当前鉴权/注意事项 |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/api/plugin/download` | 动态生成 Chromium 插件 zip | `/plugin` 下载按钮 | query `browser` | 无登录校验；支持 `chromium/chrome/edge/brave/arc/360`；只打包白名单文件 |
+| POST | `/api/plugin/capture-image` | 插件采图入库 | 浏览器插件 | `imageUrl` 等采集信息 | 需要 cookie；服务器端下载远程图片并上传存储；已有基础 SSRF 防护 |
+| GET | `/api/plugin/captured-images` | 素材库读取插件/上传/生成记录 | 首页素材库 | cookie | 需要 cookie；按当前用户返回 |
+| DELETE | `/api/plugin/captured-images` | 删除或清空素材记录 | 首页素材库 | `id` 或 `clearAll` | 需要 cookie；只删记录，不删文件 |
+
+### API 索引：管理、迁移与调试
+
+| 方法 | 路径 | 用途 | 主要调用 | 关键输入 | 当前鉴权/注意事项 |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/api/admin/generations` | 管理员查看生成/订单记录和统计 | 管理后台 | `skip`, `limit`, `keyword`, `toolPage`, `status`, 日期参数 | 需要管理员 cookie 并查库确认 `isAdmin` |
+| POST | `/api/admin/update-user` | 管理员修改用户积分/头像 | 管理后台用户编辑 | `userId`, `points`, `avatar` | 需要管理员 cookie |
+| POST | `/api/admin/set-admin` | 设置/取消管理员 | 管理后台 | `targetUserId`, `isAdmin` | 需要管理员 cookie；可修改任意目标用户 |
+| POST | `/api/migrations/add-uploaded-image` | 给订单表补 `uploaded_image` 并迁移部分历史数据 | 手工迁移 | 无 | 当前无登录校验；会执行 `ALTER TABLE`，仅手工使用 |
+| GET | `/api/debug/orders` | 查看最近彩绘提取订单摘要 | 手工调试 | 无 | 当前无登录校验；只返回少量摘要 |
+| POST | `/api/debug/create-test-user` | 开发环境创建测试用户 | 开发调试 | `email`, `password`, `username`, `points` | 仅开发环境；生产 403 |
+| DELETE | `/api/debug/delete-test-user` | 开发环境软删除测试用户 | 开发调试 | `email` | 仅开发环境；生产 403 |
+
+### 接口维护原则
+
+- 新前端优先接入正式路径：`/api/color-extraction/run`、`/api/color-extraction/generate-psd`、`/api/smart-edit/identify`
+- 不再为新功能接入 `color-extraction2` 兼容路径
+- 不再恢复已下线的去水印、自动去背景、旧高清放大页面级入口
+- 新增外部 URL 下载接口时，必须先抽统一安全下载 helper，不要复制裸 `fetch`
+- 新增扣积分接口时，必须先明确“创建订单、调用模型、扣分、写结果”的失败补偿策略
+- 新增管理接口时，必须使用统一管理员校验，不能只信 body/header/cookie 的用户字段
