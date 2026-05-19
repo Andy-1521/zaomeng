@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { transactionManager, userManager } from '@/storage/database';
+import { reconcileProcessingTransactions } from '@/lib/reconcileProcessingTransactions';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误';
@@ -11,6 +12,33 @@ type ResultDataObject = {
   result_image_url?: string;
   [key: string]: unknown;
 };
+
+type RequestParamsObject = {
+  [key: string]: unknown;
+};
+
+function isSmartEditTransaction(toolPage?: string | null, description?: string | null, orderNumber?: string | null) {
+  return toolPage === '智能改图'
+    || toolPage === '局部改图'
+    || description?.includes('智能改图')
+    || description?.includes('局部改图')
+    || orderNumber?.startsWith('LCL-');
+}
+
+function sanitizeSmartEditRequestParams(params: unknown) {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return params;
+
+  const source = params as RequestParamsObject;
+  return {
+    toolPage: '智能改图',
+    imageUrl: source.imageUrl,
+    uploadedImage: source.uploadedImage,
+    mode: source.mode,
+    userInstruction: source.userInstruction,
+    summary: source.summary || source.promptSummary,
+    regionCount: source.regionCount,
+  };
+}
 
 /**
  * 获取用户消费记录接口
@@ -76,9 +104,12 @@ export async function GET(request: NextRequest) {
 
     // 获取用户消费记录（支持游标分页）
     const transactions = await transactionManager.getUserTransactions(userId, limit, cursor);
+    const reconciledTransactions = await reconcileProcessingTransactions(transactions, {
+      logPrefix: 'API/Transactions',
+    });
 
     // 格式化返回数据 - 一次性解析，避免前端重复解析
-    const formattedTransactions = transactions.map(trans => {
+    const formattedTransactions = reconciledTransactions.map(trans => {
       // 解析 resultData（可能是 JSON 字符串，也可能是普通字符串）
       let resultData: unknown = null;
       if (trans.resultData) {
@@ -105,6 +136,8 @@ export async function GET(request: NextRequest) {
         // 忽略解析失败
       }
 
+      const isSmartEdit = isSmartEditTransaction(trans.toolPage, trans.description, trans.orderNumber);
+
       return {
         id: trans.id,
         orderNumber: trans.orderNumber,
@@ -114,16 +147,17 @@ export async function GET(request: NextRequest) {
         remainingPoints: trans.remainingPoints || 0,
         time: trans.createdAt,
         status: trans.status || '未知',
-        prompt: trans.prompt || '',
-        requestParams,
+        prompt: isSmartEdit ? '' : trans.prompt || '',
+        requestParams: isSmartEdit ? sanitizeSmartEditRequestParams(requestParams) : requestParams,
         resultData,
         psdUrl: trans.psdUrl || '',
+        uploadedImage: trans.uploadedImage || '',
       };
     });
 
     // 返回数据 + 分页游标
-    const lastItem = transactions[transactions.length - 1];
-    const nextCursor = transactions.length >= limit && lastItem?.createdAt
+    const lastItem = reconciledTransactions[reconciledTransactions.length - 1];
+    const nextCursor = reconciledTransactions.length >= limit && lastItem?.createdAt
       ? lastItem.createdAt
       : null;
 

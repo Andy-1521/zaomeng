@@ -10,6 +10,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import Image, { type ImageLoaderProps, type ImageProps } from 'next/image';
 
 interface ImageThumbnailProps {
   src?: string;
@@ -29,6 +30,12 @@ const THUMBNAIL_SIZES = {
   large: { width: 400, height: 400 },
 };
 
+const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
+
+function SafeImage({ alt, ...props }: Omit<ImageProps, 'loader'>) {
+  return <Image {...props} alt={alt} loader={passthroughImageLoader} unoptimized />;
+}
+
 export function ImageThumbnail({
   src,
   alt = '图片',
@@ -43,8 +50,7 @@ export function ImageThumbnail({
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
   const [inView, setInView] = useState(false);
-  const [loadingTimeout, setLoadingTimeout] = useState(false);
-  const imgRef = useRef<HTMLImageElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // 使用Intersection Observer实现懒加载
   useEffect(() => {
@@ -60,8 +66,8 @@ export function ImageThumbnail({
       }
     );
 
-    if (imgRef.current) {
-      observer.observe(imgRef.current);
+    if (containerRef.current) {
+      observer.observe(containerRef.current);
     }
 
     return () => {
@@ -72,11 +78,10 @@ export function ImageThumbnail({
   // 超时检测：如果图片超过10秒没有加载完成，显示错误状态
   useEffect(() => {
     if (inView && !loaded && !error && src) {
-      const timeoutId = setTimeout(() => {
-        console.warn('[ImageThumbnail] 图片加载超时:', src.substring(0, 80));
-        setLoadingTimeout(true);
-        setError(true);
-      }, 10000); // 10秒超时
+        const timeoutId = setTimeout(() => {
+          console.warn('[ImageThumbnail] 图片加载超时:', src.substring(0, 80));
+          setError(true);
+        }, 10000); // 10秒超时
 
       return () => {
         clearTimeout(timeoutId);
@@ -86,7 +91,7 @@ export function ImageThumbnail({
 
   // 直接使用原图URL
   // 注意：Coze对象存储不支持图片处理参数，如需缩略图需要后端生成
-  const thumbnailUrl = inView ? src : undefined;
+  const thumbnailUrl = inView ? src : null;
   const displayWidth = width || THUMBNAIL_SIZES[thumbnailSize].width;
   const displayHeight = height || THUMBNAIL_SIZES[thumbnailSize].height;
 
@@ -115,39 +120,40 @@ export function ImageThumbnail({
 
   return (
     <div
-      ref={imgRef}
+      ref={containerRef}
       className={`relative overflow-hidden bg-gray-100 ${className}`}
       style={{ width: displayWidth, height: displayHeight }}
       onClick={onClick}
     >
       {/* 占位图 */}
       {!loaded && !error && (
-        <img
+        <SafeImage
           src={placeholder}
-          alt={alt}
-          className="absolute inset-0 w-full h-full object-cover"
+          alt=""
+          fill
+          sizes={`${displayWidth}px`}
+          className="object-cover"
         />
       )}
 
       {/* 实际图片 */}
-      {inView && !error && (
-        <img
+      {inView && !error && thumbnailUrl && (
+        <SafeImage
           src={thumbnailUrl}
           alt={alt}
-          loading="lazy"
-          className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
+          fill
+          sizes={`${displayWidth}px`}
+          className={`object-cover transition-opacity duration-300 ${
             loaded ? 'opacity-100' : 'opacity-0'
           }`}
           onLoad={() => {
             setLoaded(true);
             setError(false);
-            setLoadingTimeout(false);
             onLoad?.();
           }}
           onError={() => {
             setError(true);
             setLoaded(false);
-            setLoadingTimeout(false);
           }}
         />
       )}

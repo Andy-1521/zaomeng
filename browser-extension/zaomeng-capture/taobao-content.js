@@ -1,6 +1,6 @@
 (() => {
   const MIN_DISPLAY_SIZE = 140
-  const WEBSITE_HOSTS = new Set(['124.223.26.206', 'localhost', '10.0.4.6'])
+  const WEBSITE_HOSTS = new Set(['localhost'])
   if (WEBSITE_HOSTS.has(window.location.hostname)) return
 
   let currentImage = null
@@ -85,9 +85,67 @@
     scheduleHide()
   })
 
-  const buildPayload = (image, captureMethod) => {
-    if (!image) return null
-    const imageUrl = normalizeImageUrl(image.currentSrc || image.src || image.dataset?.src || image.dataset?.original || '')
+  const getDatasetImageUrl = (element) => {
+    if (!element?.dataset) return ''
+    const priorityKeys = ['src', 'original', 'lazySrc', 'lazy', 'ksLazyload', 'url', 'image', 'img', 'originSrc', 'originalSrc', 'srcset']
+    for (const key of priorityKeys) {
+      const value = element.dataset[key]
+      if (value) return value
+    }
+
+    for (const value of Object.values(element.dataset)) {
+      if (typeof value === 'string' && /https?:\/\/|^\/\//.test(value)) {
+        return value
+      }
+    }
+
+    return ''
+  }
+
+  const extractSrcsetUrl = (srcset = '') => {
+    const candidates = srcset
+      .split(',')
+      .map((item) => item.trim().split(/\s+/)[0])
+      .filter(Boolean)
+    return candidates[candidates.length - 1] || ''
+  }
+
+  const extractBackgroundImageUrl = (element) => {
+    const backgroundImage = window.getComputedStyle(element).backgroundImage || ''
+    const match = backgroundImage.match(/url\((['"]?)(.*?)\1\)/)
+    return match?.[2] || ''
+  }
+
+  const getElementImageUrl = (element) => {
+    if (!element) return ''
+
+    if (element instanceof HTMLImageElement) {
+      return normalizeImageUrl(
+        element.currentSrc ||
+        element.src ||
+        extractSrcsetUrl(element.srcset || '') ||
+        extractSrcsetUrl(element.dataset?.srcset || '') ||
+        getDatasetImageUrl(element)
+      )
+    }
+
+    if (element instanceof HTMLSourceElement) {
+      return normalizeImageUrl(element.src || extractSrcsetUrl(element.srcset || '') || getDatasetImageUrl(element))
+    }
+
+    return normalizeImageUrl(getDatasetImageUrl(element) || extractBackgroundImageUrl(element))
+  }
+
+  const isSupportedImageUrl = (url) => {
+    if (!url) return false
+    const normalized = normalizeImageUrl(url)
+    if (!normalized || normalized.startsWith('data:') || normalized.startsWith('blob:')) return false
+    return /^https?:\/\//i.test(normalized)
+  }
+
+  const buildPayload = (target, captureMethod) => {
+    if (!target) return null
+    const imageUrl = getElementImageUrl(target)
     if (!imageUrl || imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) return null
 
     return {
@@ -111,13 +169,35 @@
   }
 
   const getCandidateImage = (target) => {
-    const image = target instanceof HTMLImageElement ? target : target.closest('img')
-    if (!image) return null
-    const rect = image.getBoundingClientRect()
-    if (rect.width < MIN_DISPLAY_SIZE || rect.height < MIN_DISPLAY_SIZE) return null
-    const imageUrl = normalizeImageUrl(image.currentSrc || image.src || image.dataset?.src || image.dataset?.original || '')
-    if (!imageUrl || imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) return null
-    return image
+    const startElement = target instanceof Element ? target : null
+    if (!startElement) return null
+
+    const candidates = []
+    if (startElement instanceof HTMLImageElement || startElement instanceof HTMLSourceElement) {
+      candidates.push(startElement)
+    }
+
+    const image = startElement.closest('img')
+    if (image) candidates.push(image)
+
+    const pictureImage = startElement.closest('picture')?.querySelector('img')
+    if (pictureImage) candidates.push(pictureImage)
+
+    let node = startElement
+    for (let depth = 0; node && depth < 4; depth += 1) {
+      candidates.push(node)
+      node = node.parentElement
+    }
+
+    for (const candidate of candidates) {
+      const rect = candidate.getBoundingClientRect()
+      if (rect.width < MIN_DISPLAY_SIZE || rect.height < MIN_DISPLAY_SIZE) continue
+      const imageUrl = getElementImageUrl(candidate)
+      if (!isSupportedImageUrl(imageUrl)) continue
+      return candidate
+    }
+
+    return null
   }
 
   const placeButton = () => {

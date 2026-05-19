@@ -20,7 +20,7 @@ interface PollingTask {
 class TaskPollingManager {
   private tasks: Map<string, PollingTask> = new Map();
   private pollingInterval: number = 2000; // 每2秒检查一次
-  private maxDuration: number = 720 * 1000; // 最多轮询12分钟（确保能覆盖彩绘提取2的完整流程：10分钟API超时 + 2分钟容错）
+  private maxDuration: number = 720 * 1000; // 最多轮询12分钟（确保能覆盖当前彩绘提取完整流程：10分钟API超时 + 2分钟容错）
   private maxFailCount: number = 10; // 最多连续失败10次，防止无限轮询
 
   /**
@@ -45,9 +45,9 @@ class TaskPollingManager {
     }
 
     // 创建轮询定时器
-    const intervalId = setInterval(async () => {
-      await this.checkTaskStatus(loadingMessageId, orderId, startTime, userId);
-    }, this.pollingInterval);
+      const intervalId = setInterval(async () => {
+        await this.checkTaskStatus(loadingMessageId, orderId, startTime);
+      }, this.pollingInterval);
 
     // 保存任务
     this.tasks.set(orderId, {
@@ -133,8 +133,7 @@ class TaskPollingManager {
   private async checkTaskStatus(
     loadingMessageId: string,
     orderId: string,
-    startTime: number,
-    userId: string
+    startTime: number
   ) {
     // 【关键修复】检查任务是否已停止
     const task = this.tasks.get(orderId);

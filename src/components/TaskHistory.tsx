@@ -1,12 +1,15 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import Image, { type ImageLoaderProps, type ImageProps } from 'next/image';
 import { createPortal } from 'react-dom';
 import { showToast } from '@/lib/toast';
 import { clearCache } from '@/lib/globalRecordManager';
 import { ImageThumbnail } from '@/components/ui/ImageThumbnail';
+import { parseColorExtractionModeMeta, type ColorExtractionMode } from '@/lib/colorExtractionMode';
+import { toUserFacingErrorFromUnknown, toUserFacingErrorMessage } from '@/lib/userFacingError';
 
-export type TabType = 'color-extraction' | 'auto-remove-bg' | 'watermark' | 'custom' | 'ai-generate';
+export type TabType = 'color-extraction' | 'watermark' | 'custom' | 'ai-generate' | 'smart-edit';
 export type FilterType = 'all' | TabType;
 type TaskCenterFilter = 'all' | 'processing' | 'success' | 'failed';
 export type TaskStatus = '处理中' | '成功' | '失败' | '超时' | '部分成功';
@@ -28,6 +31,8 @@ export interface TaskRecord {
   imageSize?: string; // 分辨率
   generateCount?: number; // 【新增】预期生成数量（用于判断部分成功）
   errorMessage?: string; // 失败原因
+  extractionMode?: ColorExtractionMode;
+  degraded?: boolean;
 }
 
 interface TaskHistoryProps {
@@ -45,12 +50,17 @@ type ResultDataObject = {
 };
 
 type RequestParamsObject = {
+  imageUrl?: string;
   urls?: string[];
   uploadedImage?: string | string[];
   uploaded_image?: string | string[];
+  extractionMode?: string;
   aspectRatio?: string;
   imageSize?: string;
   generateCount?: number;
+  userInstruction?: string;
+  summary?: string;
+  promptSummary?: string;
   [key: string]: unknown;
 };
 
@@ -67,6 +77,7 @@ type TaskRecordApiItem = {
   time?: number | string;
   createdAt?: number | string;
   toolPage?: string;
+  uploadedImage?: string;
 };
 
 type TaskRecordApiResponse = {
@@ -75,6 +86,12 @@ type TaskRecordApiResponse = {
 };
 
 const taskRecordCacheByUser = new Map<string, TaskRecord[]>();
+
+const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
+
+function SafeImage({ alt, ...props }: Omit<ImageProps, 'loader'>) {
+  return <Image {...props} alt={alt} loader={passthroughImageLoader} unoptimized />;
+}
 
 function getFirstImage(value?: string | string[]): string | null {
   if (Array.isArray(value)) {
@@ -143,13 +160,6 @@ function matchesTaskCenterFilter(task: TaskRecord, filter: TaskCenterFilter) {
   if (filter === 'processing') return task.status === '处理中';
   if (filter === 'success') return task.status === '成功' || task.status === '部分成功' || !task.status;
   return task.status === '失败' || task.status === '超时';
-}
-
-function getStatusPriority(status?: TaskStatus) {
-  if (status === '处理中') return 0;
-  if (status === '失败' || status === '超时') return 1;
-  if (status === '部分成功') return 2;
-  return 3;
 }
 
 function getStoredUserId(): string | null {
@@ -228,7 +238,8 @@ export const addTaskRecord = (
   orderId?: string,
   duration?: number,
   uploadedImage?: string,
-  status?: TaskStatus
+  status?: TaskStatus,
+  options?: Partial<Pick<TaskRecord, 'extractionMode' | 'degraded'>>
 ) => {
   // 创建任务记录
   const record: TaskRecord = {
@@ -242,6 +253,7 @@ export const addTaskRecord = (
     duration,
     uploadedImage,
     status,
+    ...(options || {}),
   };
 
   // 添加到缓存
@@ -422,7 +434,7 @@ export const forceRefreshCache = (userId?: string) => {
           imageUrl = resultDataObject.imageUrl || resultDataObject.image_url || resultDataObject.result_image_url || '';
           const errorValue = resultDataObject.error;
           if (typeof errorValue === 'string' && errorValue.trim()) {
-            errorMessage = errorValue.trim();
+            errorMessage = toUserFacingErrorMessage(errorValue, '暂时未能完成处理，请稍后重试');
           }
           console.log('[TaskHistory] resultData是对象，提取imageUrl');
         } else if (typeof item.resultData === 'string') {
@@ -442,7 +454,7 @@ export const forceRefreshCache = (userId?: string) => {
             // 不是JSON格式，直接使用字符串
             imageUrl = item.resultData;
             if (!item.resultData.startsWith('http://') && !item.resultData.startsWith('https://') && !item.resultData.startsWith('/')) {
-              errorMessage = item.resultData;
+              errorMessage = toUserFacingErrorMessage(item.resultData, '暂时未能完成处理，请稍后重试');
             }
             console.log('[TaskHistory] resultData无法解析为JSON，使用原始字符串');
           }
@@ -456,10 +468,12 @@ export const forceRefreshCache = (userId?: string) => {
       });
 
       // 解析 requestParams 获取上传的参考图片
-      let uploadedImage: string | string[] = '';
+      let uploadedImage: string | string[] = item.uploadedImage || '';
       let aspectRatio: string | undefined = undefined;
       let imageSize: string | undefined = undefined;
       let generateCount: number | undefined = undefined; // 【新增】预期生成数量
+      let extractionMode: ColorExtractionMode = 'full';
+      let degraded = false;
 
       if (item.requestParams) {
         try {
@@ -474,6 +488,8 @@ export const forceRefreshCache = (userId?: string) => {
           if (params && params.urls && Array.isArray(params.urls) && params.urls.length > 0) {
             // 保存完整的图片数组
             uploadedImage = params.urls;
+          } else if (params && typeof params.imageUrl === 'string' && params.imageUrl) {
+            uploadedImage = params.imageUrl;
           } else if (params && params.uploadedImage) {
             uploadedImage = params.uploadedImage;
           } else if (params && params.uploaded_image) {
@@ -490,9 +506,13 @@ export const forceRefreshCache = (userId?: string) => {
           if (params && params.generateCount) {
             generateCount = params.generateCount;
           }
+
+          const colorExtractionMeta = parseColorExtractionModeMeta(params || item.requestParams);
+          extractionMode = colorExtractionMeta.requestedMode;
+          degraded = colorExtractionMeta.degraded;
         } catch {
           // 解析失败
-          uploadedImage = '';
+          uploadedImage = item.uploadedImage || '';
         }
       }
 
@@ -502,9 +522,22 @@ export const forceRefreshCache = (userId?: string) => {
         psdUrl = item.psdUrl;
       }
 
-      // 确保 description 是字符串
+      const isSmartEditOrder = item.toolPage === '智能改图'
+        || item.toolPage === '局部改图'
+        || item.description?.includes('智能改图')
+        || item.description?.includes('局部改图')
+        || item.orderNumber?.startsWith('LCL-');
+
+      // 确保 description 是字符串。智能改图不向用户侧展示最终提示词。
       let description = '未知';
-      if (typeof item.prompt === 'string' && item.prompt.trim() !== '') {
+      if (isSmartEditOrder) {
+        const smartEditSummary = item.description?.replace(/^智能改图[:：]\s*/, '').replace(/^局部改图[:：]\s*/, '').trim()
+          || (typeof item.requestParams === 'object' && item.requestParams !== null
+            ? ((item.requestParams as RequestParamsObject).summary || (item.requestParams as RequestParamsObject).promptSummary || (item.requestParams as RequestParamsObject).userInstruction)
+            : '')
+          || '智能改图结果';
+        description = typeof smartEditSummary === 'string' ? smartEditSummary : '智能改图结果';
+      } else if (typeof item.prompt === 'string' && item.prompt.trim() !== '') {
         description = item.prompt.trim();
       } else if (typeof item.description === 'string' && item.description.trim() !== '') {
         description = item.description.trim();
@@ -566,26 +599,34 @@ export const forceRefreshCache = (userId?: string) => {
       let tab: TabType = 'color-extraction';
       let tabName: string = '彩绘提取';
 
-      // AI生图判断：兼容旧的“智能抠图”数据和订单号前缀
-      if (item.toolPage === 'AI生图' || item.toolPage === 'AI生图（图生图）' || item.description?.includes('AI生图') || item.orderNumber?.startsWith('AIG')) {
+      if (item.toolPage === '裁切工具' || item.description?.includes('裁切')) {
+        tab = 'custom';
+        tabName = '裁切工具';
+      } else if (item.toolPage === 'AI生图' || item.toolPage === 'AI生图（图生图）' || item.description?.includes('AI生图') || item.orderNumber?.startsWith('AIG')) {
         tab = 'ai-generate';
-        tabName = 'AI生图';
-      } else if (item.toolPage === '智能抠图' || item.orderNumber?.startsWith('ARB-')) {
-        tab = 'auto-remove-bg';
         tabName = 'AI生图';
       } else if (item.toolPage === '彩绘提取' || item.toolPage === '彩绘提取2' || item.description?.includes('彩绘提取')) {
         tab = 'color-extraction';
         tabName = '彩绘提取';
-      } else if (item.toolPage === '去除水印' || item.description?.includes('去除水印') || item.orderNumber?.startsWith('RW-')) {
+      } else if (item.toolPage === '高清+扩图2' || item.description?.includes('高清+扩图2') || item.orderNumber?.startsWith('HDO2-')) {
         tab = 'watermark';
-        tabName = '去除水印';
+        tabName = '高清+扩图2';
+      } else if (item.toolPage === '高清+扩图' || item.description?.includes('高清+扩图') || item.orderNumber?.startsWith('HDO-')) {
+        tab = 'watermark';
+        tabName = '高清+扩图';
+      } else if (item.toolPage === 'AI扩图' || item.toolPage === '去除水印' || item.description?.includes('去除水印') || item.description?.includes('AI扩图') || item.orderNumber?.startsWith('RW-')) {
+        tab = 'watermark';
+        tabName = 'AI扩图';
+      } else if (isSmartEditOrder) {
+        tab = 'smart-edit';
+        tabName = '智能改图';
       } else if (item.toolPage === '高清放大' || item.description?.includes('高清放大') || item.orderNumber?.startsWith('HD-')) {
         tab = 'custom';
         tabName = '高清放大';
       } else if (item.toolPage === '去水印') {
         // 兼容性处理：旧数据可能使用'去水印'
         tab = 'watermark';
-        tabName = '去除水印';
+        tabName = 'AI扩图';
       } else if (item.toolPage === '快速制作') {
         // Keep legacy history visible without restoring the old page mode.
         tab = 'custom';
@@ -619,13 +660,11 @@ export const forceRefreshCache = (userId?: string) => {
         imageSize,
         generateCount, // 【新增】预期生成数量
         errorMessage,
+        extractionMode,
+        degraded,
       };
     })
-    .sort((a: TaskRecord, b: TaskRecord) => {
-      const statusDiff = getStatusPriority(a.status) - getStatusPriority(b.status);
-      if (statusDiff !== 0) return statusDiff;
-      return b.time - a.time;
-    }); // 处理中在前，失败紧跟其后
+    .sort((a: TaskRecord, b: TaskRecord) => b.time - a.time);
 
   return tasks;
 };
@@ -685,7 +724,8 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   const [showCopySuccessForOrder, setShowCopySuccessForOrder] = useState<string | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [deletingOrder, setDeletingOrder] = useState<string | null>(null);
-  const [generatingPsdOrder, setGeneratingPsdOrder] = useState<string | null>(null);
+  const [generatingPsdOrders, setGeneratingPsdOrders] = useState<Set<string>>(new Set());
+  const [retryingOrder, setRetryingOrder] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState<FilterType>('all');
   const [statusFilter, setStatusFilter] = useState<TaskCenterFilter>('all');
   const [showAllHistory, setShowAllHistory] = useState(false);
@@ -693,25 +733,13 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   const taskCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const processingCount = tasks.filter((task) => task.status === '处理中').length;
-  const failedCount = tasks.filter((task) => task.status === '失败' || task.status === '超时').length;
 
   const historySourceTasks = showAllHistory ? tasks : tasks.slice(0, 20);
   const visibleTasks = historySourceTasks.filter((task) =>
     (filterTab === 'all' || task.tab === filterTab) && matchesTaskCenterFilter(task, statusFilter)
   );
   const groupedVisibleTasks = visibleTasks.reduce<Array<{ label: string; tasks: TaskRecord[] }>>((groups, task) => {
-    let label = '历史';
-
-    if (task.status === '处理中') {
-      label = '处理中';
-    } else if (task.status === '失败' || task.status === '超时') {
-      label = '失败';
-    } else if (task.status === '成功' || task.status === '部分成功') {
-      label = '成功';
-    } else {
-      label = getTaskDateGroup(task.time);
-    }
-
+    const label = getTaskDateGroup(task.time);
     const existing = groups.find((group) => group.label === label);
     if (existing) {
       existing.tasks.push(task);
@@ -720,18 +748,6 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     }
     return groups;
   }, []);
-  const groupOrder = ['处理中', '失败', '成功'];
-  groupedVisibleTasks.sort((a, b) => {
-    const aIndex = groupOrder.indexOf(a.label);
-    const bIndex = groupOrder.indexOf(b.label);
-    if (aIndex !== -1 || bIndex !== -1) {
-      const normalizedA = aIndex === -1 ? 999 : aIndex;
-      const normalizedB = bIndex === -1 ? 999 : bIndex;
-      return normalizedA - normalizedB;
-    }
-    return 0;
-  });
-
   // 自动隐藏定时器
   const autoHideTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -908,10 +924,16 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
         );
-      case 'auto-remove-bg':
+      case 'ai-generate':
         return (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+        );
+      case 'smart-edit':
+        return (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M4 20h4.586a1 1 0 00.707-.293l10.414-10.414a2 2 0 000-2.828l-2.172-2.172a2 2 0 00-2.828 0L4.293 14.707A1 1 0 004 15.414V20z" />
           </svg>
         );
       case 'custom':
@@ -972,9 +994,9 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       return;
     }
 
-    setGeneratingPsdOrder(task.orderId);
+    setGeneratingPsdOrders((current) => new Set(current).add(task.orderId!));
     try {
-      const response = await fetch('/api/color-extraction2/generate-psd', {
+      const response = await fetch('/api/color-extraction/generate-psd', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -983,16 +1005,88 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
       const result = await response.json();
       if (!result.success) {
-        throw new Error(result.error || 'PSD生成失败');
+        throw new Error(toUserFacingErrorMessage(result.error, 'PSD生成失败，请重试'));
       }
 
       showToast(result.message || 'PSD生成成功', 'success');
       await loadTasks();
     } catch (error) {
       console.error('[TaskHistory] 手动生成PSD失败:', error);
-      showToast(error instanceof Error ? error.message : 'PSD生成失败，请重试', 'error');
+      showToast(toUserFacingErrorFromUnknown(error, 'PSD生成失败，请重试'), 'error');
     } finally {
-      setGeneratingPsdOrder(null);
+      setGeneratingPsdOrders((current) => {
+        const next = new Set(current);
+        next.delete(task.orderId!);
+        return next;
+      });
+    }
+  };
+
+  const handleRetryColorExtraction = async (task: TaskRecord, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    if (task.tab !== 'color-extraction') {
+      showToast('当前仅支持重新提交彩绘提取任务', 'info');
+      return;
+    }
+
+    if (!task.orderId) {
+      showToast('订单号缺失，无法重新提交', 'error');
+      return;
+    }
+
+    const userIdToUse = userId || getStoredUserId();
+    if (!userIdToUse) {
+      showToast('未找到用户信息，请先登录', 'error');
+      return;
+    }
+
+    const retryImageUrl = getFirstImage(task.uploadedImage);
+    if (!isImageValue(retryImageUrl)) {
+      showToast('未找到该任务的原始图片，无法重新提交', 'error');
+      return;
+    }
+
+    const normalizedRetryImageUrl = retryImageUrl.startsWith('http://') || retryImageUrl.startsWith('https://')
+      ? retryImageUrl
+      : new URL(retryImageUrl, window.location.origin).toString();
+
+    setRetryingOrder(task.orderId);
+    try {
+      const response = await fetch('/api/color-extraction/run', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: userIdToUse,
+          imageUrl: normalizedRetryImageUrl,
+        }),
+      });
+
+      const result = await response.json() as {
+        success?: boolean;
+        message?: string;
+        data?: { remainingPoints?: number };
+      };
+
+      if (!response.ok || !result.success) {
+        throw new Error(toUserFacingErrorMessage(result.message, '重新提交失败，请稍后重试'));
+      }
+
+      if (typeof result.data?.remainingPoints === 'number') {
+        window.dispatchEvent(new CustomEvent('userPointsChanged', {
+          detail: { points: result.data.remainingPoints },
+        }));
+      }
+
+      await loadTasks(userId);
+      window.dispatchEvent(new Event('taskHistoryUpdated'));
+      showToast('已重新提交彩绘提取任务', 'success');
+    } catch (error) {
+      console.error('[TaskHistory] 重新提交彩绘提取失败:', error);
+      showToast(toUserFacingErrorFromUnknown(error, '重新提交失败，请稍后重试'), 'error');
+    } finally {
+      setRetryingOrder(null);
     }
   };
 
@@ -1061,7 +1155,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
           console.error('清空历史记录失败:', errorData.message || response.statusText);
-          showToast(`清空历史记录失败：${errorData.message || response.statusText}`, 'error');
+          showToast(toUserFacingErrorMessage(errorData.message, '清空历史记录失败，请稍后重试'), 'error');
           return;
         }
 
@@ -1122,10 +1216,10 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     const labels: Record<FilterType, string> = {
       'all': '全部',
       'color-extraction': '彩绘提取',
-      'auto-remove-bg': 'AI生图',
       'ai-generate': 'AI生图',
-      'watermark': '去除水印',
-      'custom': '其他工具',
+      'smart-edit': '智能改图',
+      'watermark': '高清+扩图/AI扩图',
+      'custom': '高清放大/其他',
     };
     return labels[filter] || filter;
   };
@@ -1157,7 +1251,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         console.error('删除历史记录失败:', errorData.message || response.statusText);
-        showToast(`删除历史记录失败：${errorData.message || response.statusText}`, 'error');
+        showToast(toUserFacingErrorMessage(errorData.message, '删除历史记录失败，请稍后重试'), 'error');
         return;
       }
 
@@ -1212,7 +1306,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                 )}
               </div>
               <div className="flex flex-col items-center gap-2">
-                <span className="[writing-mode:vertical-rl] text-xs font-medium tracking-[0.22em] text-white/78">任务中心</span>
+                <span className="[writing-mode:vertical-rl] text-xs font-medium tracking-[0.22em] text-white/78">订单记录</span>
                 {processingCount > 0 ? (
                   <span className="rounded-full bg-blue-500/20 px-1.5 py-1 text-[10px] text-blue-200 [writing-mode:vertical-rl]">处理中{processingCount}</span>
                 ) : (
@@ -1230,7 +1324,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                     </svg>
                   </div>
                   <div>
-                    <h3 className="text-base font-semibold text-white">任务中心</h3>
+                    <h3 className="text-base font-semibold text-white">订单记录</h3>
                     <p className="text-xs text-white/42">订单进度、结果与下载</p>
                   </div>
                 </div>
@@ -1246,6 +1340,19 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
         {!isCollapsed && (
           <>
             <div className="border-b border-white/10 px-4 py-3">
+              <div className="flex items-center gap-2">
+                    <div className="rounded-full border border-white/8 bg-white/[0.04] px-3 py-2 text-xs text-white/55">
+                      <select
+                        value={filterTab}
+                        onChange={(event) => setFilterTab(event.target.value as FilterType)}
+                        className="min-w-[110px] appearance-none bg-transparent pr-5 text-white outline-none cursor-pointer"
+                      >
+                        {(['all', 'color-extraction', 'ai-generate', 'smart-edit', 'watermark', 'custom'] as FilterType[]).map((filter) => (
+                          <option key={filter} value={filter} className="bg-[#111] text-white">{getFilterLabel(filter)}</option>
+                        ))}
+                      </select>
+                    </div>
+              </div>
               <div className="grid grid-cols-4 gap-1 rounded-2xl border border-white/8 bg-white/[0.035] p-1">
                 {([
                   ['all', '全部'],
@@ -1262,20 +1369,6 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                     {label}
                   </button>
                 ))}
-              </div>
-              <div className="mt-3 flex items-center gap-2">
-                <label className="flex items-center gap-2 rounded-full border border-white/8 bg-white/[0.04] px-3 py-2 text-xs text-white/55">
-                  <span>工具</span>
-                  <select
-                    value={filterTab}
-                    onChange={(event) => setFilterTab(event.target.value as FilterType)}
-                    className="bg-transparent text-white outline-none"
-                  >
-                    {(['all', 'color-extraction', 'ai-generate', 'auto-remove-bg', 'watermark', 'custom'] as FilterType[]).map((filter) => (
-                      <option key={filter} value={filter} className="bg-[#111]">{getFilterLabel(filter)}</option>
-                    ))}
-                  </select>
-                </label>
               </div>
             </div>
 
@@ -1384,11 +1477,11 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                                             void handleGeneratePsd(task);
                                           }
                                         }}
-                                        disabled={generatingPsdOrder === task.orderId}
-                                        className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${task.psdUrl ? 'border-[#31a8ff]/20 bg-[#001e36] text-[#31a8ff] hover:bg-[#001e36]/80' : 'border-amber-300/25 bg-amber-500/15 text-amber-200 hover:bg-amber-500/22'}`}
-                                        title={generatingPsdOrder === task.orderId ? 'PSD生成中' : task.psdUrl ? '下载PSD文件' : '点击生成PSD'}
+                                        disabled={task.orderId ? generatingPsdOrders.has(task.orderId) : false}
+                                        className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${task.psdUrl ? 'border-[#31a8ff]/20 bg-[#001e36] text-[#31a8ff] hover:bg-[#001e36]/80' : 'border-violet-300/25 bg-violet-500/15 text-violet-200 hover:bg-violet-500/22'}`}
+                                        title={task.orderId && generatingPsdOrders.has(task.orderId) ? 'PSD生成中' : task.psdUrl ? '下载PSD文件' : '点击生成PSD'}
                                       >
-                                        {generatingPsdOrder === task.orderId ? '生成中...' : task.psdUrl ? '下载PSD' : '生成PSD'}
+                                        {task.orderId && generatingPsdOrders.has(task.orderId) ? '生成中...' : task.psdUrl ? '下载PSD' : '生成PSD'}
                                       </button>
                                     )}
                                   </div>
@@ -1396,8 +1489,13 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
                                 {isFailedTask && (
                                   <div className="mt-2.5 flex flex-wrap gap-1.5">
-                                    <button type="button" onClick={(e) => { e.stopPropagation(); showToast('请回到对应工具重新提交该任务', 'info'); }} className="rounded-full border border-red-300/18 bg-red-500/14 px-2.5 py-1 text-[11px] text-red-200 transition-colors hover:bg-red-500/22">
-                                      重新提交
+                                    <button
+                                      type="button"
+                                      onClick={(e) => void handleRetryColorExtraction(task, e)}
+                                      disabled={retryingOrder === task.orderId || task.tab !== 'color-extraction'}
+                                      className="rounded-full border border-red-300/18 bg-red-500/14 px-2.5 py-1 text-[11px] text-red-200 transition-colors hover:bg-red-500/22 disabled:cursor-not-allowed disabled:opacity-40"
+                                    >
+                                      {retryingOrder === task.orderId ? '重新提交中...' : '重新提交'}
                                     </button>
                                   </div>
                                 )}
@@ -1458,12 +1556,15 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
           >
             ×
           </button>
-          <img
-            src={previewImageUrl}
-            alt="预览大图"
-            className="max-w-[90vw] max-h-[90vh] object-contain rounded-xl"
-            onClick={(e) => e.stopPropagation()}
-          />
+          <div className="relative flex h-[90vh] w-[90vw] items-center justify-center" onClick={() => setPreviewImageUrl(null)}>
+            <SafeImage
+              src={previewImageUrl}
+              alt="预览大图"
+              fill
+              sizes="90vw"
+              className="pointer-events-none rounded-xl object-contain"
+            />
+          </div>
         </div>,
         document.body
       )}

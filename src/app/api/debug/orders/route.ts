@@ -1,9 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { getDb } from '@/storage/database/client';
 import { transactions } from '@/storage/database/shared/schema';
 import { eq, desc } from 'drizzle-orm';
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const db = await getDb();
 

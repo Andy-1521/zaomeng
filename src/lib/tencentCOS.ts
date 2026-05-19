@@ -1,11 +1,14 @@
 /**
  * 腾讯云COS上传工具
- * 使用AWS SDK v3连接腾讯云COS
- *
- * 注意：腾讯云COS的bucket已设置为公共读，可以直接使用公共访问URL
+ * 使用AWS SDK v3上传，使用官方 SDK 生成可访问签名 URL。
  */
 
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import COS from 'cos-nodejs-sdk-v5';
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : '腾讯云COS操作失败';
+}
 
 // 腾讯云COS配置
 const region = process.env.COS_REGION || 'ap-guangzhou';
@@ -22,6 +25,7 @@ const HAS_TENCENT_COS_CONFIG = !!(
 // 如果没有有效配置，自动禁用
 let uploadClient: S3Client | null = null;
 let signClient: S3Client | null = null;
+let cosClient: COS | null = null;
 
 if (HAS_TENCENT_COS_CONFIG) {
   // 上传专用客户端：使用虚拟域名格式
@@ -44,6 +48,12 @@ if (HAS_TENCENT_COS_CONFIG) {
       secretAccessKey: process.env.COS_SECRET_KEY!,
     },
     forcePathStyle: false, // 腾讯云COS要求使用虚拟域名格式（bucket名称会自动添加到endpoint前）
+  });
+
+  cosClient = new COS({
+    SecretId: process.env.COS_ACCESS_KEY!,
+    SecretKey: process.env.COS_SECRET_KEY!,
+    Timeout: 300000,
   });
 }
 
@@ -68,7 +78,7 @@ if (!HAS_TENCENT_COS_CONFIG) {
 /**
  * 上传Buffer到腾讯云COS
  * @param buffer - 文件内容Buffer
- * @param fileName - 文件名（包含路径，如 'sjkch_png/image.png'）
+ * @param fileName - 文件名（包含路径，如 'remove-bg/results/image.png'）
  * @param contentType - 内容类型（如 'image/png'）
  * @returns 文件key
  */
@@ -97,9 +107,9 @@ export async function uploadToTencentCOS(
     console.log(`[腾讯云COS] 上传成功，key: ${fileName}`);
 
     return fileName;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[腾讯云COS] 上传失败:', error);
-    throw new Error(`上传到腾讯云COS失败: ${error.message}`);
+    throw new Error(`上传到腾讯云COS失败: ${getErrorMessage(error)}`);
   }
 }
 
@@ -147,33 +157,43 @@ export async function uploadFromUrlToTencentCOS(
     const key = await uploadToTencentCOS(buffer, fileName, finalContentType);
 
     return key;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[腾讯云COS] 从URL上传失败:', error);
-    throw new Error(`从URL上传到腾讯云COS失败: ${error.message}`);
+    throw new Error(`从URL上传到腾讯云COS失败: ${getErrorMessage(error)}`);
   }
 }
 
 /**
- * 生成腾讯云COS的公共访问URL（bucket为公共读）
+ * 生成腾讯云COS可访问URL
+ * 当前 bucket 未开放匿名读取，因此统一返回签名 URL。
  * @param key - 文件key
- * @returns 公共访问URL（不需要签名）
+ * @returns 签名URL
  */
-export async function getTencentCOSUrl(key: string, expireTime: number = 365 * 24 * 60 * 60): Promise<string> {
+export async function getTencentCOSUrl(key: string, _expireTime: number = 365 * 24 * 60 * 60): Promise<string> {
   // 如果没有有效配置，直接抛出错误（让调用者捕获并处理）
-  if (!HAS_TENCENT_COS_CONFIG) {
+  if (!HAS_TENCENT_COS_CONFIG || !cosClient) {
     throw new Error('[腾讯云COS] 未配置或已禁用');
   }
 
-  try {
-    // 腾讯云COS的bucket已设置为公共读，可以直接使用公共访问URL
-    // 格式: https://{bucket-name}.cos.{region}.myqcloud.com/{key}
-    const publicUrl = `https://${BUCKET_NAME}.cos.${region}.myqcloud.com/${key}`;
+  return new Promise((resolve, reject) => {
+    cosClient!.getObjectUrl(
+      {
+        Bucket: BUCKET_NAME,
+        Region: region,
+        Key: key,
+        Sign: true,
+        Expires: _expireTime,
+      },
+      (error, data) => {
+        if (error) {
+          console.error('[腾讯云COS] 生成签名URL失败:', error);
+          reject(new Error(`生成腾讯云COS签名URL失败: ${getErrorMessage(error)}`));
+          return;
+        }
 
-    console.log(`[腾讯云COS] 公共访问URL生成成功（永久有效）: ${publicUrl.substring(0, 80)}...`);
-
-    return publicUrl;
-  } catch (error: any) {
-    console.error('[腾讯云COS] 生成公共访问URL失败:', error);
-    throw new Error(`生成腾讯云COS公共访问URL失败: ${error.message}`);
-  }
+        console.log(`[腾讯云COS] 签名URL生成成功: ${data.Url.substring(0, 80)}...`);
+        resolve(data.Url);
+      }
+    );
+  });
 }

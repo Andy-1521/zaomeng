@@ -1,10 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Image, { type ImageLoaderProps, type ImageProps } from 'next/image';
 import { showToast } from '@/lib/toast';
+import { toUserFacingErrorFromUnknown, toUserFacingErrorMessage } from '@/lib/userFacingError';
 
 type AspectRatio = 'free' | '1:1' | '4:5' | '16:9';
 type CropHandle = 'move' | 'top' | 'right' | 'bottom' | 'left' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+type OutputSizeMode = 'crop' | 'custom';
 
 type CropBox = {
   x: number;
@@ -15,6 +18,10 @@ type CropBox = {
 
 type Props = {
   imageUrl: string;
+  destination?: 'gallery' | 'orders';
+  orderNumber?: string;
+  toolLabel?: string;
+  sourceImageUrl?: string | null;
   onClose: () => void;
   onComplete: (resultUrl: string) => void | Promise<void>;
 };
@@ -25,6 +32,12 @@ const aspectRatios: Array<[AspectRatio, string]> = [
   ['4:5', '4:5'],
   ['16:9', '16:9'],
 ];
+
+const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
+
+const SafeImage = forwardRef<HTMLImageElement, Omit<ImageProps, 'loader'>>(function SafeImage({ alt, ...props }, ref) {
+  return <Image {...props} alt={alt} ref={ref} loader={passthroughImageLoader} unoptimized />;
+});
 
 function getRatioValue(aspectRatio: AspectRatio): number | null {
   if (aspectRatio === '1:1') return 1;
@@ -61,10 +74,6 @@ function clampCrop(crop: CropBox): CropBox {
   };
 }
 
-function normalizeRotation(rotation: number) {
-  return ((rotation % 360) + 360) % 360;
-}
-
 function normalizeSignedRotation(rotation: number) {
   const normalized = ((rotation + 180) % 360 + 360) % 360 - 180;
   return normalized === -180 ? 180 : normalized;
@@ -85,7 +94,7 @@ function getRotatedBoundingSize(size: { width: number; height: number }, rotatio
   };
 }
 
-export default function CropEditorPanel({ imageUrl, onClose, onComplete }: Props) {
+export default function CropEditorPanel({ imageUrl, destination = 'gallery', orderNumber, toolLabel, sourceImageUrl, onClose, onComplete }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const dragStateRef = useRef<{
@@ -103,6 +112,9 @@ export default function CropEditorPanel({ imageUrl, onClose, onComplete }: Props
   const [crop, setCrop] = useState<CropBox>({ x: 12, y: 12, width: 76, height: 76 });
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
   const [isExporting, setIsExporting] = useState(false);
+  const [outputSizeMode, setOutputSizeMode] = useState<OutputSizeMode>('crop');
+  const [customOutputWidth, setCustomOutputWidth] = useState('');
+  const [customOutputHeight, setCustomOutputHeight] = useState('');
 
   const rotatedSize = useMemo(() => {
     return getRotatedBoundingSize(naturalSize, rotation);
@@ -141,6 +153,29 @@ export default function CropEditorPanel({ imageUrl, onClose, onComplete }: Props
     };
   }, [crop.height, crop.width, naturalSize.height, naturalSize.width]);
 
+  const resolvedOutputSize = useMemo(() => {
+    if (outputSizeMode === 'custom') {
+      const width = Number(customOutputWidth);
+      const height = Number(customOutputHeight);
+      const hasWidth = Number.isFinite(width) && width > 0;
+      const hasHeight = Number.isFinite(height) && height > 0;
+
+      if (hasWidth && hasHeight) {
+        return {
+          width: Math.round(width),
+          height: Math.round(height),
+          isCustom: true,
+        };
+      }
+    }
+
+    return {
+      width: cropPixelSize.width,
+      height: cropPixelSize.height,
+      isCustom: false,
+    };
+  }, [cropPixelSize.height, cropPixelSize.width, customOutputHeight, customOutputWidth, outputSizeMode]);
+
   const resetCrop = useCallback(() => {
     setAspectRatio('free');
     setScale(1);
@@ -148,6 +183,9 @@ export default function CropEditorPanel({ imageUrl, onClose, onComplete }: Props
     setFlipHorizontal(false);
     setFlipVertical(false);
     setCrop({ x: 12, y: 12, width: 76, height: 76 });
+    setOutputSizeMode('crop');
+    setCustomOutputWidth('');
+    setCustomOutputHeight('');
   }, []);
 
   const rotateImage = useCallback((delta: number) => {
@@ -262,29 +300,36 @@ export default function CropEditorPanel({ imageUrl, onClose, onComplete }: Props
         body: JSON.stringify({
           action: 'crop',
           imageUrl,
+          destination,
+          orderNumber,
+          toolLabel,
+          sourceImageUrl,
           crop,
           rotation,
           scale,
           flipHorizontal,
           flipVertical,
-          outputSize: cropPixelSize,
+          outputSize: {
+            width: resolvedOutputSize.width,
+            height: resolvedOutputSize.height,
+          },
         }),
       });
 
       const data = await response.json();
       if (!response.ok || !data.success || !data.data?.url) {
-        throw new Error(data.message || '裁切结果生成失败');
+        throw new Error(toUserFacingErrorMessage(data.message, '暂时未能完成处理，请稍后重试'));
       }
 
       await onComplete(data.data.url);
       onClose();
     } catch (error) {
-      const message = error instanceof Error ? error.message : '裁切结果生成失败';
+      const message = toUserFacingErrorFromUnknown(error, '暂时未能完成处理，请稍后重试');
       showToast(message, 'error');
     } finally {
       setIsExporting(false);
     }
-  }, [crop, cropPixelSize, flipHorizontal, flipVertical, imageUrl, onClose, onComplete, rotation, scale]);
+  }, [crop, destination, flipHorizontal, flipVertical, imageUrl, onClose, onComplete, orderNumber, resolvedOutputSize.height, resolvedOutputSize.width, rotation, scale, sourceImageUrl, toolLabel]);
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/65 backdrop-blur-sm px-4">
@@ -293,6 +338,7 @@ export default function CropEditorPanel({ imageUrl, onClose, onComplete }: Props
           <div>
             <h3 className="text-2xl font-semibold text-white">裁切工具</h3>
             <p className="text-white/50 mt-1">支持缩放、旋转和比例裁切，拖动四边、四角或整块区域进行调整</p>
+            <p className="mt-1 text-xs text-white/34">{destination === 'orders' ? '当前结果将保存在订单记录中' : '当前结果将保存在素材库中'}</p>
           </div>
           <button onClick={onClose} className="text-white/55 hover:text-white transition-colors">
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -396,19 +442,72 @@ export default function CropEditorPanel({ imageUrl, onClose, onComplete }: Props
 
             <div className="rounded-2xl border border-white/10 bg-black/20 p-3 space-y-3">
               <div>
-                <p className="text-sm text-white/55">输出像素</p>
-                <p className="mt-1 text-xs text-white/35">按裁切框在原图中的占比计算，缩放和旋转只影响取景，不改变目标尺寸</p>
+                <p className="text-sm text-white/55">输出画布</p>
+                <p className="mt-1 text-xs text-white/35">可直接沿用当前裁切像素，或手动指定导出宽高，类似 PS 调整画布大小。</p>
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setOutputSizeMode('crop')}
+                  className={`rounded-xl border px-3 py-2 text-sm transition-colors ${outputSizeMode === 'crop' ? 'border-purple-400/40 bg-purple-500/22 text-purple-100' : 'border-white/10 bg-white/8 text-white/70 hover:bg-white/14 hover:text-white'}`}
+                >
+                  跟随裁切
+                </button>
+                <button
+                  onClick={() => {
+                    setOutputSizeMode('custom');
+                    if (!customOutputWidth) setCustomOutputWidth(String(cropPixelSize.width || ''));
+                    if (!customOutputHeight) setCustomOutputHeight(String(cropPixelSize.height || ''));
+                  }}
+                  className={`rounded-xl border px-3 py-2 text-sm transition-colors ${outputSizeMode === 'custom' ? 'border-purple-400/40 bg-purple-500/22 text-purple-100' : 'border-white/10 bg-white/8 text-white/70 hover:bg-white/14 hover:text-white'}`}
+                >
+                  自定义画布
+                </button>
+              </div>
+
+              {outputSizeMode === 'custom' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="rounded-xl border border-white/10 bg-white/8 px-3 py-2">
+                    <span className="mb-1 block text-xs text-white/40">宽度</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="12000"
+                      inputMode="numeric"
+                      value={customOutputWidth}
+                      onChange={(event) => setCustomOutputWidth(event.target.value.replace(/[^\d]/g, ''))}
+                      className="w-full bg-transparent text-lg font-semibold text-white outline-none"
+                      placeholder={String(cropPixelSize.width || '')}
+                    />
+                  </label>
+                  <label className="rounded-xl border border-white/10 bg-white/8 px-3 py-2">
+                    <span className="mb-1 block text-xs text-white/40">高度</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="12000"
+                      inputMode="numeric"
+                      value={customOutputHeight}
+                      onChange={(event) => setCustomOutputHeight(event.target.value.replace(/[^\d]/g, ''))}
+                      className="w-full bg-transparent text-lg font-semibold text-white outline-none"
+                      placeholder={String(cropPixelSize.height || '')}
+                    />
+                  </label>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-xl border border-white/10 bg-white/8 px-3 py-2">
                   <span className="block text-xs text-white/40 mb-1">宽度</span>
-                  <span className="text-lg font-semibold text-white">{cropPixelSize.width || '--'} px</span>
+                  <span className="text-lg font-semibold text-white">{resolvedOutputSize.width || '--'} px</span>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-white/8 px-3 py-2">
                   <span className="block text-xs text-white/40 mb-1">高度</span>
-                  <span className="text-lg font-semibold text-white">{cropPixelSize.height || '--'} px</span>
+                  <span className="text-lg font-semibold text-white">{resolvedOutputSize.height || '--'} px</span>
                 </div>
               </div>
+              <p className="text-xs text-white/35">
+                {resolvedOutputSize.isCustom ? '当前将按自定义画布尺寸导出。' : '当前按裁切框在原图中的实际像素导出。'}
+              </p>
             </div>
 
             <div className="flex gap-3 pt-2">
@@ -434,10 +533,12 @@ export default function CropEditorPanel({ imageUrl, onClose, onComplete }: Props
                 maxWidth: rotatedSize.width > 0 && rotatedSize.height > 0 && rotatedSize.height > rotatedSize.width ? '420px' : '620px',
               }}
             >
-              <img
+              <SafeImage
                 ref={imageRef}
                 src={imageUrl}
                 alt="裁切中的素材"
+                width={naturalSize.width || 1200}
+                height={naturalSize.height || 1200}
                 className="absolute left-1/2 top-1/2 object-fill"
                 onLoad={(event) => {
                   setNaturalSize({

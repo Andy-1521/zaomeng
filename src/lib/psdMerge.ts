@@ -4,6 +4,7 @@ import sharp from 'sharp';
 // 使用ag-psd的接口类型
 type Psd = AgPsd.Psd;
 type Layer = AgPsd.Layer;
+type ColorMode = Psd['colorMode'];
 
 /**
  * PSD图层配置接口
@@ -44,7 +45,7 @@ export async function mergeImagesToPsd(layers: PsdLayerConfig[] | string[]): Pro
     height,
     channels: 4, // RGBA
     bitsPerChannel: 8,
-    colorMode: 3 as any, // RGB模式（3）
+      colorMode: 3 as ColorMode, // RGB模式（3）
     children: [],
   };
 
@@ -61,8 +62,6 @@ export async function mergeImagesToPsd(layers: PsdLayerConfig[] | string[]): Pro
       const imageBuffer = await downloadImage(url);
 
       // 获取图片信息
-      const metadata = await sharp(imageBuffer).metadata();
-
       // 调整图片尺寸到PSD尺寸
       const resizedBuffer = await sharp(imageBuffer)
         .resize(width, height, {

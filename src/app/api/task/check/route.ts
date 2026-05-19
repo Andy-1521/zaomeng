@@ -13,6 +13,33 @@ function getErrorStack(error: unknown) {
   return error instanceof Error ? error.stack : undefined;
 }
 
+function isSmartEditTransaction(toolPage?: string | null, description?: string | null, orderNumber?: string | null) {
+  return toolPage === '智能改图'
+    || toolPage === '局部改图'
+    || description?.includes('智能改图')
+    || description?.includes('局部改图')
+    || orderNumber?.startsWith('LCL-');
+}
+
+function sanitizeSmartEditRequestParams(rawParams?: string | null) {
+  if (!rawParams) return rawParams;
+
+  try {
+    const params = JSON.parse(rawParams) as Record<string, unknown>;
+    return JSON.stringify({
+      toolPage: '智能改图',
+      imageUrl: params.imageUrl,
+      uploadedImage: params.uploadedImage,
+      mode: params.mode,
+      userInstruction: params.userInstruction,
+      summary: params.summary || params.promptSummary,
+      regionCount: params.regionCount,
+    });
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 检查订单状态接口
  *
@@ -60,6 +87,7 @@ export async function GET(request: NextRequest) {
     });
 
     console.log('[CheckOrder] ========== 请求成功 ==========');
+    const isSmartEdit = isSmartEditTransaction(transaction.toolPage, transaction.description, transaction.orderNumber);
 
     return NextResponse.json({
       success: true,
@@ -70,7 +98,7 @@ export async function GET(request: NextRequest) {
         resultData: transaction.resultData,
         points: transaction.points,
         remainingPoints: transaction.remainingPoints,
-        requestParams: transaction.requestParams,
+        requestParams: isSmartEdit ? sanitizeSmartEditRequestParams(transaction.requestParams) : transaction.requestParams,
         createdAt: transaction.createdAt,
       },
     });

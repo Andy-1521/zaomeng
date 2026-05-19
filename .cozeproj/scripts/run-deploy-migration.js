@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
+
 /**
  * 部署前数据库迁移脚本（纯SQL版本）
  *

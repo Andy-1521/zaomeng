@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
     const bufferData = formData.get('buffer') as string; // Base64编码的Buffer
     const fileName = (formData.get('fileName') as string) || 'result.png';
     const contentType = (formData.get('contentType') as string) || 'image/png';
-    const folder = normalizeFolder((formData.get('folder') as string) || 'grsai');
+    const folder = normalizeFolder((formData.get('folder') as string) || 'ai-generate');
 
     // 参数验证
     if (!bufferData) {

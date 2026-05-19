@@ -1,4 +1,4 @@
-export type LayerKind = 'background' | 'text' | 'main-element' | 'secondary-element' | 'others';
+export type LayerKind = 'background' | 'others';
 
 export interface LayerItem {
   name: string;
@@ -10,24 +10,12 @@ export interface LayerItem {
 
 export interface LayerDecompositionSlots {
   background?: LayerItem;
-  text?: LayerItem;
-  mainElement?: LayerItem;
-  secondaryElement?: LayerItem;
   others?: LayerItem;
 }
 
 export interface LayerPlanningHints {
   backgroundSourceIndex?: number;
-  textSourceIndex?: number;
-  mainElementSourceIndex?: number;
-  secondaryElementSourceIndex?: number;
   othersSourceIndexes?: number[];
-}
-
-export interface TextLayerCandidate {
-  sourceIndex: number;
-  confidence?: number;
-  label?: string;
 }
 
 export interface LayerDecompositionResult {

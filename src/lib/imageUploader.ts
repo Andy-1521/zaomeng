@@ -3,6 +3,18 @@
  * 通过API将图片上传到对象存储并返回HTTP URL
  */
 
+type UploadResponse = {
+  success?: boolean;
+  message?: string;
+  data?: {
+    url?: string;
+  };
+};
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : '图片上传失败，请重试';
+}
+
 /**
  * 上传图片到对象存储
  * @param file - 图片文件
@@ -29,20 +41,20 @@ export async function uploadImage(
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
+      const errorData = await response.json() as UploadResponse;
       throw new Error(errorData.message || '上传失败');
     }
 
-    const data = await response.json();
+    const data = await response.json() as UploadResponse;
     if (!data.success || !data.data?.url) {
       throw new Error('上传失败：未返回URL');
     }
 
     console.log(`[图片上传] 上传成功，URL: ${data.data.url.substring(0, 80)}...`);
     return data.data.url;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[图片上传] 失败:', error);
-    throw new Error(error.message || '图片上传失败，请重试');
+    throw new Error(getErrorMessage(error));
   }
 }
 
@@ -65,14 +77,14 @@ export async function uploadImages(
  * @param buffer - 图片Buffer
  * @param fileName - 文件名（如 'result-1234567890.png'）
  * @param contentType - 内容类型（如 'image/png'）
- * @param folder - 存储文件夹（默认：'grsai'）
+ * @param folder - 存储文件夹（默认：'ai-generate'）
  * @returns 签名URL（有效期30天）
  */
 export async function uploadBuffer(
   buffer: Buffer,
   fileName: string,
   contentType: string = 'image/png',
-  folder: string = 'grsai'
+  folder: string = 'ai-generate'
 ): Promise<string> {
   try {
     console.log(`[Buffer上传] 开始上传: ${fileName}, 大小: ${buffer.length} bytes`);
@@ -95,19 +107,19 @@ export async function uploadBuffer(
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
+      const errorData = await response.json() as UploadResponse;
       throw new Error(errorData.message || '上传失败');
     }
 
-    const data = await response.json();
+    const data = await response.json() as UploadResponse;
     if (!data.success || !data.data?.url) {
       throw new Error('上传失败：未返回URL');
     }
 
     console.log(`[Buffer上传] 上传成功，URL: ${data.data.url.substring(0, 80)}...`);
     return data.data.url;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Buffer上传] 失败:', error);
-    throw new Error(error.message || '图片上传失败，请重试');
+    throw new Error(getErrorMessage(error));
   }
 }

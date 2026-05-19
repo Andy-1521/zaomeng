@@ -1,13 +1,21 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { forwardRef, useCallback, useRef, useState } from 'react';
+import Image, { type ImageLoaderProps, type ImageProps } from 'next/image';
 import { showToast } from '@/lib/toast';
+import { toUserFacingErrorFromUnknown, toUserFacingErrorMessage } from '@/lib/userFacingError';
 
 type Props = {
   imageUrl: string;
   onClose: () => void;
   onComplete: (resultUrl: string) => void | Promise<void>;
 };
+
+const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
+
+const SafeImage = forwardRef<HTMLImageElement, Omit<ImageProps, 'loader'>>(function SafeImage({ alt, ...props }, ref) {
+  return <Image {...props} alt={alt} ref={ref} loader={passthroughImageLoader} unoptimized />;
+});
 
 export default function AnnotateEditorPanel({ imageUrl, onClose, onComplete }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -88,13 +96,13 @@ export default function AnnotateEditorPanel({ imageUrl, onClose, onComplete }: P
 
       const data = await response.json();
       if (!response.ok || !data.success || !data.data?.url) {
-        throw new Error(data.message || '标注结果生成失败');
+        throw new Error(toUserFacingErrorMessage(data.message, '暂时未能完成处理，请稍后重试'));
       }
 
       await onComplete(data.data.url);
       onClose();
     } catch (error) {
-      const message = error instanceof Error ? error.message : '标注结果生成失败';
+      const message = toUserFacingErrorFromUnknown(error, '暂时未能完成处理，请稍后重试');
       showToast(message, 'error');
     } finally {
       setIsExporting(false);
@@ -163,7 +171,14 @@ export default function AnnotateEditorPanel({ imageUrl, onClose, onComplete }: P
 
           <div className="rounded-2xl border border-white/10 bg-black/35 p-5 flex items-center justify-center overflow-hidden min-h-[520px]">
             <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-black/40 w-full h-full min-h-[440px]">
-              <img ref={imageRef} src={imageUrl} alt="标注中的素材" className="absolute inset-0 h-full w-full object-cover" />
+              <SafeImage
+                ref={imageRef}
+                src={imageUrl}
+                alt="标注中的素材"
+                width={1200}
+                height={1200}
+                className="absolute inset-0 h-full w-full object-cover"
+              />
               <canvas
                 ref={canvasRef}
                 width={1200}

@@ -1,16 +1,13 @@
-const WEBSITE_ORIGIN = 'http://124.223.26.206'
+const WEBSITE_ORIGIN = 'http://localhost:5000'
 const WEBSITE_PATTERNS = [
-  'http://124.223.26.206/*',
   'http://localhost:5000/*',
-  'http://10.0.4.6:5000/*',
 ]
+const WORKSPACE_PATH = '/home'
 
 const CONTEXT_MENU_ID = 'ZAOMENG_SAVE_IMAGE'
 
 const isWebsiteUrl = (url = '') => {
-  return url.startsWith('http://124.223.26.206/') ||
-    url.startsWith('http://localhost:5000/') ||
-    url.startsWith('http://10.0.4.6:5000/')
+  return url.startsWith('http://localhost:5000/')
 }
 
 const showTabTip = (tabId, message) => {
@@ -28,6 +25,21 @@ const notifyWebsiteTabs = (payload) => {
         void chrome.runtime.lastError
       })
     })
+  })
+}
+
+const openOrFocusWorkspace = () => {
+  chrome.tabs.query({ url: WEBSITE_PATTERNS }, (tabs) => {
+    const existingTab = tabs.find((tab) => tab.id && isWebsiteUrl(tab.url || ''))
+    if (existingTab?.id) {
+      chrome.tabs.update(existingTab.id, { active: true, url: `${WEBSITE_ORIGIN}${WORKSPACE_PATH}` })
+      if (existingTab.windowId) {
+        chrome.windows.update(existingTab.windowId, { focused: true })
+      }
+      return
+    }
+
+    chrome.tabs.create({ url: `${WEBSITE_ORIGIN}${WORKSPACE_PATH}` })
   })
 }
 
@@ -61,6 +73,7 @@ const ensureContextMenu = () => {
 ensureContextMenu()
 chrome.runtime.onInstalled.addListener(ensureContextMenu)
 chrome.runtime.onStartup.addListener(ensureContextMenu)
+chrome.action.onClicked.addListener(openOrFocusWorkspace)
 
 const captureFromPayload = (payload, sourceTabId = null) => {
   if (!payload?.imageUrl) return

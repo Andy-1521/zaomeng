@@ -4,7 +4,6 @@ import {
   waitForTaskComplete,
 } from '@/lib/runningHub';
 import { resolveLayerPlanningHints } from './planning';
-import { detectTextLayerCandidates } from './textLayerPlanner';
 import type {
   LayerDecompositionResult,
   LayerItem,
@@ -35,37 +34,32 @@ function mapRunningHubOutputsToSlots(imageUrls: string[], hints: LayerPlanningHi
     slots.background = createIndexedLayer('Background', 'background', imageUrls[hints.backgroundSourceIndex], 0, hints.backgroundSourceIndex);
   }
 
-  if (typeof hints.textSourceIndex === 'number' && imageUrls[hints.textSourceIndex]) {
-    slots.text = createIndexedLayer('Text', 'text', imageUrls[hints.textSourceIndex], 40, hints.textSourceIndex);
-  }
-
-  if (typeof hints.mainElementSourceIndex === 'number' && imageUrls[hints.mainElementSourceIndex]) {
-    slots.mainElement = createIndexedLayer('Main Element', 'main-element', imageUrls[hints.mainElementSourceIndex], 30, hints.mainElementSourceIndex);
-  }
-
-  if (typeof hints.secondaryElementSourceIndex === 'number' && imageUrls[hints.secondaryElementSourceIndex]) {
-    slots.secondaryElement = createIndexedLayer('Secondary Element', 'secondary-element', imageUrls[hints.secondaryElementSourceIndex], 20, hints.secondaryElementSourceIndex);
-  }
-
   const othersIndexes = hints.othersSourceIndexes || [];
   if (othersIndexes.length > 0) {
-    const lastOthersIndex = othersIndexes[othersIndexes.length - 1];
-    if (imageUrls[lastOthersIndex]) {
-      slots.others = createIndexedLayer('Others', 'others', imageUrls[lastOthersIndex], 10, lastOthersIndex);
+    const firstOthersIndex = othersIndexes[0];
+    if (imageUrls[firstOthersIndex]) {
+      slots.others = createIndexedLayer('Others', 'others', imageUrls[firstOthersIndex], firstOthersIndex, firstOthersIndex);
     }
   }
 
   return slots;
 }
 
-function slotsToLayers(slots: LayerDecompositionSlots): LayerItem[] {
-  return [
-    slots.background,
-    slots.text,
-    slots.mainElement,
-    slots.secondaryElement,
-    slots.others,
-  ].filter((item): item is LayerItem => Boolean(item));
+function buildLayers(imageUrls: string[], hints: LayerPlanningHints): LayerItem[] {
+  const layerHints = new Map<number, Pick<LayerItem, 'name' | 'kind'>>();
+
+  if (typeof hints.backgroundSourceIndex === 'number' && imageUrls[hints.backgroundSourceIndex]) {
+    layerHints.set(hints.backgroundSourceIndex, { name: 'Background', kind: 'background' });
+  }
+
+  return imageUrls.map((imageUrl, sourceIndex) => {
+    const hintedLayer = layerHints.get(sourceIndex);
+    if (hintedLayer) {
+      return createIndexedLayer(hintedLayer.name, hintedLayer.kind, imageUrl, sourceIndex, sourceIndex);
+    }
+
+    return createIndexedLayer(`Layer ${sourceIndex + 1}`, 'others', imageUrl, sourceIndex, sourceIndex);
+  });
 }
 
 export async function decomposeLayersWithRunningHub(imageUrl: string): Promise<LayerDecompositionResult> {
@@ -79,13 +73,9 @@ export async function decomposeLayersWithRunningHub(imageUrl: string): Promise<L
   }
 
   const imageUrls = pngOutputs.map((output) => output.fileUrl);
-  const textCandidates = await detectTextLayerCandidates({
-    imageUrl,
-    layerImageUrls: imageUrls,
-  });
-  const hints = resolveLayerPlanningHints(imageUrls.length, textCandidates);
+  const hints = resolveLayerPlanningHints(imageUrls.length);
   const slots = mapRunningHubOutputsToSlots(imageUrls, hints);
-  const layers = slotsToLayers(slots);
+  const layers = buildLayers(imageUrls, hints);
 
   return {
     source: 'runninghub',

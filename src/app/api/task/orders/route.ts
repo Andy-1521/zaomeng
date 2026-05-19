@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/storage/database/client';
 import { transactions } from '@/storage/database/shared/schema';
 import { eq, and, desc, sql } from 'drizzle-orm';
+import { reconcileProcessingTransactions } from '@/lib/reconcileProcessingTransactions';
 
 /**
  * GET /api/task/orders
@@ -19,19 +20,41 @@ import { eq, and, desc, sql } from 'drizzle-orm';
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const userId = searchParams.get('userId');
+    const requestedUserId = searchParams.get('userId');
     const toolPage = searchParams.get('toolPage');
+    const userCookie = request.cookies.get('user');
+    let cookieUserId: string | null = null;
 
-    console.log('[订单查询] 收到请求，参数:', { userId, toolPage });
+    if (userCookie) {
+      try {
+        const userData = JSON.parse(userCookie.value);
+        if (typeof userData.id === 'string' && userData.id) {
+          cookieUserId = userData.id;
+        }
+      } catch (error) {
+        console.error('[订单查询] 解析 user cookie 失败:', error);
+      }
+    }
 
-    if (!userId) {
-      console.error('[订单查询] 缺少必需参数: userId');
+    if (!cookieUserId) {
       return NextResponse.json(
         {
           success: false,
-          message: '缺少必需参数: userId',
+          message: '未登录',
         },
-        { status: 400 }
+        { status: 401 }
+      );
+    }
+
+    const userId = requestedUserId || cookieUserId;
+
+    if (requestedUserId && requestedUserId !== cookieUserId) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: '无权限访问其他用户订单',
+        },
+        { status: 403 }
       );
     }
 
@@ -44,12 +67,12 @@ export async function GET(request: NextRequest) {
       // 兼容"彩绘提取"和"彩绘提取2"
       if (toolPage === '彩绘提取') {
         conditions.push(sql`(${transactions.toolPage} = ${toolPage} OR ${transactions.toolPage} = '彩绘提取2')`);
+      } else if (toolPage === '智能改图') {
+        conditions.push(sql`(${transactions.toolPage} = ${toolPage} OR ${transactions.toolPage} = '局部改图')`);
       } else {
         conditions.push(eq(transactions.toolPage, toolPage));
       }
     }
-
-    console.log('[订单查询] 查询条件:', conditions);
 
     const orders = await db
       .select()
@@ -57,11 +80,13 @@ export async function GET(request: NextRequest) {
       .where(and(...conditions))
       .orderBy(desc(transactions.createdAt));
 
-    console.log('[订单查询] 查询成功，订单数量:', orders.length);
+    const reconciledOrders = await reconcileProcessingTransactions(orders, {
+      logPrefix: '订单查询',
+    });
 
     return NextResponse.json({
       success: true,
-      data: orders,
+      data: reconciledOrders,
     });
   } catch (error) {
     console.error('[订单查询] 查询失败:', error);

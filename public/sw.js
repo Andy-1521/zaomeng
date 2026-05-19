@@ -3,7 +3,6 @@
  * 用于在页面切换时保持生图请求继续执行
  */
 
-const CACHE_NAME = 'generation-v3';
 const GENERATION_API = '/api/generate-image';
 
 // 添加全局错误处理
@@ -120,7 +119,7 @@ async function saveGenerationResult(result) {
   try {
     const db = await openDB();
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const transaction = db.transaction(['results'], 'readwrite');
       const store = transaction.objectStore('results');
 
@@ -156,7 +155,7 @@ async function cleanupOldResults() {
   try {
     const db = await openDB();
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const transaction = db.transaction(['results'], 'readwrite');
       const store = transaction.objectStore('results');
       const index = store.index('timestamp');
@@ -187,7 +186,7 @@ async function cleanupOldResults() {
 }
 
 // Service Worker 安装
-self.addEventListener('install', (event) => {
+self.addEventListener('install', () => {
   console.log('[SW] Service Worker 安装中...');
   self.skipWaiting();
 });

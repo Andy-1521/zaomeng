@@ -4,9 +4,7 @@
  * 提供统一的数据库初始化接口，确保数据库结构与代码同步
  */
 
-import { getDb, getMysqlPool } from "@/storage/database/client";
-import { users, transactions } from "@/storage/database/shared/schema";
-import { sql } from "drizzle-orm";
+import { getMysqlPool } from "@/storage/database/client";
 
 /**
  * 检查数据库表是否存在

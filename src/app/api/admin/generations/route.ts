@@ -4,15 +4,21 @@ import { userManager } from '@/storage/database';
 
 type GenerationFilters = {
   toolPage?: string;
+  toolPages?: string[];
   status?: string;
+  diagnostic?: string;
   startDate?: Date;
   endDate?: Date;
   includeUserIds?: string[];
   excludeSubOrders?: boolean;
 };
 
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '未知错误';
+function mapToolFilter(toolFilter: string): string[] {
+  if (toolFilter === '彩绘提取') return ['彩绘提取', '彩绘提取2'];
+  if (toolFilter === 'AI生图') return ['AI生图', 'AI生图（图生图）'];
+  if (toolFilter === '智能改图') return ['智能改图', '局部改图'];
+  if (toolFilter === '去除水印') return ['去除水印', '去水印'];
+  return [toolFilter];
 }
 
 /**
@@ -26,26 +32,14 @@ function getErrorMessage(error: unknown) {
  */
 export async function GET(request: NextRequest) {
   try {
-    // 检查是否登录
     const userCookie = request.cookies.get('user');
+    let currentUser: { id?: string } | null = null;
 
-    let currentUser;
-
-    // 方式1：从 Cookie 获取用户信息
     if (userCookie) {
       try {
         currentUser = JSON.parse(userCookie.value);
       } catch (error) {
         console.error('[API] 解析 user cookie 失败:', error);
-      }
-    }
-
-    // 方式2：如果 Cookie 失败，尝试从查询参数获取 userId
-    if (!currentUser || !currentUser.id) {
-      const { searchParams } = new URL(request.url);
-      const userId = searchParams.get('userId');
-      if (userId) {
-        currentUser = { id: userId };
       }
     }
 
@@ -82,13 +76,22 @@ export async function GET(request: NextRequest) {
     const keyword = searchParams.get('keyword') || '';
     const toolPage = searchParams.get('toolPage') || '';
     const status = searchParams.get('status') || '';
+    const diagnostic = searchParams.get('diagnostic') || '';
     const startDate = searchParams.get('startDate') || '';
     const endDate = searchParams.get('endDate') || '';
 
     // 构建基础筛选条件
     const baseFilters: GenerationFilters = {};
-    if (toolPage) baseFilters.toolPage = toolPage;
+    if (toolPage) {
+      const mapped = mapToolFilter(toolPage);
+      if (mapped.length === 1) {
+        baseFilters.toolPage = mapped[0];
+      } else {
+        baseFilters.toolPages = mapped;
+      }
+    }
     if (status) baseFilters.status = status;
+    if (diagnostic) baseFilters.diagnostic = diagnostic;
     if (startDate) baseFilters.startDate = new Date(startDate);
     if (endDate) baseFilters.endDate = new Date(endDate);
 
@@ -101,9 +104,11 @@ export async function GET(request: NextRequest) {
       baseFilters.includeUserIds = includeUserIds.length > 0 ? includeUserIds : undefined;
     }
 
-    // 【优化2】合并统计查询：一次SQL替代5次COUNT
+    // 【优化2】统计查询
     const statsFilters = { ...baseFilters, excludeSubOrders: true };
-    const stats = await transactionManager.getStats(statsFilters);
+    const stats = keyword
+      ? await transactionManager.getSearchStats(keyword, statsFilters)
+      : await transactionManager.getStats(statsFilters);
 
     // 【优化3】获取记录 - 在DB层面过滤子订单
     const listFilters = { ...baseFilters, excludeSubOrders: true };
@@ -126,9 +131,11 @@ export async function GET(request: NextRequest) {
 
       // 解析requestParams，提取参考图片
       let uploadedImage: string | undefined;
+      let parsedRequestParams: unknown = null;
       try {
         if (transaction.requestParams) {
           const params = JSON.parse(transaction.requestParams);
+          parsedRequestParams = params;
           uploadedImage = params.uploadedImage;
         }
       } catch {
@@ -143,11 +150,7 @@ export async function GET(request: NextRequest) {
           if (Array.isArray(parsed)) {
             resultData = parsed;
           } else if (typeof parsed === 'object' && parsed !== null) {
-            if (parsed.result_image_url) {
-              resultData = parsed.result_image_url;
-            } else {
-              resultData = null;
-            }
+            resultData = parsed;
           } else {
             resultData = parsed;
           }
@@ -161,46 +164,12 @@ export async function GET(request: NextRequest) {
         username: user?.username || '未知用户',
         userAvatar: user?.avatar || '/images/avatar.png',
         uploadedImage,
+        requestParams: parsedRequestParams,
         resultData,
       };
     });
 
-    // 如果有关键字搜索，需要在JS层面再次按用户名筛选（因为searchByKeyword只匹配了订单号+用户ID范围）
-    let finalRecords = enrichedGenerations;
-    if (keyword) {
-      const lowerKeyword = keyword.toLowerCase();
-      finalRecords = enrichedGenerations.filter(record =>
-        record.username?.toLowerCase().includes(lowerKeyword) ||
-        record.orderNumber.toLowerCase().includes(lowerKeyword)
-      );
-
-      // 重新计算关键字筛选后的统计
-      const keywordStats = {
-        colorExtractionCount: 0,
-        successCount: 0,
-        failureCount: 0,
-      };
-      finalRecords.forEach(record => {
-        if (record.toolPage === '彩绘提取') {
-          keywordStats.colorExtractionCount++;
-        }
-        if (record.status === '成功') {
-          keywordStats.successCount++;
-        } else if (record.status === '失败') {
-          keywordStats.failureCount++;
-        }
-      });
-
-      return NextResponse.json({
-        success: true,
-        data: {
-          total: stats.total,
-          keywordFilteredTotal: finalRecords.length,
-          records: finalRecords,
-          stats: keywordStats,
-        },
-      });
-    }
+    const finalRecords = enrichedGenerations;
 
     return NextResponse.json({
       success: true,
@@ -215,7 +184,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        message: `获取生图记录失败: ${getErrorMessage(error)}`,
+        message: '获取生图记录失败，请稍后重试',
       },
       { status: 500 }
     );

@@ -6,17 +6,19 @@ import { uploadToCozeStorage } from '@/lib/dualStorage';
 import { composePromptFromImage } from '@/lib/materialEditorPrompt';
 import { capturedImageManager } from '@/storage/database';
 import { transactionManager, userManager } from '@/storage/database';
-import { runPsydoImageEditFromUrl } from '@/lib/psydoImageEdits';
+import { isImageEditTimeoutError, runPsydoImageEditWithMetaFromUrl } from '@/lib/psydoImageEdits';
 import { saveBufferToLocalMaterialFile } from '@/lib/localUploadStorage';
+import { DEFAULT_SMART_EDIT_SIZE_OPTION, resolveSmartEditAspectRatio } from '@/lib/smartEditSize';
+import { buildBrowserImageHeaders } from '@/lib/browserFetch';
 
-const REDRAW_WORKFLOW_URL = 'https://frzr6k4qcc.coze.site/run';
-const REDRAW_WORKFLOW_TOKEN = 'eyJhbGciOiJSUzI1NiIsImtpZCI6IjlkOGYxNGZiLTM3M2MtNDRjMS1hZTJjLTcxMmRkMDk3OWFiYyJ9.eyJpc3MiOiJodHRwczovL2FwaS5jb3plLmNuIiwiYXVkIjpbIjE0Sm9lYVpCZkJmaXEzUHRQbWQ5QUlIMm5wbDJSV3RmIl0sImV4cCI6ODIxMDI2Njg3Njc5OSwiaWF0IjoxNzc2MjU5NzQ0LCJzdWIiOiJzcGlmZmU6Ly9hcGkuY296ZS5jbi93b3JrbG9hZF9pZGVudGl0eS9pZDo3NjI4OTE4NjY5NzgyODEwNjcwIiwic3JjIjoiaW5ib3VuZF9hdXRoX2FjY2Vzc190b2tlbl9pZDo3NjI4OTc3NTEzNzcwNzc4NjYwIn0.s5Y1qtl40GwKdVIkFEmYVyc_cpbzem4i1rxpHOfQQUpoeITkCZxSUIT-wz4l1GFBpVHWF4E5ktwZkkfddCt3Ft3cNJfXUql7SL5oZJyVYS0qkkp6gGnhvIykUaQnYrPB9XmOPeQsQumY8GmXLOixx1AQM5wxzlFjYlwibCAndLB-4O2Y4NEsJ571dBiF9cyF2eROVeNBXyhBLA7y9q_tXkAP2cukEDjfdhBTYDrILRMWz53zlVbKD0SYhDUM7xgDJYys3xPkv-VqjHLDrqt7drTyhoJ0GBvRpK_LnX-206KJScSHDQ27eWBuiykaEk3O2U2HrMV33Zrm_9daRClAdA';
-
-const FETCH_TIMEOUT = 600000;
 
 type CropPayload = {
   action?: 'crop';
   imageUrl?: string;
+  destination?: 'gallery' | 'orders';
+  orderNumber?: string;
+  toolLabel?: string;
+  sourceImageUrl?: string | null;
   rotation?: number;
   scale?: number;
   flipHorizontal?: boolean;
@@ -42,6 +44,16 @@ type AnnotatePayload = {
 type RedrawPayload = {
   action?: 'redraw';
   imageUrl?: string;
+  aspectRatio?: string;
+  resolution?: '1k' | '2k' | '4k';
+  outputSize?: {
+    width?: number;
+    height?: number;
+  };
+  sourceSize?: {
+    width?: number;
+    height?: number;
+  };
   sessionId?: string;
   maskImageBase64?: string;
   prompt?: string;
@@ -73,7 +85,15 @@ function getCookieUserId(request: NextRequest): string | null {
 }
 
 function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '编辑图片生成失败';
+  if (isImageEditTimeoutError(error)) {
+    return '处理时间较长，请稍后重试';
+  }
+
+  return '暂时未能完成处理，请稍后重试';
+}
+
+function getErrorStatus(error: unknown) {
+  return isImageEditTimeoutError(error) ? 504 : 500;
 }
 
 function normalizeRotation(rotation: unknown) {
@@ -128,10 +148,7 @@ function resolveImageUrl(imageUrl: string, request: NextRequest) {
 
 async function downloadImageBuffer(imageUrl: string): Promise<Buffer> {
   const response = await fetch(imageUrl, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      Referer: imageUrl,
-    },
+    headers: buildBrowserImageHeaders(imageUrl),
   });
 
   if (!response.ok) {
@@ -147,23 +164,6 @@ function parsePngDataUrl(dataUrl: string): Buffer {
     throw new Error('标注画布格式不正确');
   }
   return Buffer.from(matched[1], 'base64');
-}
-
-async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout = FETCH_TIMEOUT): Promise<Response> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    return response;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    throw error;
-  }
 }
 
 async function saveToLocalPublic(buffer: Buffer, fileName: string) {
@@ -192,10 +192,62 @@ async function createMaterialRecord(userId: string, imageUrl: string, action: 'c
     imageUrl,
     originalUrl: null,
     pageUrl: null,
-    pageTitle: action === 'crop' ? '裁切工具生成' : action === 'annotate' ? '画笔标注生成' : '局部改图生成',
+    pageTitle: action === 'crop' ? '裁切工具生成' : action === 'annotate' ? '画笔标注生成' : '智能改图生成',
     sourceHost: 'material-editor',
     imageType: 'edited',
   });
+}
+
+async function createOrderRecord(
+  userId: string,
+  imageUrl: string,
+  payload: {
+    toolPage: string;
+    description: string;
+    uploadedImage: string;
+    sourceImageUrl?: string | null;
+  },
+) {
+  const user = await userManager.getUserById(userId);
+  if (!user) {
+    throw new Error('用户不存在');
+  }
+
+  const orderNumber = transactionManager.generateOrderNumber();
+  await transactionManager.createTransaction({
+    userId,
+    orderNumber,
+    toolPage: payload.toolPage,
+    description: payload.description,
+    points: 0,
+    actualPoints: 0,
+    remainingPoints: user.points || 0,
+    status: '成功',
+    requestParams: JSON.stringify({
+      imageUrl: payload.uploadedImage,
+      uploadedImage: payload.uploadedImage,
+      sourceImageUrl: payload.sourceImageUrl || payload.uploadedImage,
+    }),
+    resultData: imageUrl,
+    uploadedImage: payload.sourceImageUrl || payload.uploadedImage,
+  });
+
+  return { orderNumber };
+}
+
+function sanitizeRegionsForRequest(regions: RedrawPayload['regions']) {
+  if (!Array.isArray(regions)) return [];
+
+  return regions.map((region, index) => ({
+    id: region.id || `region-${index + 1}`,
+    type: region.type || 'tag',
+    naturalX: typeof region.naturalX === 'number' ? region.naturalX : null,
+    naturalY: typeof region.naturalY === 'number' ? region.naturalY : null,
+    description: region.description || '',
+    selectedCandidate: region.selectedCandidate || '',
+    customTarget: region.customTarget || '',
+    candidates: Array.isArray(region.candidates) ? region.candidates.filter((item) => typeof item === 'string' && item.trim()).slice(0, 6) : [],
+  }));
 }
 
 export async function POST(request: NextRequest) {
@@ -238,7 +290,7 @@ export async function POST(request: NextRequest) {
         sessionId: body.sessionId,
       });
 
-      console.info('[MaterialEditor] redraw-submit', {
+      console.info('[MaterialEditor] smart-edit-submit', {
         sessionId: body.sessionId || 'unknown',
         mode: body.mode === 'tag' ? 'tag' : 'brush',
         regionCount: Array.isArray(body.regions) ? body.regions.length : 0,
@@ -247,17 +299,26 @@ export async function POST(request: NextRequest) {
 
       const finalPrompt = `${promptResult.prompt}${promptResult.negativePrompt ? `\n\n负面约束：${promptResult.negativePrompt}` : ''}`.trim();
       const orderNumber = `MD${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-      const resultBuffer = await runPsydoImageEditFromUrl({
+      const resolvedAspectRatio = resolveSmartEditAspectRatio(body.aspectRatio, body.sourceSize);
+      const outputWidth = normalizeOutputDimension(body.outputSize?.width);
+      const outputHeight = normalizeOutputDimension(body.outputSize?.height);
+      const imageEditResult = await runPsydoImageEditWithMetaFromUrl({
         imageUrl: resolveImageUrl(body.imageUrl, request),
         prompt: finalPrompt,
-        size: '1024x1792',
+        aspectRatio: resolvedAspectRatio,
         quality: 'high',
         maskImageBase64: body.maskImageBase64,
       });
+      const resultBuffer = outputWidth && outputHeight
+        ? await sharp(imageEditResult.buffer)
+          .resize({ width: outputWidth, height: outputHeight, fit: 'fill' })
+          .png()
+          .toBuffer()
+        : imageEditResult.buffer;
 
       let editedUrl = '';
       try {
-        editedUrl = await uploadToCozeStorage(resultBuffer, `material-editor-redraw/${userId}/${orderNumber}.png`, 'image/png');
+        editedUrl = await uploadToCozeStorage(resultBuffer, `material-editor/${userId}/${orderNumber}-redraw.png`, 'image/png');
       } catch (error) {
         console.warn('[素材编辑] redraw 对象存储失败，回退本地:', error);
         const localUrl = await saveBufferToLocalMaterialFile(resultBuffer, `material-editor/${userId}/${orderNumber}-redraw.png`);
@@ -272,13 +333,41 @@ export async function POST(request: NextRequest) {
       await transactionManager.createTransaction({
         userId,
         orderNumber,
-        toolPage: '局部改图',
-        description: `局部改图: ${promptResult.summary.substring(0, 50)}`,
+        toolPage: '智能改图',
+        description: `智能改图: ${promptResult.summary.substring(0, 50)}`,
         points: REQUIRED_POINTS,
         actualPoints: REQUIRED_POINTS,
         remainingPoints: updatedUser.points,
         status: '成功',
         prompt: finalPrompt,
+        requestParams: JSON.stringify({
+          toolPage: '智能改图',
+          imageUrl: body.imageUrl,
+          uploadedImage: body.imageUrl,
+          sessionId: body.sessionId || '',
+          mode: body.mode === 'tag' ? 'tag' : 'brush',
+          userInstruction: body.prompt.trim(),
+          summary: promptResult.summary,
+          promptSummary: promptResult.summary,
+          finalPrompt,
+          agentPrompt: promptResult.prompt,
+          negativePrompt: promptResult.negativePrompt,
+          promptSource: promptResult.source,
+          requestedAspectRatio: body.aspectRatio || DEFAULT_SMART_EDIT_SIZE_OPTION,
+          resolvedAspectRatio,
+          requestedResolution: body.resolution || '2k',
+          requestedOutputSize: outputWidth && outputHeight ? { width: outputWidth, height: outputHeight } : null,
+          requestedImageEditTimeoutMs: 300000,
+          agentName: 'material-editor-prompt-agent',
+          agentModel: 'gpt-5.4-mini',
+          editModel: imageEditResult.meta.model,
+          editTarget: imageEditResult.meta.targetName,
+          editBaseUrl: imageEditResult.meta.baseUrl,
+          usedFallback: imageEditResult.meta.usedFallback,
+          regionCount: Array.isArray(body.regions) ? body.regions.length : 0,
+          regions: sanitizeRegionsForRequest(body.regions),
+          hasMask: true,
+        }),
         resultData: editedUrl,
         uploadedImage: body.imageUrl,
       });
@@ -376,6 +465,25 @@ export async function POST(request: NextRequest) {
     }
 
     const editedUrl = await persistEditedImage(outputBuffer, userId, action);
+
+    if (body.action === 'crop' && body.destination === 'orders') {
+      const toolLabel = body.toolLabel?.trim() || '裁切工具';
+      const orderRecord = await createOrderRecord(userId, editedUrl, {
+        toolPage: '裁切工具',
+        description: `${toolLabel}裁切结果`,
+        uploadedImage: body.imageUrl,
+        sourceImageUrl: body.sourceImageUrl,
+      });
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          orderNumber: orderRecord.orderNumber,
+          url: editedUrl,
+        },
+      });
+    }
+
     const record = await createMaterialRecord(userId, editedUrl, action);
 
     return NextResponse.json({
@@ -387,6 +495,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('[素材编辑] 生成失败:', error);
-    return NextResponse.json({ success: false, message: getErrorMessage(error) }, { status: 500 });
+    return NextResponse.json({ success: false, message: getErrorMessage(error) }, { status: getErrorStatus(error) });
   }
 }

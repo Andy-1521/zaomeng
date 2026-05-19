@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image, { type ImageLoaderProps, type ImageProps } from 'next/image';
 import { useRouter } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 import { useUser } from '@/contexts/UserContext';
 import { showToast } from '@/lib/toast';
+import { toUserFacingErrorMessage } from '@/lib/userFacingError';
 
 type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
 
@@ -26,6 +28,12 @@ interface Transaction {
 }
 
 type ProfileTab = 'info' | 'security' | 'transactions';
+
+const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
+
+function SafeImage({ alt, ...props }: Omit<ImageProps, 'loader'>) {
+  return <Image {...props} alt={alt} loader={passthroughImageLoader} unoptimized />;
+}
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -110,7 +118,7 @@ export default function ProfilePage() {
       };
 
       if (!response.ok || !result.success || !result.data) {
-        showToast(result.message || '管理员会话校验失败，请重新登录', 'error');
+        showToast(toUserFacingErrorMessage(result.message, '管理员会话校验失败，请重新登录'), 'error');
         router.push('/login');
         return;
       }
@@ -220,7 +228,7 @@ export default function ProfilePage() {
         showMessage('success', '用户名修改成功');
         setShowEditUsername(false);
       } else {
-        showMessage('error', result.message || '修改失败');
+        showMessage('error', toUserFacingErrorMessage(result.message, '修改失败，请稍后重试'));
       }
     } catch {
       showMessage('error', '修改失败，请稍后重试');
@@ -259,7 +267,7 @@ export default function ProfilePage() {
         setNewPassword('');
         setConfirmPassword('');
       } else {
-        showMessage('error', result.message || '修改失败');
+        showMessage('error', toUserFacingErrorMessage(result.message, '修改失败，请稍后重试'));
       }
     } catch {
       showMessage('error', '修改失败，请稍后重试');
@@ -300,7 +308,7 @@ export default function ProfilePage() {
         setUser({ ...user!, avatar: result.data.avatar });
         showMessage('success', '头像修改成功');
       } else {
-        showMessage('error', result.message || '修改失败');
+        showMessage('error', toUserFacingErrorMessage(result.message, '修改失败，请稍后重试'));
       }
     } catch {
       showMessage('error', '修改失败，请稍后重试');
@@ -400,11 +408,13 @@ export default function ProfilePage() {
             <div className="bg-white/10 backdrop-blur-2xl rounded-2xl p-8 border border-white/20 shadow-2xl">
               {/* 头像区域 */}
               <div className="flex items-center mb-8">
-                <div className="relative group">
-                  <img
-                    src={user.avatar}
+                <div className="relative group h-24 w-24">
+                  <SafeImage
+                    src={user.avatar || '/images/avatar.png'}
                     alt="用户头像"
-                    className="w-24 h-24 rounded-full object-cover border-4 border-white/20 shadow-lg shadow-purple-500/30"
+                    fill
+                    sizes="96px"
+                    className="rounded-full object-cover border-4 border-white/20 shadow-lg shadow-purple-500/30"
                   />
                   <label className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
                     <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -477,7 +487,7 @@ export default function ProfilePage() {
                 <div className="flex items-center justify-between p-4 bg-white/5 rounded-lg border border-white/10">
                   <div>
                     <div className="flex items-center gap-2 text-neutral-400 text-sm mb-1">
-                      <img src="/points-icon.png" alt="积分" className="w-4 h-4" />
+                      <Image src="/points-icon.png" alt="积分" width={16} height={16} className="w-4 h-4" />
                       <span>剩余积分</span>
                     </div>
                     <p className="text-2xl font-bold text-white bg-gradient-to-r from-yellow-400 to-orange-400 bg-clip-text text-transparent">
@@ -551,13 +561,13 @@ export default function ProfilePage() {
               <div className="mb-6 flex items-start justify-between gap-4">
                 <div>
                   <h3 className="text-xl font-bold text-white">积分明细</h3>
-                  <p className="mt-1 text-sm text-white/42">这里查看每笔积分变化；任务进度、结果图和下载入口请到首页右侧任务中心查看。</p>
+                  <p className="mt-1 text-sm text-white/42">这里查看每笔积分变化；订单进度、结果图和下载入口请到首页右侧订单记录查看。</p>
                 </div>
                 <button
                   onClick={() => router.push('/home')}
                   className="shrink-0 rounded-full border border-white/10 bg-white/6 px-3 py-2 text-xs text-white/72 transition-colors hover:bg-white/12 hover:text-white"
                 >
-                  前往任务中心
+                  前往订单记录
                 </button>
               </div>
 
@@ -613,7 +623,7 @@ export default function ProfilePage() {
                           {trans.status === '成功' && (
                             <div className="flex items-center justify-end gap-1">
                               <span className="text-red-400 font-bold text-sm">-{trans.points}</span>
-                              <img src="/points-icon.png" alt="积分" className="w-3 h-3" />
+                              <Image src="/points-icon.png" alt="积分" width={12} height={12} className="w-3 h-3" />
                             </div>
                           )}
                           <p className="text-neutral-500 text-xs">剩余积分: {trans.remainingPoints}</p>

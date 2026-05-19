@@ -7,7 +7,7 @@ export const localUploadRoots = new Set([
   'uploads',
   'ai-reference',
   'color-extraction',
-  'grsai',
+  'ai-generate',
   'avatars',
 ]);
 

@@ -4,9 +4,6 @@ import type { LayerDecompositionResult, LayerItem } from '@/lib/layer-decomposit
 const layerOrder: Record<LayerItem['kind'], number> = {
   background: 0,
   others: 10,
-  'secondary-element': 20,
-  'main-element': 30,
-  text: 40,
 };
 
 export function mapLayersToPsdConfig(layers: LayerItem[]): PsdLayerConfig[] {

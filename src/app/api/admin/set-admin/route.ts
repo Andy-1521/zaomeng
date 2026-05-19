@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { userManager } from '@/storage/database';
 
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '未知错误';
-}
-
 /**
  * 设置/取消管理员权限接口
  *
@@ -80,7 +76,7 @@ export async function POST(request: NextRequest) {
   } catch (error: unknown) {
     console.error('设置管理员失败:', error);
     return NextResponse.json(
-      { success: false, message: `操作失败，请稍后重试: ${getErrorMessage(error)}` },
+      { success: false, message: '操作失败，请稍后重试' },
       { status: 500 }
     );
   }

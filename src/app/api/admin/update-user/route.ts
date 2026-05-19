@@ -2,10 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { userManager } from '@/storage/database';
 import type { UpdateUser } from '@/storage/database';
 
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '未知错误';
-}
-
 /**
  * 更新用户信息接口（管理员专用）
  *
@@ -18,11 +14,9 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { userId, points, avatar } = body;
 
-    // 检查是否登录
     const userCookie = request.cookies.get('user');
-    let currentUser;
+    let currentUser: { id?: string } | null = null;
 
-    // 从 Cookie 获取用户信息
     if (userCookie) {
       try {
         currentUser = JSON.parse(userCookie.value);
@@ -31,17 +25,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 备用方案：从查询参数获取 userId
-    if (!currentUser) {
-      const { searchParams } = new URL(request.url);
-      const adminUserId = searchParams.get('userId');
-      if (adminUserId) {
-        currentUser = { id: adminUserId };
-      }
-    }
-
     if (!currentUser || !currentUser.id) {
-      console.log('[API] 未登录：未找到用户信息');
       return NextResponse.json(
         { success: false, message: '未登录' },
         { status: 401 }
@@ -95,7 +79,7 @@ export async function POST(request: NextRequest) {
   } catch (error: unknown) {
     console.error('更新用户信息失败:', error);
     return NextResponse.json(
-      { success: false, message: `更新失败，请稍后重试: ${getErrorMessage(error)}` },
+      { success: false, message: '更新失败，请稍后重试' },
       { status: 500 }
     );
   }

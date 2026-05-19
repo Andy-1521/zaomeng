@@ -1,4 +1,5 @@
 import path from 'path';
+import { buildBrowserImageHeaders } from '@/lib/browserFetch';
 
 const COZE_FILES_UPLOAD_API = 'https://api.coze.cn/v1/files/upload';
 const DEFAULT_UPLOAD_TIMEOUT = 60_000;
@@ -34,10 +35,7 @@ async function fetchFileBuffer(fileUrl: string, timeout = DEFAULT_UPLOAD_TIMEOUT
   try {
     const response = await fetch(fileUrl, {
       signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0',
-        Referer: fileUrl,
-      },
+      headers: buildBrowserImageHeaders(fileUrl, { userAgent: 'Mozilla/5.0' }),
     });
 
     if (!response.ok) {

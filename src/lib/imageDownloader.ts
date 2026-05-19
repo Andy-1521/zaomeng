@@ -3,6 +3,10 @@
  * 统一的跨域图片下载解决方案
  */
 
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : '图片下载失败，请重试';
+}
+
 /**
  * 下载图片（支持跨域URL）
  * @param url - 图片URL（支持签名URL、公共URL）
@@ -39,9 +43,9 @@ export async function downloadImage(url: string, fileName: string): Promise<void
     window.URL.revokeObjectURL(blobUrl);
 
     console.log('[图片下载] 下载成功:', fileName);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[图片下载] 失败:', error);
-    throw new Error(error.message || '图片下载失败，请重试');
+    throw new Error(getErrorMessage(error));
   }
 }
 

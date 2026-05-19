@@ -50,7 +50,7 @@ export async function compressImage(
 
   // 如果是PNG格式，尝试转换为JPEG（PNG通常更大）
   // 但保持透明背景的需要特殊处理
-  let outputFormat: 'jpeg' | 'png' = imageInfo.format === 'png' && imageInfo.hasAlpha ? 'png' : 'jpeg';
+  const outputFormat: 'jpeg' | 'png' = imageInfo.format === 'png' && imageInfo.hasAlpha ? 'png' : 'jpeg';
 
   console.log(`[图片压缩] 压缩格式: ${outputFormat}, 透明背景: ${imageInfo.hasAlpha}`);
 

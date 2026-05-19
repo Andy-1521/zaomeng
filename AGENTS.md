@@ -4,9 +4,10 @@
 AI-powered image tool application built with Next.js. Currently supports **Color Extraction (彩绘提取)** as the primary feature, with Smart Background Removal, Watermark Removal, and Custom tools as secondary features.
 
 ## Tech Stack
-- **Framework**: Next.js 16 (App Router) with Turbopack
+- **Framework**: Next.js 16 (App Router)
 - **Core**: React 19, TypeScript 5
-- **Database**: Drizzle ORM (PostgreSQL via `coze-coding-dev-sdk`)
+- **Database**: Drizzle ORM over MySQL (`mysql2/promise`)
+- **Cache / Temp State**: Redis
 - **UI**: Tailwind CSS 4, shadcn/ui components
 - **Package Manager**: pnpm (strict - never use npm or yarn)
 
@@ -27,8 +28,7 @@ src/
 │   └── profile/        # User profile page
 ├── components/
 │   ├── TaskHistory.tsx  # Task history sidebar with filter/tabs
-│   ├── ColorExtraction2Page.tsx  # Main color extraction feature
-│   ├── QuickCreatePage.tsx  # Material library main workflow
+│   ├── QuickCreatePage.tsx  # Material library and color extraction workflow
 │   ├── Navbar.tsx       # Navigation bar
 │   └── ui/              # shadcn/ui components
 ├── lib/
@@ -42,9 +42,9 @@ src/
 ```
 
 ## Key Types
-- `TabType`: `'color-extraction' | 'auto-remove-bg' | 'watermark' | 'custom'`
+- `TabType`: `'color-extraction' | 'watermark' | 'custom' | 'ai-generate' | 'smart-edit'`
 - `FilterType`: `'all' | TabType` (used in TaskHistory filter UI)
-- `RecordType`: `'watermark' | 'remove-bg' | 'color-extraction'` (used in globalRecordManager)
+- `TaskCenterFilter`: `'all' | 'processing' | 'success' | 'failed'`
 
 ## Code Style
 - Use `@/` path aliases for imports
@@ -57,17 +57,19 @@ src/
 - The `generate-image` and `optimize-prompt` API routes have been removed (AI image generation feature fully deprecated)
 - The `chat-messages` API has been removed (was only used by AI image feature)
 - Admin dashboard stats no longer track `aiImageCount`
+- Frontend active API paths are `/api/smart-edit/identify`, `/api/color-extraction/run`, and `/api/color-extraction/generate-psd`
+- Legacy `color-extraction2` routes still exist only as compatibility wrappers and should not be used for new frontend code
 
 ## Vision Model Integration
 
-### 局部重绘标注点识别
+### 智能改图标记点识别
 - **模型**: `doubao-seed-2-0-mini-260215` (支持多模态理解)
 - **API**: 使用 OpenAI 兼容端点 `https://integration.coze.cn/api/v3/chat/completions`
 - **特点**: 
   - 支持图片 URL 直接输入
   - 不需要 Bot ID，直接通过 SDK 的 apiKey 认证
   - 返回 SSE 流式响应，需要客户端解析
-- **实现文件**: `src/app/api/color-extraction2/identify/route.ts`
+- **实现文件**: `src/app/api/smart-edit/identify/handler.ts`
 
 ### 模型能力说明
 - `doubao-seed-2-0-mini-260215`: 面向低时延、高并发场景，支持 256k 上下文、多模态理解，适合成本和速度优先的轻量级任务

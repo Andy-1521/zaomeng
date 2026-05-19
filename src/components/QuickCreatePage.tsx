@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import Image, { type ImageLoaderProps, type ImageProps } from 'next/image';
 import { addTaskRecord, updateTaskRecordStatus } from '@/components/TaskHistory';
 import CropEditorPanel from '@/components/CropEditorPanel';
-import AnnotateEditorPanel from '@/components/AnnotateEditorPanel';
 import LocalEditPanel from '@/components/LocalEditPanel';
 import { useUser } from '@/contexts/UserContext';
+import { isSmartEditAspectRatioOption, isSmartEditResolution, type SmartEditAspectRatioOption, type SmartEditResolution } from '@/lib/smartEditSize';
 import { showToast } from '@/lib/toast';
+import { toUserFacingErrorFromUnknown, toUserFacingErrorMessage } from '@/lib/userFacingError';
 
 type PluginCapturePayload = {
   imageUrl: string;
@@ -31,9 +33,38 @@ type CapturedImageRecord = {
   createdAt: string;
 };
 
+type RawOrderRecord = {
+  id: string;
+  orderNumber?: string | null;
+  toolPage?: string | null;
+  description?: string | null;
+  prompt?: string | null;
+  status?: string | null;
+  resultData?: unknown;
+  requestParams?: unknown;
+  uploadedImage?: string | null;
+  createdAt?: string | number | Date | null;
+  time?: string | number | Date | null;
+};
+
+type OrderResultCard = {
+  id: string;
+  orderId: string;
+  imageUrl: string;
+  createdAt: string | number | Date;
+  toolLabel: string;
+  statusLabel: string;
+  description: string;
+  orderNumber: string;
+  sourceImageUrl: string | null;
+  isResultImage: boolean;
+  downloadFileName: string;
+};
+
 type MaterialFilter = 'all' | 'today' | 'yesterday' | 'earlier';
 type MaterialScope = 'all' | 'favorite' | 'uncategorized' | `folder:${string}`;
-type GalleryActionId = 'color-extraction' | 'auto-remove-bg' | 'watermark' | 'upsampling';
+type GalleryActionId = 'color-extraction' | 'ai-generate' | 'outpaint-upsampling';
+type LibraryView = 'gallery' | 'orders';
 
 type MaterialFolder = {
   id: string;
@@ -52,15 +83,31 @@ type GalleryAction = {
 };
 
 type EditorAction = {
-  id: 'edit-image' | 'annotate' | 'local-edit';
+  id: 'edit-image' | 'local-edit';
   label: string;
 };
 
 type ImageEditorState = {
   open: boolean;
-  mode: 'crop' | 'annotate';
+  mode: 'crop';
   imageUrl: string;
+  destination: 'gallery' | 'orders';
+  orderNumber?: string;
+  toolLabel?: string;
+  sourceImageUrl?: string | null;
 };
+
+type DropdownOption = {
+  value: string;
+  label: string;
+};
+
+type ImageSourceSize = {
+  width: number;
+  height: number;
+};
+
+type QuickCreateDropdownId = 'tool-filter' | 'material-filter' | 'ai-aspect-ratio' | 'ai-resolution' | 'move-materials';
 
 type DuplicateReviewState = {
   open: boolean;
@@ -72,14 +119,14 @@ type JsonObject = Record<string, unknown>;
 
 const galleryActions: GalleryAction[] = [
   {
-    id: 'auto-remove-bg',
+    id: 'ai-generate',
     label: 'AI生图',
     description: '参考已选图片进行图生图创作',
     className: 'bg-gradient-to-r from-fuchsia-600 to-violet-600 hover:from-fuchsia-500 hover:to-violet-500',
     tag: '图生图',
     preview: (
       <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
-        <img src="/assets/remove-background-demo.gif" alt="AI生图示例" className="w-full h-full object-cover" />
+        <Image src="/assets/remove-background-demo.gif" alt="AI生图示例" width={128} height={140} unoptimized className="w-full h-full object-cover" />
       </div>
     ),
   },
@@ -91,31 +138,19 @@ const galleryActions: GalleryAction[] = [
     tag: '核心功能',
     preview: (
       <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
-        <img src="/assets/phone-case-demo.jpg" alt="彩绘提取示例" className="w-full h-full object-cover" />
+        <Image src="/assets/phone-case-demo.jpg" alt="彩绘提取示例" width={128} height={140} className="w-full h-full object-cover" />
       </div>
     ),
   },
   {
-    id: 'watermark',
-    label: '去除水印',
-    description: '清理图片水印',
-    className: 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500',
-    tag: '限时免费',
+    id: 'outpaint-upsampling',
+    label: '高清+扩图',
+    description: '先扩图，再做高清放大',
+    className: 'bg-gradient-to-r from-cyan-600 to-sky-600 hover:from-cyan-500 hover:to-sky-500',
+    tag: '对比实验',
     preview: (
       <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
-        <img src="/assets/remove-watermark-demo.jpg" alt="去除水印示例" className="w-full h-full object-cover" />
-      </div>
-    ),
-  },
-  {
-    id: 'upsampling',
-    label: '高清放大',
-    description: '增强清晰度和细节',
-    className: 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500',
-    tag: '限时免费',
-    preview: (
-      <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
-        <img src="/assets/high-quality-upsampling.gif" alt="高清放大示例" className="w-full h-full object-cover" />
+        <Image src="/assets/remove-watermark-demo.jpg" alt="高清+扩图示例" width={128} height={140} className="w-full h-full object-cover" />
       </div>
     ),
   },
@@ -123,9 +158,119 @@ const galleryActions: GalleryAction[] = [
 
 const editorActions: EditorAction[] = [
   { id: 'edit-image', label: '裁切工具' },
-  { id: 'annotate', label: '画笔标注' },
-  { id: 'local-edit', label: '局部改图' },
+  { id: 'local-edit', label: '智能改图' },
 ];
+
+const MATERIAL_FILTER_OPTIONS: DropdownOption[] = [
+  { value: 'all', label: '全部日期' },
+  { value: 'today', label: '今天' },
+  { value: 'yesterday', label: '昨天' },
+  { value: 'earlier', label: '更早' },
+];
+
+const AI_ASPECT_RATIO_OPTIONS: Array<{ value: SmartEditAspectRatioOption; label: string }> = [
+  { value: 'auto', label: '自动' },
+  { value: '1:1', label: '1:1' },
+  { value: '2:3', label: '2:3' },
+  { value: '3:2', label: '3:2' },
+  { value: '3:4', label: '3:4' },
+  { value: '4:3', label: '4:3' },
+  { value: '4:5', label: '4:5' },
+  { value: '5:4', label: '5:4' },
+  { value: '9:16', label: '9:16' },
+  { value: '16:9', label: '16:9' },
+  { value: '21:9', label: '21:9' },
+];
+
+const AI_RESOLUTION_OPTIONS: Array<{ value: SmartEditResolution; label: string }> = [
+  { value: '1k', label: '1k' },
+  { value: '2k', label: '2k' },
+  { value: '4k', label: '4k' },
+];
+
+const UNCATEGORIZED_FOLDER_VALUE = '__uncategorized__';
+
+const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
+
+function SafeImage({ alt, ...props }: Omit<ImageProps, 'loader'>) {
+  return <Image {...props} alt={alt} loader={passthroughImageLoader} unoptimized />;
+}
+
+function getDropdownOptionLabel(options: DropdownOption[], value: string) {
+  return options.find((option) => option.value === value)?.label || value;
+}
+
+type QuickCreateDropdownProps = {
+  dropdownId: QuickCreateDropdownId;
+  label?: string;
+  value: string;
+  options: DropdownOption[];
+  placeholder?: string;
+  isOpen: boolean;
+  onToggle: (dropdownId: QuickCreateDropdownId) => void;
+  onSelect: (value: string) => void;
+  align?: 'left' | 'right';
+  direction?: 'down' | 'up';
+  buttonClassName?: string;
+  menuWidthClassName?: string;
+  showSelectedCheck?: boolean;
+};
+
+function QuickCreateDropdown({
+  dropdownId,
+  label,
+  value,
+  options,
+  placeholder,
+  isOpen,
+  onToggle,
+  onSelect,
+  align = 'left',
+  direction = 'down',
+  buttonClassName = '',
+  menuWidthClassName = 'min-w-[160px]',
+  showSelectedCheck = true,
+}: QuickCreateDropdownProps) {
+  const selectedLabel = value ? getDropdownOptionLabel(options, value) : (placeholder || '请选择');
+  const positionClassName = direction === 'up'
+    ? `${align === 'right' ? 'right-0' : 'left-0'} bottom-full mb-2`
+    : `${align === 'right' ? 'right-0' : 'left-0'} top-full mt-2`;
+
+  return (
+    <div className="relative" data-role="quick-create-dropdown">
+      <button
+        type="button"
+        onClick={() => onToggle(dropdownId)}
+        aria-expanded={isOpen}
+        aria-haspopup="listbox"
+        className={`inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.045] px-3 py-2 text-xs text-white/78 shadow-[0_10px_24px_rgba(0,0,0,0.16)] transition hover:bg-white/[0.08] hover:text-white ${buttonClassName}`}
+      >
+        {label ? <span className="text-white/36">{label}</span> : null}
+        <span className={`truncate ${value ? 'text-white/82' : 'text-white/54'}`}>{selectedLabel}</span>
+        <span className={`text-[10px] text-white/42 transition ${isOpen ? 'rotate-180' : ''}`}>▾</span>
+      </button>
+
+      {isOpen ? (
+        <div className={`absolute z-30 ${positionClassName} ${menuWidthClassName} overflow-hidden rounded-2xl border border-white/12 bg-[#0d0d12] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.4)]`}>
+          {options.map((option) => {
+            const selected = option.value === value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => onSelect(option.value)}
+                className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs transition ${selected ? 'bg-white text-slate-950' : 'text-white/72 hover:bg-white/[0.08] hover:text-white'}`}
+              >
+                <span className="flex-1 truncate">{option.label}</span>
+                {selected && showSelectedCheck ? <span className="text-[10px]">✓</span> : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function getString(value: unknown): string | null {
   return typeof value === 'string' && value ? value : null;
@@ -217,14 +362,170 @@ function getDownloadFileName(image: CapturedImageRecord): string {
   return `zaomeng-${type}-${image.id.slice(0, 8)}.${fallbackExtension}`;
 }
 
-function parseMaterialDate(value: string): Date {
+function getUrlExtension(imageUrl: string): string {
+  const normalized = imageUrl.toLowerCase();
+  if (normalized.includes('.png')) return 'png';
+  if (normalized.includes('.webp')) return 'webp';
+  if (normalized.includes('.gif')) return 'gif';
+  return 'jpg';
+}
+
+function getOrderDownloadFileName(orderNumber: string, toolLabel: string, imageUrl: string, index: number): string {
+  const sanitizedTool = toolLabel.replace(/\s+/g, '-');
+  return `${sanitizedTool || 'order'}-${orderNumber || 'result'}-${index + 1}.${getUrlExtension(imageUrl)}`;
+}
+
+function isLikelyImageUrl(value: unknown): value is string {
+  return typeof value === 'string' && (value.startsWith('http://') || value.startsWith('https://') || value.startsWith('/'));
+}
+
+function dedupeUrls(urls: string[]): string[] {
+  return Array.from(new Set(urls.filter(Boolean)));
+}
+
+function extractImageUrls(value: unknown): string[] {
+  if (!value) return [];
+
+  if (isLikelyImageUrl(value)) {
+    return [value];
+  }
+
+  if (typeof value === 'string') {
+    try {
+      return extractImageUrls(JSON.parse(value));
+    } catch {
+      return [];
+    }
+  }
+
+  if (Array.isArray(value)) {
+    return dedupeUrls(value.flatMap((item) => extractImageUrls(item)));
+  }
+
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const candidates = [
+      'imageUrl',
+      'image_url',
+      'result_image_url',
+      'uploadedImage',
+      'uploaded_image',
+      'originalImageUrl',
+      'url',
+      'fileUrl',
+      'urls',
+    ];
+
+    return dedupeUrls(candidates.flatMap((key) => extractImageUrls(record[key])));
+  }
+
+  return [];
+}
+
+function getOrderToolLabel(toolPage: string | null | undefined, description?: string | null, orderNumber?: string | null): string {
+  if (toolPage === '裁切工具' || description?.includes('裁切')) {
+    return '裁切工具';
+  }
+
+  if (toolPage === 'AI生图' || toolPage === 'AI生图（图生图）' || description?.includes('AI生图') || orderNumber?.startsWith('AIG')) {
+    return 'AI生图';
+  }
+
+  if (toolPage === '彩绘提取' || toolPage === '彩绘提取2' || description?.includes('彩绘提取')) {
+    return '彩绘提取';
+  }
+
+  if (toolPage === '智能改图' || toolPage === '局部改图' || description?.includes('智能改图') || description?.includes('局部改图') || orderNumber?.startsWith('LCL-')) {
+    return '智能改图';
+  }
+
+  if (toolPage === 'AI扩图' || toolPage === '去除水印' || toolPage === '去水印' || description?.includes('去除水印') || description?.includes('AI扩图') || orderNumber?.startsWith('RW-')) {
+    return 'AI扩图';
+  }
+
+  if (toolPage === '高清+扩图' || description?.includes('高清+扩图') || orderNumber?.startsWith('HDO-')) {
+    return '高清+扩图';
+  }
+
+  if (toolPage === '高清+扩图2' || description?.includes('高清+扩图2') || orderNumber?.startsWith('HDO2-')) {
+    return '高清+扩图2';
+  }
+
+  if (toolPage === '高清放大' || description?.includes('高清放大') || orderNumber?.startsWith('HD-')) {
+    return '高清放大';
+  }
+
+  return toolPage || '其他工具';
+}
+
+function getOrderStatusLabel(status: string | null | undefined): string {
+  if (status === '处理中' || status === 'pending') return '处理中';
+  if (status === '失败' || status === 'failed') return '失败';
+  if (status === '超时' || status === 'timeout') return '超时';
+  if (status === '部分成功') return '部分成功';
+  return '成功';
+}
+
+function getOrderStatusClass(statusLabel: string): string {
+  if (statusLabel === '处理中') return 'border-sky-300/30 bg-sky-400/18 text-sky-100';
+  if (statusLabel === '失败' || statusLabel === '超时') return 'border-red-300/30 bg-red-500/18 text-red-100';
+  if (statusLabel === '部分成功') return 'border-amber-300/30 bg-amber-400/18 text-amber-50';
+  return 'border-emerald-300/30 bg-emerald-400/18 text-emerald-50';
+}
+
+function createOrderPlaceholderImage(orderNumber: string, statusLabel: string): string {
+  const palette = statusLabel === '处理中'
+    ? { start: '#082032', end: '#0ea5e9', accent: '#7dd3fc', ring: 'rgba(125,211,252,0.34)' }
+    : statusLabel === '失败' || statusLabel === '超时'
+      ? { start: '#22070a', end: '#ef4444', accent: '#fecaca', ring: 'rgba(252,165,165,0.34)' }
+      : statusLabel === '部分成功'
+        ? { start: '#231507', end: '#f59e0b', accent: '#fde68a', ring: 'rgba(251,191,36,0.34)' }
+        : { start: '#052016', end: '#10b981', accent: '#a7f3d0', ring: 'rgba(52,211,153,0.34)' };
+
+  const glyph = statusLabel === '处理中'
+    ? '<circle cx="64" cy="64" r="18" fill="none" stroke="#7dd3fc" stroke-width="4.5" stroke-linecap="round" stroke-dasharray="62 42" transform="rotate(-40 64 64)" />'
+    : statusLabel === '失败' || statusLabel === '超时'
+      ? '<path d="M52 52l24 24M76 52L52 76" fill="none" stroke="#fecaca" stroke-width="4.5" stroke-linecap="round" />'
+      : '<path d="M49 64l10 10 20-22" fill="none" stroke="#a7f3d0" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />';
+
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+      <title>${orderNumber}</title>
+      <defs>
+        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="${palette.start}" />
+          <stop offset="100%" stop-color="${palette.end}" />
+        </linearGradient>
+      </defs>
+      <rect width="128" height="128" rx="28" fill="url(#bg)" />
+      <circle cx="64" cy="64" r="34" fill="rgba(255,255,255,0.08)" stroke="${palette.ring}" stroke-width="2" />
+      ${glyph}
+      <rect x="24" y="92" width="80" height="7" rx="3.5" fill="rgba(255,255,255,0.14)" />
+      <rect x="36" y="106" width="56" height="5" rx="2.5" fill="rgba(255,255,255,0.12)" />
+      <circle cx="32" cy="32" r="4" fill="${palette.accent}" fill-opacity="0.9" />
+    </svg>
+  `;
+
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function parseMaterialDate(value: string | number | Date): Date {
+  if (value instanceof Date) {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    return new Date(value);
+  }
+
   if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)) {
     return new Date(value.replace(' ', 'T'));
   }
+
   return new Date(value);
 }
 
-function formatMaterialDateLabel(value: string): string {
+function formatMaterialDateLabel(value: string | number | Date): string {
   const date = parseMaterialDate(value);
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -237,14 +538,14 @@ function formatMaterialDateLabel(value: string): string {
   return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', weekday: 'short' });
 }
 
-function formatMaterialTime(value: string): string {
+function formatMaterialTime(value: string | number | Date): string {
   return parseMaterialDate(value).toLocaleTimeString('zh-CN', {
     hour: '2-digit',
     minute: '2-digit',
   });
 }
 
-function getMaterialDateGroup(value: string): 'today' | 'yesterday' | 'earlier' {
+function getMaterialDateGroup(value: string | number | Date): 'today' | 'yesterday' | 'earlier' {
   const date = parseMaterialDate(value);
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -281,22 +582,30 @@ export default function QuickCreatePage() {
   const [capturedImages, setCapturedImages] = useState<CapturedImageRecord[]>([]);
   const [materialFolders, setMaterialFolders] = useState<MaterialFolder[]>([]);
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
+  const [libraryView, setLibraryView] = useState<LibraryView>('gallery');
+  const [orderResults, setOrderResults] = useState<OrderResultCard[]>([]);
+  const [hasProcessingOrders, setHasProcessingOrders] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isAiReferenceUploading, setIsAiReferenceUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [canHoverCardControls, setCanHoverCardControls] = useState(true);
   const [columnCount, setColumnCount] = useState(4);
   const [thumbnailSize, setThumbnailSize] = useState(290);
   const [imageAspectRatios, setImageAspectRatios] = useState<Record<string, number>>({});
+  const [imageSourceSizes, setImageSourceSizes] = useState<Record<string, ImageSourceSize>>({});
   const [failedImageUrls, setFailedImageUrls] = useState<Set<string>>(new Set());
   const [processingAction, setProcessingAction] = useState<GalleryActionId | null>(null);
   const [actionBarPosition, setActionBarPosition] = useState<{ top: number; left: number } | null>(null);
   const [showAiPromptPanel, setShowAiPromptPanel] = useState(false);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [deletingOrderNumber, setDeletingOrderNumber] = useState<string | null>(null);
   const [aiPrompt, setAiPrompt] = useState('');
-  const [aiAspectRatio, setAiAspectRatio] = useState('auto');
-  const [aiResolution, setAiResolution] = useState('2k');
+  const [aiAspectRatio, setAiAspectRatio] = useState<SmartEditAspectRatioOption>('auto');
+  const [aiResolution, setAiResolution] = useState<SmartEditResolution>('2k');
   const [materialScope, setMaterialScope] = useState<MaterialScope>('all');
   const [materialFilter, setMaterialFilter] = useState<MaterialFilter>('all');
+  const [toolFilter, setToolFilter] = useState('all');
+  const [openDropdownId, setOpenDropdownId] = useState<QuickCreateDropdownId | null>(null);
   const [showNewFolderInput, setShowNewFolderInput] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [renamingFolderId, setRenamingFolderId] = useState('');
@@ -305,6 +614,7 @@ export default function QuickCreatePage() {
     open: false,
     mode: 'crop',
     imageUrl: '',
+    destination: 'gallery',
   });
   const [localEditImageUrl, setLocalEditImageUrl] = useState('');
   const [showLocalEdit, setShowLocalEdit] = useState(false);
@@ -334,6 +644,21 @@ export default function QuickCreatePage() {
     [processingAction]
   );
 
+  const availableOrderTools = useMemo(() => {
+    return Array.from(new Set(orderResults.map((item) => item.toolLabel))).sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  }, [orderResults]);
+
+  const toolFilterOptions = useMemo<DropdownOption[]>(() => {
+    return [{ value: 'all', label: '全部工具' }, ...availableOrderTools.map((tool) => ({ value: tool, label: tool }))];
+  }, [availableOrderTools]);
+
+  const moveMaterialOptions = useMemo<DropdownOption[]>(() => {
+    return [
+      { value: UNCATEGORIZED_FOLDER_VALUE, label: '未分类' },
+      ...materialFolders.map((folder) => ({ value: folder.id, label: folder.name })),
+    ];
+  }, [materialFolders]);
+
   const filteredCapturedImages = useMemo(() => {
     return capturedImages.filter((image) => {
       if (materialScope === 'favorite' && !image.isFavorite) return false;
@@ -360,6 +685,30 @@ export default function QuickCreatePage() {
     ].filter((group) => group.items.length > 0);
   }, [filteredCapturedImages]);
 
+  const filteredOrderResults = useMemo(() => {
+    return orderResults.filter((item) => {
+      if (toolFilter !== 'all' && item.toolLabel !== toolFilter) return false;
+      if (materialFilter === 'all') return true;
+      return getMaterialDateGroup(item.createdAt) === materialFilter;
+    });
+  }, [materialFilter, orderResults, toolFilter]);
+
+  const groupedOrderResults = useMemo(() => {
+    const groupMap = new Map<'today' | 'yesterday' | 'earlier', OrderResultCard[]>();
+    for (const image of filteredOrderResults) {
+      const key = getMaterialDateGroup(image.createdAt);
+      const current = groupMap.get(key) || [];
+      current.push(image);
+      groupMap.set(key, current);
+    }
+
+    return [
+      { key: 'today' as const, label: '今天', items: groupMap.get('today') || [] },
+      { key: 'yesterday' as const, label: '昨天', items: groupMap.get('yesterday') || [] },
+      { key: 'earlier' as const, label: '更早', items: groupMap.get('earlier') || [] },
+    ].filter((group) => group.items.length > 0);
+  }, [filteredOrderResults]);
+
   const dispatchTaskHistoryUpdated = useCallback((delay = 0) => {
     const dispatch = () => window.dispatchEvent(new Event('taskHistoryUpdated'));
     if (delay > 0) {
@@ -374,6 +723,29 @@ export default function QuickCreatePage() {
     window.dispatchEvent(new CustomEvent('userPointsChanged', { detail: { points } }));
   }, [setPoints]);
 
+  const toggleDropdown = useCallback((dropdownId: QuickCreateDropdownId) => {
+    setOpenDropdownId((current) => current === dropdownId ? null : dropdownId);
+  }, []);
+
+  const closeDropdowns = useCallback(() => {
+    setOpenDropdownId(null);
+  }, []);
+
+  const recordImageMetrics = useCallback((imageUrl: string, width: number, height: number) => {
+    if (!(width > 0) || !(height > 0)) return;
+
+    const ratio = height / width;
+    setImageAspectRatios((prev) => {
+      if (prev[imageUrl] === ratio) return prev;
+      return { ...prev, [imageUrl]: ratio };
+    });
+    setImageSourceSizes((prev) => {
+      const current = prev[imageUrl];
+      if (current?.width === width && current.height === height) return prev;
+      return { ...prev, [imageUrl]: { width, height } };
+    });
+  }, []);
+
   const loadCapturedImages = useCallback(async () => {
     try {
       const response = await fetch('/api/plugin/captured-images', { credentials: 'include' });
@@ -384,6 +756,86 @@ export default function QuickCreatePage() {
       console.error('[素材库] 加载失败:', error);
     }
   }, []);
+
+  const loadOrderResults = useCallback(async (options?: { silent?: boolean }) => {
+    if (!user?.id) {
+      setOrderResults([]);
+      setHasProcessingOrders(false);
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/task/orders', { credentials: 'include' });
+      const data = await response.json() as { success?: boolean; message?: string; data?: RawOrderRecord[] };
+      if (!response.ok || !data.success || !Array.isArray(data.data)) {
+        throw new Error(toUserFacingErrorMessage(data.message, '刷新订单记录失败，请重试'));
+      }
+
+      setHasProcessingOrders(data.data.some((item) => getOrderStatusLabel(item.status) === '处理中'));
+
+      const cards = data.data.flatMap((item) => {
+        const resultImages = extractImageUrls(item.resultData);
+        const sourceImages = dedupeUrls([
+          ...extractImageUrls(item.requestParams),
+          ...extractImageUrls(item.uploadedImage),
+        ]);
+        const toolLabel = getOrderToolLabel(item.toolPage, item.description, item.orderNumber);
+        const statusLabel = getOrderStatusLabel(item.status);
+        const createdAt = item.createdAt || item.time || new Date().toISOString();
+        const orderNumber = item.orderNumber || item.id;
+
+        if (statusLabel === '处理中' || statusLabel === '失败' || statusLabel === '超时') {
+          return [];
+        }
+
+        if (resultImages.length === 0) {
+          const description = statusLabel === '成功'
+            ? `${toolLabel}暂无结果`
+            : `${toolLabel}${statusLabel}`;
+
+          return [{
+            id: `${item.id}-placeholder`,
+            orderId: orderNumber,
+            imageUrl: createOrderPlaceholderImage(orderNumber, statusLabel),
+            createdAt,
+            toolLabel,
+            statusLabel,
+            description,
+            orderNumber,
+            sourceImageUrl: sourceImages[0] || null,
+            isResultImage: false,
+            downloadFileName: '',
+          }];
+        }
+
+        const description = `${toolLabel}${statusLabel === '处理中' ? '处理中' : '结果'}`;
+
+        return resultImages.map((imageUrl, index) => ({
+          id: `${item.id}-${index}`,
+          orderId: orderNumber,
+          imageUrl,
+          createdAt,
+          toolLabel,
+          statusLabel,
+          description,
+          orderNumber,
+          sourceImageUrl: sourceImages[0] || null,
+          isResultImage: true,
+          downloadFileName: getOrderDownloadFileName(orderNumber, toolLabel, imageUrl, index),
+        }));
+      });
+
+      cards.sort((left, right) => parseMaterialDate(right.createdAt).getTime() - parseMaterialDate(left.createdAt).getTime());
+
+      setOrderResults(cards);
+    } catch (error) {
+      console.error('[订单库] 加载失败:', error);
+      setHasProcessingOrders(false);
+      if (!options?.silent) {
+        showToast(toUserFacingErrorFromUnknown(error, '刷新订单记录失败，请重试'), 'error');
+      }
+    }
+  }, [user?.id]);
 
   const loadMaterialFolders = useCallback(async () => {
     try {
@@ -411,14 +863,13 @@ export default function QuickCreatePage() {
         body: JSON.stringify({ name }),
       });
       const data = await response.json();
-      if (!response.ok || !data.success) throw new Error(data.error || '创建文件夹失败');
+      if (!response.ok || !data.success) throw new Error(toUserFacingErrorMessage(data.error, '创建文件夹失败，请重试'));
       setNewFolderName('');
       setShowNewFolderInput(false);
       await loadMaterialFolders();
       showToast('文件夹已创建', 'success');
     } catch (error) {
-      const message = error instanceof Error ? error.message : '创建文件夹失败';
-      showToast(message, 'error');
+      showToast(toUserFacingErrorFromUnknown(error, '创建文件夹失败，请重试'), 'error');
     }
   }, [loadMaterialFolders, newFolderName]);
 
@@ -443,14 +894,13 @@ export default function QuickCreatePage() {
         body: JSON.stringify({ id: renamingFolderId, name }),
       });
       const data = await response.json();
-      if (!response.ok || !data.success) throw new Error(data.error || '重命名失败');
+      if (!response.ok || !data.success) throw new Error(toUserFacingErrorMessage(data.error, '重命名失败，请重试'));
       setRenamingFolderId('');
       setRenamingFolderName('');
       await loadMaterialFolders();
       showToast('文件夹已重命名', 'success');
     } catch (error) {
-      const message = error instanceof Error ? error.message : '重命名失败';
-      showToast(message, 'error');
+      showToast(toUserFacingErrorFromUnknown(error, '重命名失败，请重试'), 'error');
     }
   }, [loadMaterialFolders, renamingFolderId, renamingFolderName]);
 
@@ -467,14 +917,13 @@ export default function QuickCreatePage() {
         body: JSON.stringify({ id: activeFolder.id }),
       });
       const data = await response.json();
-      if (!response.ok || !data.success) throw new Error(data.error || '删除文件夹失败');
+      if (!response.ok || !data.success) throw new Error(toUserFacingErrorMessage(data.error, '删除文件夹失败，请重试'));
       setMaterialScope('uncategorized');
       await loadMaterialFolders();
       await loadCapturedImages();
       showToast('文件夹已删除，素材已移到未分类', 'success');
     } catch (error) {
-      const message = error instanceof Error ? error.message : '删除文件夹失败';
-      showToast(message, 'error');
+      showToast(toUserFacingErrorFromUnknown(error, '删除文件夹失败，请重试'), 'error');
     }
   }, [activeFolder, loadCapturedImages, loadMaterialFolders]);
 
@@ -488,12 +937,11 @@ export default function QuickCreatePage() {
         body: JSON.stringify({ ids, ...updates }),
       });
       const data = await response.json();
-      if (!response.ok || !data.success) throw new Error(data.error || '更新素材失败');
+      if (!response.ok || !data.success) throw new Error(toUserFacingErrorMessage(data.error, '更新素材失败，请重试'));
       await loadCapturedImages();
       return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : '更新素材失败';
-      showToast(message, 'error');
+      showToast(toUserFacingErrorFromUnknown(error, '更新素材失败，请重试'), 'error');
       return false;
     }
   }, [loadCapturedImages]);
@@ -508,12 +956,20 @@ export default function QuickCreatePage() {
   const moveSelectedMaterials = useCallback(async (targetValue: string) => {
     const ids = selectedCapturedImages.map((image) => image.id);
     if (!targetValue || ids.length === 0) return;
-    const folderId = targetValue === '__uncategorized__' ? null : targetValue;
+    const folderId = targetValue === UNCATEGORIZED_FOLDER_VALUE ? null : targetValue;
     const success = await updateMaterials(ids, { folderId });
     if (success) {
       showToast(folderId ? '已移动到文件夹' : '已移动到未分类', 'success');
     }
   }, [selectedCapturedImages, updateMaterials]);
+
+  const clearSelectionState = useCallback(() => {
+    setSelectedImages(new Set());
+    setShowAiPromptPanel(false);
+    setAiPrompt('');
+    setAiAspectRatio('auto');
+    setAiResolution('2k');
+  }, []);
 
   const validateImageFiles = useCallback((files: File[]) => {
     const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
@@ -582,7 +1038,7 @@ export default function QuickCreatePage() {
         const response = await fetch('/api/upload/file', { method: 'POST', credentials: 'include', body: formData });
         const data = await response.json();
         if (!response.ok || !data.success || !data.data?.url) {
-          throw new Error(data.message || '参考图上传失败');
+          throw new Error(toUserFacingErrorMessage(data.message, '参考图上传失败，请重试'));
         }
         uploadedUrls.push(data.data.url);
       }
@@ -596,8 +1052,7 @@ export default function QuickCreatePage() {
         showToast(`已添加 ${uploadedUrls.length} 张 AI 参考图`, 'success');
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : '参考图上传失败，请重试';
-      showToast(message, 'error');
+      showToast(toUserFacingErrorFromUnknown(error, '参考图上传失败，请重试'), 'error');
     } finally {
       setIsAiReferenceUploading(false);
       if (aiReferenceInputRef.current) aiReferenceInputRef.current.value = '';
@@ -625,6 +1080,23 @@ export default function QuickCreatePage() {
 
   const hasDraggedFiles = useCallback((dataTransfer: DataTransfer | null) => {
     return Array.from(dataTransfer?.types || []).includes('Files');
+  }, []);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(hover: hover) and (pointer: fine)');
+    const update = () => {
+      setCanHoverCardControls(mediaQuery.matches);
+    };
+
+    update();
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', update);
+      return () => mediaQuery.removeEventListener('change', update);
+    }
+
+    mediaQuery.addListener(update);
+    return () => mediaQuery.removeListener(update);
   }, []);
 
   useEffect(() => {
@@ -679,11 +1151,10 @@ export default function QuickCreatePage() {
         body: JSON.stringify({ id: image.id }),
       });
       const data = await response.json();
-      if (!response.ok || !data.success) throw new Error(data.error || '删除失败');
+      if (!response.ok || !data.success) throw new Error(toUserFacingErrorMessage(data.error, '删除失败，请重试'));
       setCapturedImages((prev) => prev.filter((item) => item.id !== image.id));
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '删除失败';
-      showToast(errorMessage, 'error');
+      showToast(toUserFacingErrorFromUnknown(error, '删除失败，请重试'), 'error');
       return;
     }
 
@@ -694,10 +1165,10 @@ export default function QuickCreatePage() {
     });
   };
 
-  const downloadMaterialImage = useCallback(async (image: CapturedImageRecord) => {
-    const imageUrl = getDisplayImageUrl(image.imageUrl);
+  const downloadImageByUrl = useCallback(async (imageUrl: string, fileName: string) => {
+    const displayImageUrl = getDisplayImageUrl(imageUrl);
     try {
-      const response = await fetch(imageUrl);
+      const response = await fetch(displayImageUrl);
       if (!response.ok) {
         throw new Error('图片下载失败');
       }
@@ -706,18 +1177,71 @@ export default function QuickCreatePage() {
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = objectUrl;
-      link.download = getDownloadFileName(image);
+      link.download = fileName;
       document.body.appendChild(link);
       link.click();
       link.remove();
       URL.revokeObjectURL(objectUrl);
     } catch (error) {
       console.error('[素材库] 图片下载失败:', error);
-      window.open(imageUrl, '_blank', 'noopener,noreferrer');
+      window.open(displayImageUrl, '_blank', 'noopener,noreferrer');
     }
   }, []);
 
+  const downloadMaterialImage = useCallback(async (image: CapturedImageRecord) => {
+    await downloadImageByUrl(image.imageUrl, getDownloadFileName(image));
+  }, [downloadImageByUrl]);
+
+  const downloadOrderImage = useCallback(async (image: OrderResultCard) => {
+    await downloadImageByUrl(image.imageUrl, image.downloadFileName);
+  }, [downloadImageByUrl]);
+
+  const deleteOrderRecord = useCallback(async (image: OrderResultCard) => {
+    if (image.statusLabel === '处理中') {
+      showToast('处理中订单暂时不能删除', 'error');
+      return;
+    }
+
+    const confirmed = window.confirm('确定要删除这条订单记录吗？此操作不可恢复。');
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setDeletingOrderNumber(image.orderNumber);
+      const response = await fetch('/api/user/transactions/delete', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderNumber: image.orderNumber }),
+      });
+
+      const data = await response.json().catch(() => ({} as { success?: boolean; message?: string }));
+      if (!response.ok || data.success === false) {
+        throw new Error(toUserFacingErrorMessage(data.message, '删除失败，请重试'));
+      }
+
+      setOrderResults((prev) => prev.filter((item) => item.orderNumber !== image.orderNumber));
+      setSelectedImages((prev) => {
+        const next = new Set(prev);
+        next.delete(image.imageUrl);
+        return next;
+      });
+      dispatchTaskHistoryUpdated();
+      showToast('删除成功', 'success');
+    } catch (error) {
+      showToast(toUserFacingErrorFromUnknown(error, '删除失败，请重试'), 'error');
+    } finally {
+      setDeletingOrderNumber(null);
+    }
+  }, [dispatchTaskHistoryUpdated]);
+
   const deleteSelectedImages = async () => {
+    if (libraryView !== 'gallery') {
+      clearSelectionState();
+      return;
+    }
+
     if (selectedImageList.length === 0) {
       showToast('请先选择要删除的图片', 'error');
       return;
@@ -735,16 +1259,13 @@ export default function QuickCreatePage() {
           body: JSON.stringify({ id: target.id }),
         });
         const data = await response.json();
-        if (!response.ok || !data.success) throw new Error(data.error || '删除失败');
+        if (!response.ok || !data.success) throw new Error(toUserFacingErrorMessage(data.error, '删除失败，请重试'));
       }
 
       setCapturedImages((prev) => prev.filter((image) => !selectedImages.has(image.imageUrl)));
-      setSelectedImages(new Set());
-      setShowAiPromptPanel(false);
-      setAiPrompt('');
+      clearSelectionState();
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '删除失败';
-      showToast(errorMessage, 'error');
+      showToast(toUserFacingErrorFromUnknown(error, '删除失败，请重试'), 'error');
     }
   };
 
@@ -794,7 +1315,7 @@ export default function QuickCreatePage() {
           body: JSON.stringify({ id: image.id }),
         });
         const data = await response.json();
-        if (!response.ok || !data.success) throw new Error(data.error || '删除重复图片失败');
+        if (!response.ok || !data.success) throw new Error(toUserFacingErrorMessage(data.error, '删除重复图片失败，请重试'));
       }
 
       const duplicateIdSet = new Set(imagesToDelete.map((image) => image.id));
@@ -807,8 +1328,7 @@ export default function QuickCreatePage() {
       closeDuplicateReview();
       showToast(`已删除 ${imagesToDelete.length} 张重复图片`, 'success');
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '删除重复图片失败';
-      showToast(errorMessage, 'error');
+      showToast(toUserFacingErrorFromUnknown(error, '删除重复图片失败，请重试'), 'error');
     }
   };
 
@@ -846,14 +1366,13 @@ export default function QuickCreatePage() {
 
       const data = await response.json();
       if (!response.ok || !data.success || !data.data?.uploadedUrl) {
-        throw new Error(data.error || data.message || '插件采图失败');
+        throw new Error(toUserFacingErrorMessage(data.error || data.message, '插件采图失败，请重试'));
       }
 
       await loadCapturedImages();
       showToast('插件采图成功，图片已加入素材库', 'success');
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '插件采图失败';
-      showToast(errorMessage, 'error');
+      showToast(toUserFacingErrorFromUnknown(error, '插件采图失败，请重试'), 'error');
     }
   }, [loadCapturedImages]);
 
@@ -907,11 +1426,20 @@ export default function QuickCreatePage() {
     const tempOrderId = `ORD${Date.now()}_${Math.floor(Math.random() * 10000)}`;
     const processingImageUrl = getProcessingImageUrl(imageUrl);
 
-    addTaskRecord('color-extraction', '彩绘提取', '手机壳彩绘提取', undefined, tempOrderId, undefined, processingImageUrl, '处理中');
+    addTaskRecord(
+      'color-extraction',
+      '彩绘提取',
+      '手机壳彩绘提取',
+      undefined,
+      tempOrderId,
+      undefined,
+      processingImageUrl,
+      '处理中'
+    );
 
     void (async () => {
       try {
-        const response = await fetch('/api/color-extraction2/workflow', {
+        const response = await fetch('/api/color-extraction/run', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
@@ -924,7 +1452,9 @@ export default function QuickCreatePage() {
           data?: { imageUrl?: string; remainingPoints?: number };
         };
 
-        if (!response.ok || !data.success) throw new Error(data.message || '彩绘提取失败');
+        if (!response.ok || !data.success) {
+          throw new Error(toUserFacingErrorMessage(data.message, '彩绘提取失败，请重试'));
+        }
 
         updateTaskRecordStatus(tempOrderId, '成功', data.data?.imageUrl);
         if (typeof data.data?.remainingPoints === 'number') syncPoints(data.data.remainingPoints);
@@ -937,53 +1467,35 @@ export default function QuickCreatePage() {
     })();
   }, [dispatchTaskHistoryUpdated, syncPoints, user?.id]);
 
-  const startRemoveWatermark = useCallback((imageUrl: string) => {
+  const startOutpaintUpsampling = useCallback((imageUrl: string) => {
     if (!user?.id) return;
     void (async () => {
       try {
-        const response = await fetch('/api/remove-watermark/run', {
+        const response = await fetch('/api/outpaint-upsampling/run', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId: user.id, imageUrl }),
         });
         if (!response.ok) {
-          const errorMessage = await parseErrorResponse(response, '去除水印失败');
+          const errorMessage = toUserFacingErrorMessage(await parseErrorResponse(response, '暂时未能完成处理，请稍后重试'), '暂时未能完成处理，请稍后重试');
           throw new Error(errorMessage);
         }
         dispatchTaskHistoryUpdated();
       } catch (error) {
-        console.error('[素材库] 去除水印执行失败:', error);
+        console.error('[素材库] 高清+扩图执行失败:', error);
         dispatchTaskHistoryUpdated();
+        showToast(toUserFacingErrorFromUnknown(error, '暂时未能完成处理，请稍后重试'), 'error');
       }
     })();
     dispatchTaskHistoryUpdated(500);
   }, [dispatchTaskHistoryUpdated, user?.id]);
 
-  const startUpsampling = useCallback((imageUrl: string) => {
-    if (!user?.id) return;
-    void (async () => {
-      try {
-        const response = await fetch('/api/image-upsampling/run', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: user.id, imageUrl }),
-        });
-        if (!response.ok) {
-          const errorMessage = await parseErrorResponse(response, '高清放大失败');
-          throw new Error(errorMessage);
-        }
-        dispatchTaskHistoryUpdated();
-      } catch (error) {
-        console.error('[素材库] 高清放大执行失败:', error);
-        dispatchTaskHistoryUpdated();
-      }
-    })();
-    dispatchTaskHistoryUpdated(500);
-  }, [dispatchTaskHistoryUpdated, user?.id]);
-
-  const startAiGenerate = useCallback((imageUrl: string, prompt: string) => {
+  const startAiGenerate = useCallback((imageUrl: string, prompt: string, options: {
+    aspectRatio: SmartEditAspectRatioOption;
+    resolution: SmartEditResolution;
+    sourceSize?: ImageSourceSize;
+  }) => {
     if (!user?.id) return;
     const tempOrderId = `AIG${Date.now()}_${Math.floor(Math.random() * 10000)}`;
     const processingImageUrl = getProcessingImageUrl(imageUrl);
@@ -999,6 +1511,9 @@ export default function QuickCreatePage() {
             userId: user.id,
             imageUrl: processingImageUrl,
             prompt,
+            aspectRatio: options.aspectRatio,
+            resolution: options.resolution,
+            sourceSize: options.sourceSize,
             orderId: tempOrderId,
           }),
         });
@@ -1010,7 +1525,7 @@ export default function QuickCreatePage() {
         };
 
         if (!response.ok || !data.success) {
-          throw new Error(data.message || `AI生图失败 (${response.status})`);
+          throw new Error(toUserFacingErrorMessage(data.message, '暂时未能完成处理，请稍后重试'));
         }
 
         updateTaskRecordStatus(tempOrderId, '成功', data.data?.url);
@@ -1023,7 +1538,7 @@ export default function QuickCreatePage() {
         console.error('[素材库] AI生图执行失败:', error);
         updateTaskRecordStatus(tempOrderId, '失败');
         dispatchTaskHistoryUpdated();
-        showToast(error instanceof Error ? error.message : 'AI生图失败', 'error');
+        showToast(toUserFacingErrorFromUnknown(error, '暂时未能完成处理，请稍后重试'), 'error');
       }
     })();
   }, [dispatchTaskHistoryUpdated, loadCapturedImages, syncPoints, user?.id]);
@@ -1035,7 +1550,7 @@ export default function QuickCreatePage() {
       return;
     }
 
-    if (actionId === 'auto-remove-bg') {
+    if (actionId === 'ai-generate') {
       setShowAiPromptPanel((current) => !current);
       return;
     }
@@ -1061,21 +1576,16 @@ export default function QuickCreatePage() {
         showToast(`已提交 ${submittedCount} 张图片到彩绘提取`, 'info');
       }
 
-      if (actionId === 'watermark') {
-        selectedImageList.forEach((imageUrl) => startRemoveWatermark(imageUrl));
-        showToast(`已提交 ${selectedImageList.length} 张图片到去除水印`, 'info');
+      if (actionId === 'outpaint-upsampling') {
+        selectedImageList.forEach((imageUrl) => startOutpaintUpsampling(imageUrl));
+        showToast(`已提交 ${selectedImageList.length} 张图片到高清+扩图`, 'info');
       }
 
-      if (actionId === 'upsampling') {
-        selectedImageList.forEach((imageUrl) => startUpsampling(imageUrl));
-        showToast(`已提交 ${selectedImageList.length} 张图片到高清放大`, 'info');
-      }
-
-      setSelectedImages(new Set());
+      clearSelectionState();
     } finally {
       setProcessingAction(null);
     }
-  }, [ensureEnoughColorExtractionPoints, ensureUserReady, selectedImageList, startColorExtraction, startRemoveWatermark, startUpsampling]);
+  }, [clearSelectionState, ensureEnoughColorExtractionPoints, ensureUserReady, selectedImageList, startColorExtraction, startOutpaintUpsampling]);
 
   const submitAiGenerate = useCallback(() => {
     const prompt = aiPrompt.trim();
@@ -1085,20 +1595,21 @@ export default function QuickCreatePage() {
     }
 
     setShowAiPromptPanel(false);
-    setProcessingAction('auto-remove-bg');
+    setProcessingAction('ai-generate');
     try {
       selectedImageList.forEach((imageUrl) => {
-        startAiGenerate(imageUrl, `${prompt} [比例:${aiAspectRatio} 分辨率:${aiResolution}]`);
+        startAiGenerate(imageUrl, prompt, {
+          aspectRatio: aiAspectRatio,
+          resolution: aiResolution,
+          sourceSize: imageSourceSizes[imageUrl],
+        });
       });
       showToast(`已提交 ${selectedImageList.length} 张图片到AI生图`, 'info');
-      setSelectedImages(new Set());
-      setAiPrompt('');
-      setAiAspectRatio('auto');
-      setAiResolution('2k');
+      clearSelectionState();
     } finally {
       setProcessingAction(null);
     }
-  }, [aiAspectRatio, aiPrompt, aiResolution, selectedImageList, startAiGenerate]);
+  }, [aiAspectRatio, aiPrompt, aiResolution, clearSelectionState, imageSourceSizes, selectedImageList, startAiGenerate]);
 
   const handleEditorAction = useCallback((action: EditorAction['id']) => {
     if (selectedImageList.length !== 1) {
@@ -1106,24 +1617,32 @@ export default function QuickCreatePage() {
       return;
     }
 
-    if (action === 'edit-image') {
-      setImageEditor({ open: true, mode: 'crop', imageUrl: selectedImageList[0] });
-      return;
-    }
+    const selectedImageUrl = selectedImageList[0];
+    const selectedOrder = libraryView === 'orders'
+      ? orderResults.find((item) => item.imageUrl === selectedImageUrl)
+      : null;
 
-    if (action === 'annotate') {
-      setImageEditor({ open: true, mode: 'annotate', imageUrl: selectedImageList[0] });
+    if (action === 'edit-image') {
+      setImageEditor({
+        open: true,
+        mode: 'crop',
+        imageUrl: selectedImageUrl,
+        destination: selectedOrder ? 'orders' : 'gallery',
+        orderNumber: selectedOrder?.orderNumber,
+        toolLabel: selectedOrder?.toolLabel,
+        sourceImageUrl: selectedOrder?.sourceImageUrl || null,
+      });
       return;
     }
 
     if (action === 'local-edit') {
-      setLocalEditImageUrl(selectedImageList[0]);
+      setLocalEditImageUrl(selectedImageUrl);
       setShowLocalEdit(true);
     }
-  }, [selectedImageList]);
+  }, [libraryView, orderResults, selectedImageList]);
 
   const closeImageEditor = useCallback(() => {
-    setImageEditor({ open: false, mode: 'crop', imageUrl: '' });
+    setImageEditor({ open: false, mode: 'crop', imageUrl: '', destination: 'gallery' });
   }, []);
 
   const closeLocalEdit = useCallback(() => {
@@ -1131,10 +1650,30 @@ export default function QuickCreatePage() {
     setLocalEditImageUrl('');
   }, []);
 
-  const handleEditorComplete = useCallback(async () => {
-    await loadCapturedImages();
+  const handleEditorComplete = useCallback((resultUrl: string) => {
+    void resultUrl;
+    if (imageEditor.destination === 'orders') {
+      void loadOrderResults();
+      showToast('裁切结果已加入订单记录', 'success');
+      return;
+    }
+
+    void loadCapturedImages();
     showToast('编辑后的素材已加入素材库', 'success');
-  }, [loadCapturedImages]);
+  }, [imageEditor.destination, loadCapturedImages, loadOrderResults]);
+
+  const handleLocalEditComplete = useCallback((resultUrl: string) => {
+    clearSelectionState();
+    void loadOrderResults();
+    handleEditorComplete(resultUrl);
+  }, [clearSelectionState, handleEditorComplete, loadOrderResults]);
+
+  const handleMasonryBlankClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (selectedImageList.length === 0) return;
+    const target = event.target as HTMLElement | null;
+    if (!target || target.closest('[data-selection-card="true"]')) return;
+    clearSelectionState();
+  }, [clearSelectionState, selectedImageList.length]);
 
   useEffect(() => {
     const handlePluginMessage = (event: MessageEvent) => {
@@ -1156,12 +1695,61 @@ export default function QuickCreatePage() {
   }, [handlePluginCapture, loadCapturedImages]);
 
   useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (target?.closest('[data-role="quick-create-dropdown"]')) return;
+      closeDropdowns();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeDropdowns();
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [closeDropdowns]);
+
+  useEffect(() => {
     window.postMessage({ source: 'zaomeng-web', type: 'ZAOMENG_EXTENSION_PING' }, window.location.origin);
     queueMicrotask(() => {
       void loadCapturedImages();
       void loadMaterialFolders();
+      if (user?.id) {
+        void loadOrderResults();
+      }
     });
-  }, [loadCapturedImages, loadMaterialFolders]);
+  }, [loadCapturedImages, loadMaterialFolders, loadOrderResults, user?.id]);
+
+  useEffect(() => {
+    const handleTaskUpdate = () => {
+      void loadOrderResults();
+    };
+
+    window.addEventListener('taskHistoryUpdated', handleTaskUpdate);
+    return () => window.removeEventListener('taskHistoryUpdated', handleTaskUpdate);
+  }, [loadOrderResults]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      return;
+    }
+
+    if (!hasProcessingOrders) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadOrderResults({ silent: true });
+    }, 4000);
+
+    return () => window.clearInterval(intervalId);
+  }, [hasProcessingOrders, loadOrderResults, user?.id]);
 
   useEffect(() => {
     const updateColumnCount = () => {
@@ -1241,15 +1829,19 @@ export default function QuickCreatePage() {
   return (
     <div className="flex-1 px-6 py-8 overflow-y-auto">
       {imageEditor.open && imageEditor.mode === 'crop' && (
-        <CropEditorPanel imageUrl={imageEditor.imageUrl} onClose={closeImageEditor} onComplete={handleEditorComplete} />
-      )}
-
-      {imageEditor.open && imageEditor.mode === 'annotate' && (
-        <AnnotateEditorPanel imageUrl={imageEditor.imageUrl} onClose={closeImageEditor} onComplete={handleEditorComplete} />
+        <CropEditorPanel
+          imageUrl={imageEditor.imageUrl}
+          destination={imageEditor.destination}
+          orderNumber={imageEditor.orderNumber}
+          toolLabel={imageEditor.toolLabel}
+          sourceImageUrl={imageEditor.sourceImageUrl}
+          onClose={closeImageEditor}
+          onComplete={handleEditorComplete}
+        />
       )}
 
       {showLocalEdit && localEditImageUrl && (
-        <LocalEditPanel imageUrl={localEditImageUrl} onClose={closeLocalEdit} onComplete={handleEditorComplete} />
+        <LocalEditPanel imageUrl={localEditImageUrl} onClose={closeLocalEdit} onComplete={handleLocalEditComplete} />
       )}
 
       {duplicateReview.open && (
@@ -1295,7 +1887,15 @@ export default function QuickCreatePage() {
                             className={`group relative overflow-hidden rounded-2xl border bg-black/25 text-left transition-all ${checked ? 'border-red-400/70 ring-2 ring-red-500/35' : 'border-white/10 hover:border-white/28'}`}
                           >
                             <div className="aspect-square w-full overflow-hidden bg-black/30">
-                              <img src={displayImageUrl} alt={`重复图片 ${imageIndex + 1}`} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
+                              <div className="relative h-full w-full">
+                                <SafeImage
+                                  src={displayImageUrl}
+                                  alt={`重复图片 ${imageIndex + 1}`}
+                                  fill
+                                  sizes="(max-width: 1024px) 50vw, 20vw"
+                                  className="object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                                />
+                              </div>
                             </div>
                             <div className="absolute left-2 top-2 rounded-full border border-white/15 bg-black/70 px-2 py-1 text-[11px] text-white/72 backdrop-blur">
                               {imageIndex === 0 ? '默认保留' : '重复项'}
@@ -1369,70 +1969,110 @@ export default function QuickCreatePage() {
         className={`relative max-w-[92vw] 2xl:max-w-[1780px] mx-auto transition-all ${isDragging ? 'scale-[0.995]' : ''}`}
       >
         <div className="mb-7 flex flex-wrap items-end justify-between gap-5">
-          <div>
-            <h2 className="text-4xl font-semibold tracking-[-0.04em] text-white">素材库</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-white/48">统一收集、筛选和整理图片素材，选图后直接进入编辑与加工流程。</p>
+          <div className="flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.045] p-1">
+            {([
+              ['gallery', '图库'],
+                ['orders', '项目'],
+            ] as Array<[LibraryView, string]>).map(([view, label]) => (
+              <button
+                key={view}
+                onClick={() => {
+                  if (view === libraryView) return;
+                  clearSelectionState();
+                  closeDropdowns();
+                  setLibraryView(view);
+                }}
+                className={`rounded-full px-4 py-2 text-sm font-medium transition-all ${libraryView === view ? 'bg-white/16 text-white shadow-[0_8px_22px_rgba(255,255,255,0.06)]' : 'text-white/48 hover:text-white/78'}`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
           <button
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => {
+              if (libraryView === 'gallery') {
+                fileInputRef.current?.click();
+                return;
+              }
+              void loadOrderResults();
+            }}
             className="group inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.07] px-4 py-2.5 text-sm font-medium text-white/78 shadow-[0_14px_34px_rgba(0,0,0,0.22)] transition-all hover:-translate-y-0.5 hover:border-purple-300/25 hover:bg-gradient-to-r hover:from-purple-600 hover:to-blue-600 hover:text-white"
-            title="上传本地素材"
+            title={libraryView === 'gallery' ? '上传本地素材' : '刷新订单记录'}
           >
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/12 text-lg leading-none transition-colors group-hover:bg-white/20">+</span>
-            上传素材
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/12 text-lg leading-none transition-colors group-hover:bg-white/20">{libraryView === 'gallery' ? '+' : '↻'}</span>
+            {libraryView === 'gallery' ? '上传素材' : '刷新订单'}
           </button>
         </div>
 
-        <div className="mb-5 overflow-hidden rounded-[1.8rem] border border-white/[0.08] bg-black/28 p-3 shadow-[0_18px_70px_rgba(0,0,0,0.2)] backdrop-blur-2xl ring-1 ring-white/[0.03]">
+        <div className="mb-5 rounded-[1.8rem] border border-white/[0.08] bg-black/28 p-3 shadow-[0_18px_70px_rgba(0,0,0,0.2)] backdrop-blur-2xl ring-1 ring-white/[0.03]">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-1">
-              {([
-                ['all', '全部', capturedImages.length],
-                ['favorite', '收藏', capturedImages.filter((image) => image.isFavorite).length],
-                ['uncategorized', '未分类', capturedImages.filter((image) => !image.folderId).length],
-              ] as Array<[MaterialScope, string, number]>).map(([scope, label, count]) => (
-                <button
-                  key={scope}
-                  onClick={() => setMaterialScope(scope)}
-                  className={`shrink-0 rounded-full border px-3.5 py-2 text-xs transition-all ${materialScope === scope ? 'border-white/18 bg-white/16 text-white shadow-[0_8px_22px_rgba(255,255,255,0.06)]' : 'border-white/[0.07] bg-white/[0.045] text-white/48 hover:bg-white/[0.08] hover:text-white/78'}`}
-                >
-                  {label} <span className="ml-1 text-white/32">{count}</span>
-                </button>
-              ))}
-              <div className="mx-1 h-5 w-px shrink-0 bg-white/10" />
-              {materialFolders.map((folder) => {
-                const scope = `folder:${folder.id}` as MaterialScope;
-                const count = capturedImages.filter((image) => image.folderId === folder.id).length;
-                return (
-                  <button
-                    key={folder.id}
-                    onClick={() => setMaterialScope(scope)}
-                    className={`shrink-0 rounded-full border px-3.5 py-2 text-xs transition-all ${materialScope === scope ? 'border-blue-300/28 bg-blue-400/18 text-blue-50 shadow-[0_10px_26px_rgba(59,130,246,0.12)]' : 'border-white/[0.07] bg-white/[0.045] text-white/48 hover:bg-white/[0.08] hover:text-white/78'}`}
-                  >
-                    {folder.name} <span className="ml-1 text-white/32">{count}</span>
-                  </button>
-                );
-              })}
+              {libraryView === 'gallery' ? (
+                <>
+                  {([
+                    ['all', '全部', capturedImages.length],
+                    ['favorite', '收藏', capturedImages.filter((image) => image.isFavorite).length],
+                    ['uncategorized', '未分类', capturedImages.filter((image) => !image.folderId).length],
+                  ] as Array<[MaterialScope, string, number]>).map(([scope, label, count]) => (
+                    <button
+                      key={scope}
+                      onClick={() => setMaterialScope(scope)}
+                      className={`shrink-0 rounded-full border px-3.5 py-2 text-xs transition-all ${materialScope === scope ? 'border-white/18 bg-white/16 text-white shadow-[0_8px_22px_rgba(255,255,255,0.06)]' : 'border-white/[0.07] bg-white/[0.045] text-white/48 hover:bg-white/[0.08] hover:text-white/78'}`}
+                    >
+                      {label} <span className="ml-1 text-white/32">{count}</span>
+                    </button>
+                  ))}
+                  <div className="mx-1 h-5 w-px shrink-0 bg-white/10" />
+                  {materialFolders.map((folder) => {
+                    const scope = `folder:${folder.id}` as MaterialScope;
+                    const count = capturedImages.filter((image) => image.folderId === folder.id).length;
+                    return (
+                      <button
+                        key={folder.id}
+                        onClick={() => setMaterialScope(scope)}
+                        className={`shrink-0 rounded-full border px-3.5 py-2 text-xs transition-all ${materialScope === scope ? 'border-blue-300/28 bg-blue-400/18 text-blue-50 shadow-[0_10px_26px_rgba(59,130,246,0.12)]' : 'border-white/[0.07] bg-white/[0.045] text-white/48 hover:bg-white/[0.08] hover:text-white/78'}`}
+                      >
+                        {folder.name} <span className="ml-1 text-white/32">{count}</span>
+                      </button>
+                    );
+                  })}
+                </>
+              ) : (
+                <QuickCreateDropdown
+                  dropdownId="tool-filter"
+                  label={undefined}
+                  value={toolFilter}
+                  options={toolFilterOptions}
+                  isOpen={openDropdownId === 'tool-filter'}
+                  onToggle={toggleDropdown}
+                  onSelect={(value) => {
+                    setToolFilter(value);
+                    closeDropdowns();
+                  }}
+                  menuWidthClassName="min-w-[180px]"
+                />
+              )}
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
-              {selectedCapturedImages.length > 0 && (
-                <select
+              {libraryView === 'gallery' && selectedCapturedImages.length > 0 && (
+                <QuickCreateDropdown
+                  dropdownId="move-materials"
                   value=""
-                  onChange={(event) => {
-                    void moveSelectedMaterials(event.target.value);
+                  placeholder="移动到..."
+                  options={moveMaterialOptions}
+                  isOpen={openDropdownId === 'move-materials'}
+                  onToggle={toggleDropdown}
+                  onSelect={(value) => {
+                    closeDropdowns();
+                    void moveSelectedMaterials(value);
                   }}
-                  className="h-8 rounded-full border border-white/[0.08] bg-white/[0.045] px-3 text-xs text-white/62 outline-none transition-colors hover:bg-white/[0.08] hover:text-white focus:border-blue-300/35"
-                  title="移动选中素材"
-                >
-                  <option value="" className="bg-[#111]">移动到...</option>
-                  <option value="__uncategorized__" className="bg-[#111]">未分类</option>
-                  {materialFolders.map((folder) => (
-                    <option key={folder.id} value={folder.id} className="bg-[#111]">{folder.name}</option>
-                  ))}
-                </select>
+                  buttonClassName="h-8 px-3 text-white/62 shadow-none hover:text-white"
+                  menuWidthClassName="min-w-[168px]"
+                  showSelectedCheck={false}
+                />
               )}
-              {showNewFolderInput && (
+              {libraryView === 'gallery' && showNewFolderInput && (
                 <div className="flex items-center gap-1 rounded-full border border-white/[0.07] bg-white/[0.045] p-1">
                   <input
                     value={newFolderName}
@@ -1456,22 +2096,24 @@ export default function QuickCreatePage() {
                   </button>
                 </div>
               )}
-              <button
-                onClick={() => {
-                  setShowNewFolderInput((current) => !current);
-                  if (showNewFolderInput) setNewFolderName('');
-                }}
-                className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.05] text-white/58 transition-colors hover:bg-white/[0.1] hover:text-white"
-                title="新建文件夹"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 5v14m7-7H5" />
-                </svg>
-              </button>
+              {libraryView === 'gallery' && (
+                <button
+                  onClick={() => {
+                    setShowNewFolderInput((current) => !current);
+                    if (showNewFolderInput) setNewFolderName('');
+                  }}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.05] text-white/58 transition-colors hover:bg-white/[0.1] hover:text-white"
+                  title="新建文件夹"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 5v14m7-7H5" />
+                  </svg>
+                </button>
+              )}
             </div>
           </div>
 
-          {activeFolder && (
+          {libraryView === 'gallery' && activeFolder && (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.035] px-3 py-2.5">
               <div className="min-w-0">
                 <p className="truncate text-xs font-medium text-blue-100">当前：{activeFolder.name}</p>
@@ -1517,7 +2159,7 @@ export default function QuickCreatePage() {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2 text-sm text-white/42">
             <span className="h-1.5 w-1.5 rounded-full bg-purple-300/70" />
-            当前显示 {filteredCapturedImages.length} 张
+            当前显示 {libraryView === 'gallery' ? `${filteredCapturedImages.length} 张` : `${filteredOrderResults.length} 条`}
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1535,7 +2177,7 @@ export default function QuickCreatePage() {
               <span className="text-white/72">大</span>
             </label>
 
-            {duplicateImageCount > 0 && (
+            {libraryView === 'gallery' && duplicateImageCount > 0 && (
               <button
                 onClick={openDuplicateReview}
                 disabled={processingAction !== null}
@@ -1551,30 +2193,24 @@ export default function QuickCreatePage() {
                 disabled={processingAction !== null}
                 className="rounded-full border border-red-300/10 bg-red-500/10 px-3 py-2 text-xs text-red-100/72 transition-colors hover:bg-red-500/22 hover:text-red-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                删除所选
+                {libraryView === 'gallery' ? '删除所选' : '清空选择'}
               </button>
             )}
 
-            <label className="flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.045] px-3 py-2 text-xs text-white/52">
-              <span>日期</span>
-              <select
+              <QuickCreateDropdown
+                dropdownId="material-filter"
+                label="日期"
                 value={materialFilter}
-                onChange={(event) => setMaterialFilter(event.target.value as MaterialFilter)}
-                className="bg-transparent text-xs text-white outline-none"
-              >
-                <option value="all" className="bg-[#111]">全部日期</option>
-                <option value="today" className="bg-[#111]">今天</option>
-                <option value="yesterday" className="bg-[#111]">昨天</option>
-                <option value="earlier" className="bg-[#111]">更早</option>
-              </select>
-            </label>
+                options={MATERIAL_FILTER_OPTIONS}
+                isOpen={openDropdownId === 'material-filter'}
+                onToggle={toggleDropdown}
+                onSelect={(value) => {
+                  setMaterialFilter(value as MaterialFilter);
+                  closeDropdowns();
+                }}
+              />
+            </div>
           </div>
-        </div>
-
-        <div className="mb-5 flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-xs text-white/48 w-fit">
-          <span className="h-1.5 w-1.5 rounded-full bg-white/40" />
-          点击卡片可加入批量操作，点右下角可预览大图
-        </div>
 
         <input
           ref={fileInputRef}
@@ -1600,7 +2236,7 @@ export default function QuickCreatePage() {
           </div>
         )}
 
-        {filteredCapturedImages.length === 0 ? (
+        {(libraryView === 'gallery' ? filteredCapturedImages.length === 0 : filteredOrderResults.length === 0) ? (
           <div className="rounded-[2rem] border border-white/[0.08] bg-white/[0.025] p-14 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
             <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.045] text-white/36">
               <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1608,26 +2244,32 @@ export default function QuickCreatePage() {
               </svg>
             </div>
             <p className="text-base font-medium text-white/70">
-              {capturedImages.length === 0 ? '素材库还是空的' : '当前视图没有素材'}
+              {libraryView === 'gallery'
+                ? (capturedImages.length === 0 ? '素材库还是空的' : '当前视图没有素材')
+                : '当前筛选下没有订单记录'}
             </p>
             <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-white/40">
-              {capturedImages.length === 0
-                ? '可以通过浏览器插件采集图片，也可以上传本地图片开始整理。'
-                : '试试切换文件夹、收藏或日期筛选，或者清空当前筛选条件。'}
+              {libraryView === 'gallery'
+                ? (capturedImages.length === 0
+                  ? '可以通过浏览器插件采集图片，也可以上传本地图片开始整理。'
+                  : '试试切换文件夹、收藏或日期筛选，或者清空当前筛选条件。')
+                : '可以切换筛选条件，或点击右上角刷新订单记录。'}
             </p>
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="mt-6 rounded-full bg-white/10 px-4 py-2 text-sm text-white/72 transition-colors hover:bg-white/16 hover:text-white"
-            >
-              上传素材
-            </button>
+            {libraryView === 'gallery' && (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="mt-6 rounded-full bg-white/10 px-4 py-2 text-sm text-white/72 transition-colors hover:bg-white/16 hover:text-white"
+              >
+                上传素材
+              </button>
+            )}
           </div>
         ) : (
           <div className="mb-8 space-y-10">
-            {groupedMaterials.map((group) => {
+            {(libraryView === 'gallery' ? groupedMaterials : groupedOrderResults).map((group) => {
               const groupColumns = (() => {
                 const columns = Array.from({ length: columnCount }, () => ({
-                  items: [] as CapturedImageRecord[],
+                  items: [] as Array<CapturedImageRecord | OrderResultCard>,
                   heightScore: 0,
                 }));
 
@@ -1653,11 +2295,11 @@ export default function QuickCreatePage() {
                   <div className="flex items-center gap-3 mb-5">
                     <h3 className="text-xl font-semibold text-white">{group.label}</h3>
                     <span className="text-xs text-white/45 rounded-full border border-white/10 px-2.5 py-1 bg-white/[0.04]">
-                      {group.items.length} 张素材
+                      {group.items.length} {libraryView === 'gallery' ? '张素材' : '条记录'}
                     </span>
                   </div>
 
-                  <div className="flex items-start justify-center" style={{ gap: `${thumbnailGap}px` }}>
+                  <div className="flex items-start justify-center" onClick={handleMasonryBlankClick} style={{ gap: `${thumbnailGap}px` }}>
                     {groupColumns.map((column, columnIndex) => (
                       <div
                         key={`${group.key}-${columnIndex}`}
@@ -1669,6 +2311,15 @@ export default function QuickCreatePage() {
                           const selected = selectedImages.has(image.imageUrl);
                           const imageFailed = failedImageUrls.has(image.imageUrl);
                           const cardIndex = columnIndex * 100 + index;
+                          const isOrderCard = 'orderNumber' in image;
+                          const isSelectable = !isOrderCard || image.isResultImage;
+                          const canDeleteOrder = isOrderCard && image.statusLabel !== '处理中';
+                          const orderStatusClass = isOrderCard ? getOrderStatusClass(image.statusLabel) : '';
+                          const isCompactCard = thumbnailSize <= 190;
+                          const actionControlsVisibilityClass = canHoverCardControls ? 'opacity-0 transition-all group-hover:opacity-100' : 'opacity-100 transition-all';
+                          const idleCardClass = isSelectable
+                            ? 'border-white/10 hover:border-white/30 hover:-translate-y-1 hover:shadow-[0_20px_45px_rgba(15,23,42,0.35)]'
+                            : 'border-white/10';
                           const accentClass = cardIndex % 7 === 0
                             ? 'before:absolute before:inset-0 before:border before:border-purple-400/20 before:rounded-[1.2rem] before:pointer-events-none'
                             : '';
@@ -1676,11 +2327,15 @@ export default function QuickCreatePage() {
                           return (
                             <div
                               key={image.id}
+                              data-selection-card="true"
                               ref={(node) => {
                                 imageButtonRefs.current[image.imageUrl] = node;
                               }}
-                              onClick={() => toggleImageSelection(image.imageUrl)}
-                              className={`group relative w-full cursor-pointer overflow-hidden rounded-[1.35rem] border transition-all ${accentClass} ${selected ? 'border-purple-500 ring-2 ring-purple-500/50 shadow-[0_0_0_1px_rgba(168,85,247,0.25),0_24px_50px_rgba(76,29,149,0.28)] -translate-y-1' : 'border-white/10 hover:border-white/30 hover:-translate-y-1 hover:shadow-[0_20px_45px_rgba(15,23,42,0.35)]'}`}
+                              onClick={() => {
+                                if (!isSelectable) return;
+                                toggleImageSelection(image.imageUrl);
+                              }}
+                              className={`group relative w-full overflow-hidden rounded-[1.35rem] border transition-all ${accentClass} ${isSelectable ? 'cursor-pointer' : 'cursor-default'} ${selected ? 'border-purple-500 ring-2 ring-purple-500/50 shadow-[0_0_0_1px_rgba(168,85,247,0.25),0_24px_50px_rgba(76,29,149,0.28)] -translate-y-1' : idleCardClass}`}
                             >
                               <div className="w-full bg-black/20">
                                 {imageFailed ? (
@@ -1691,97 +2346,152 @@ export default function QuickCreatePage() {
                                     <span className="text-xs">图片不可用</span>
                                   </div>
                                 ) : (
-                                  <img
-                                    src={displayImageUrl}
-                                    alt={`素材图片 ${cardIndex + 1}`}
-                                    className="h-auto w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
-                                    onLoad={(event) => {
-                                      const ratio = event.currentTarget.naturalHeight / Math.max(event.currentTarget.naturalWidth, 1);
-                                      setImageAspectRatios((prev) => {
-                                        if (prev[image.imageUrl] === ratio) return prev;
-                                        return { ...prev, [image.imageUrl]: ratio };
-                                      });
-                                    }}
-                                    onError={() => {
-                                      setFailedImageUrls((prev) => new Set(prev).add(image.imageUrl));
-                                    }}
-                                  />
+                                  <div
+                                    className="relative w-full overflow-hidden"
+                                    style={{ aspectRatio: `${1 / (imageAspectRatios[image.imageUrl] ?? 1)}` }}
+                                  >
+                                    <SafeImage
+                                      src={displayImageUrl}
+                                      alt={`素材图片 ${cardIndex + 1}`}
+                                      fill
+                                      sizes={`(max-width: 768px) 50vw, ${thumbnailSize}px`}
+                                      className="object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+                                      onLoad={(event) => {
+                                        recordImageMetrics(image.imageUrl, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight);
+                                      }}
+                                      onError={() => {
+                                        setFailedImageUrls((prev) => new Set(prev).add(image.imageUrl));
+                                      }}
+                                    />
+                                  </div>
                                 )}
                               </div>
                               <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/62 via-black/10 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
                               <div className="absolute inset-x-0 bottom-0 h-24 pointer-events-none bg-gradient-to-t from-black/68 to-transparent opacity-75" />
-                              {selected && (
-                                <div className="absolute top-3 left-3 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-purple-500 text-white shadow-lg ring-4 ring-purple-500/18">
+                              {isOrderCard && (
+                                <div className="absolute left-3 top-3 z-10 flex max-w-[calc(100%-4.25rem)] flex-wrap items-center gap-2">
+                                  <span className="rounded-full border border-white/16 bg-black/58 px-2.5 py-1 text-[11px] font-medium text-white/86 backdrop-blur-md">
+                                    {image.toolLabel}
+                                  </span>
+                                  <span className={`rounded-full border px-2.5 py-1 text-[11px] font-medium backdrop-blur-md ${orderStatusClass}`}>
+                                    {image.statusLabel}
+                                  </span>
+                                </div>
+                              )}
+                              {selected && isSelectable && (
+                                <div className={`absolute z-10 flex h-7 w-7 items-center justify-center rounded-full bg-purple-500 text-white shadow-lg ring-4 ring-purple-500/18 ${isOrderCard ? 'left-3 top-12' : 'left-3 top-3'}`}>
                                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                   </svg>
                                 </div>
                               )}
-                              <div className="absolute right-3 top-3 z-20 flex flex-col gap-2 opacity-0 transition-all group-hover:opacity-100">
-                                <button
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    void removeUploadedImage(image);
-                                  }}
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-red-300/20 bg-red-500/18 text-red-50/80 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-red-500/40 hover:text-white"
-                                  title="移除图片"
-                                >
-                                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                  </svg>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    void toggleMaterialFavorite(image);
-                                  }}
-                                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full border shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 ${image.isFavorite ? 'border-amber-200/60 bg-amber-400 text-black opacity-100' : 'border-white/15 bg-black/55 text-white/75 hover:bg-white/18 hover:text-white'}`}
-                                  title={image.isFavorite ? '取消收藏' : '加入收藏'}
-                                >
-                                  <svg className="h-4 w-4" fill={image.isFavorite ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.48 3.499a.6.6 0 011.04 0l2.2 4.459a.6.6 0 00.452.328l4.92.715a.6.6 0 01.333 1.024l-3.56 3.47a.6.6 0 00-.173.531l.84 4.9a.6.6 0 01-.87.632l-4.4-2.313a.6.6 0 00-.558 0l-4.4 2.313a.6.6 0 01-.87-.632l.84-4.9a.6.6 0 00-.173-.53l-3.56-3.471A.6.6 0 013.9 9.001l4.92-.715a.6.6 0 00.452-.328l2.208-4.459z" />
-                                  </svg>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    void downloadMaterialImage(image);
-                                  }}
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/75 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-white/18 hover:text-white"
-                                  title="下载图片"
-                                >
-                                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
-                                  </svg>
-                                </button>
+                              <div className={`absolute z-20 flex gap-2 ${isCompactCard ? 'right-3 bottom-3 flex-row flex-wrap justify-end max-w-[calc(100%-1.5rem)]' : 'right-3 top-3 flex-col'} ${actionControlsVisibilityClass}`}>
+                                {isOrderCard && (
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void deleteOrderRecord(image);
+                                    }}
+                                    disabled={!canDeleteOrder || deletingOrderNumber === image.orderNumber}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-red-300/20 bg-red-500/18 text-red-50/80 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-red-500/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                                    title={canDeleteOrder ? '删除订单记录' : '处理中订单不能删除'}
+                                  >
+                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                  </button>
+                                )}
+                                {!isOrderCard && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        void removeUploadedImage(image);
+                                      }}
+                                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-red-300/20 bg-red-500/18 text-red-50/80 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-red-500/40 hover:text-white"
+                                      title="移除图片"
+                                    >
+                                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                      </svg>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        void toggleMaterialFavorite(image);
+                                      }}
+                                      className={`inline-flex h-8 w-8 items-center justify-center rounded-full border shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 ${image.isFavorite ? 'border-amber-200/60 bg-amber-400 text-black opacity-100' : 'border-white/15 bg-black/55 text-white/75 hover:bg-white/18 hover:text-white'}`}
+                                      title={image.isFavorite ? '取消收藏' : '加入收藏'}
+                                    >
+                                      <svg className="h-4 w-4" fill={image.isFavorite ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.48 3.499a.6.6 0 011.04 0l2.2 4.459a.6.6 0 00.452.328l4.92.715a.6.6 0 01.333 1.024l-3.56 3.47a.6.6 0 00-.173.531l.84 4.9a.6.6 0 01-.87.632l-4.4-2.313a.6.6 0 00-.558 0l-4.4 2.313a.6.6 0 01-.87-.632l.84-4.9a.6.6 0 00-.173-.53l-3.56-3.471A.6.6 0 013.9 9.001l4.92-.715a.6.6 0 00.452-.328l2.208-4.459z" />
+                                      </svg>
+                                    </button>
+                                  </>
+                                )}
+                                {(!isOrderCard || image.isResultImage) && (
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      if (isOrderCard) {
+                                        void downloadOrderImage(image);
+                                        return;
+                                      }
+                                      void downloadMaterialImage(image);
+                                    }}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/75 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-white/18 hover:text-white"
+                                    title="下载图片"
+                                  >
+                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
+                                    </svg>
+                                  </button>
+                                )}
                               </div>
+                              {(!isOrderCard || image.isResultImage) && (
                                 <button
                                   type="button"
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     previewMaterialImage(image.imageUrl);
                                   }}
-                                className="absolute right-3 bottom-3 z-20 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-black/58 text-white/78 opacity-0 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-white/18 hover:text-white group-hover:opacity-100"
+                                className={`absolute z-20 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-black/58 text-white/78 shadow-lg backdrop-blur-md hover:-translate-y-0.5 hover:bg-white/18 hover:text-white ${isCompactCard ? 'right-3 top-3' : 'right-3 bottom-3'} ${actionControlsVisibilityClass}`}
                                 title="预览大图"
-                              >
-                                <svg className="h-4.5 w-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 3H3v5m18 0V3h-5M3 16v5h5m8 0h5v-5" />
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9l-6-6m12 6l6-6M9 15l-6 6m12-6l6 6" />
-                                </svg>
-                              </button>
+                                >
+                                  <svg className="h-4.5 w-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 3H3v5m18 0V3h-5M3 16v5h5m8 0h5v-5" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9l-6-6m12 6l6-6M9 15l-6 6m12-6l6 6" />
+                                  </svg>
+                                </button>
+                              )}
                               <div className="absolute left-3 bottom-3 text-left opacity-0 group-hover:opacity-100 transition-opacity">
-                                <p className="text-[11px] tracking-[0.18em] uppercase text-white/55">Material</p>
-                                <p className="text-sm text-white/85 mt-1">素材 {cardIndex + 1}</p>
+                                <p className="text-[11px] tracking-[0.18em] uppercase text-white/55">{isOrderCard ? 'Order' : 'Material'}</p>
+                                <p className="text-sm text-white/85 mt-1">{isOrderCard ? image.description : `素材 ${cardIndex + 1}`}</p>
                                 <p className="text-[11px] text-white/50 mt-1">
                                   {formatMaterialDateLabel(image.createdAt)}
                                   <span className="mx-1 text-white/35">·</span>
                                   {formatMaterialTime(image.createdAt)}
-                                  {(image.imageType || 'main') ? ` · ${(image.imageType || 'main') === 'detail' ? '明细图' : '主图'}` : ''}
-                                  {image.sourceHost ? ` · ${image.sourceHost}` : ''}
+                                  {isOrderCard
+                                    ? ` · ${image.orderNumber}${image.sourceImageUrl ? ' · 有参考图' : ''}`
+                                    : `${(image.imageType || 'main') ? ` · ${(image.imageType || 'main') === 'detail' ? '明细图' : '主图'}` : ''}${image.sourceHost ? ` · ${image.sourceHost}` : ''}`}
                                 </p>
+                                {isOrderCard && (
+                                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-white/42">
+                                    <span>{image.toolLabel}</span>
+                                    <span className="text-white/25">/</span>
+                                    <span>{image.statusLabel}</span>
+                                    {!image.isResultImage && image.sourceImageUrl && (
+                                      <>
+                                        <span className="text-white/25">/</span>
+                                        <span>等待结果图</span>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             </div>
                           );
@@ -1818,7 +2528,7 @@ export default function QuickCreatePage() {
 
               <div className="mt-4 grid gap-3 md:grid-cols-[auto_minmax(0,1fr)] md:items-center">
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-white/32">编辑</span>
+                  <span className="text-[11px] text-white/32">单选编辑</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                 {editorActions.map((action) => {
@@ -1842,8 +2552,17 @@ export default function QuickCreatePage() {
                   <div className="flex flex-wrap items-start gap-3 mb-4">
                     <div className="flex flex-wrap gap-2 flex-1 min-w-0">
                               {selectedImageList.slice(0, 6).map((imageUrl, index) => (
-                                <div key={`${imageUrl}-${index}`} className="w-14 h-14 rounded-xl overflow-hidden border border-white/10 bg-black/20">
-                                  <img src={getDisplayImageUrl(imageUrl)} alt={`已选素材 ${index + 1}`} className="w-full h-full object-cover" />
+                                <div key={`${imageUrl}-${index}`} className="relative h-14 w-14 overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                                  <SafeImage
+                                    src={getDisplayImageUrl(imageUrl)}
+                                    alt={`已选素材 ${index + 1}`}
+                                    fill
+                                    sizes="56px"
+                                    className="object-cover"
+                                    onLoad={(event) => {
+                                      recordImageMetrics(imageUrl, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight);
+                                    }}
+                                  />
                                 </div>
                               ))}
                       {selectedImageList.length > 6 && (
@@ -1872,33 +2591,41 @@ export default function QuickCreatePage() {
 
                     <div className="absolute left-3 right-3 bottom-3 flex items-center justify-between gap-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        <select
+                        <QuickCreateDropdown
+                          dropdownId="ai-aspect-ratio"
+                          label="比例"
                           value={aiAspectRatio}
-                          onChange={(event) => setAiAspectRatio(event.target.value)}
-                          className="rounded-xl border border-white/10 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-fuchsia-400/40"
-                        >
-                          <option value="auto" className="bg-[#111]">自动</option>
-                          <option value="1:1" className="bg-[#111]">1:1</option>
-                          <option value="2:3" className="bg-[#111]">2:3</option>
-                          <option value="3:2" className="bg-[#111]">3:2</option>
-                          <option value="3:4" className="bg-[#111]">3:4</option>
-                          <option value="4:3" className="bg-[#111]">4:3</option>
-                          <option value="4:5" className="bg-[#111]">4:5</option>
-                          <option value="5:4" className="bg-[#111]">5:4</option>
-                          <option value="9:16" className="bg-[#111]">9:16</option>
-                          <option value="16:9" className="bg-[#111]">16:9</option>
-                          <option value="21:9" className="bg-[#111]">21:9</option>
-                        </select>
+                          options={AI_ASPECT_RATIO_OPTIONS}
+                          isOpen={openDropdownId === 'ai-aspect-ratio'}
+                          onToggle={toggleDropdown}
+                          onSelect={(value) => {
+                            if (isSmartEditAspectRatioOption(value)) {
+                              setAiAspectRatio(value);
+                            }
+                            closeDropdowns();
+                          }}
+                          direction="up"
+                          buttonClassName="rounded-xl bg-black/35 px-3 py-2 text-sm shadow-none"
+                          menuWidthClassName="min-w-[148px]"
+                        />
 
-                        <select
+                        <QuickCreateDropdown
+                          dropdownId="ai-resolution"
+                          label="清晰度"
                           value={aiResolution}
-                          onChange={(event) => setAiResolution(event.target.value)}
-                          className="rounded-xl border border-white/10 bg-black/35 px-3 py-2 text-sm text-white outline-none focus:border-fuchsia-400/40"
-                        >
-                          <option value="1k" className="bg-[#111]">1k</option>
-                          <option value="2k" className="bg-[#111]">2k</option>
-                          <option value="4k" className="bg-[#111]">4k</option>
-                        </select>
+                          options={AI_RESOLUTION_OPTIONS}
+                          isOpen={openDropdownId === 'ai-resolution'}
+                          onToggle={toggleDropdown}
+                          onSelect={(value) => {
+                            if (isSmartEditResolution(value)) {
+                              setAiResolution(value);
+                            }
+                            closeDropdowns();
+                          }}
+                          direction="up"
+                          buttonClassName="rounded-xl bg-black/35 px-3 py-2 text-sm shadow-none"
+                          menuWidthClassName="min-w-[128px]"
+                        />
                       </div>
 
                       <button
@@ -1915,25 +2642,26 @@ export default function QuickCreatePage() {
 
               <div className="mt-5 grid gap-3 border-t border-white/[0.06] pt-4 md:grid-cols-[auto_minmax(0,1fr)] md:items-center">
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-white/32">加工</span>
+                  <span className="text-[11px] text-white/32">多选编辑</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                {galleryActions.map((action) => (
-                  <button
-                    key={action.id}
-                    onClick={() => {
-                      if (action.id === 'auto-remove-bg') {
-                        setShowAiPromptPanel((current) => !current);
-                        return;
-                      }
-                      void handleRunAction(action.id);
-                    }}
-                    disabled={processingAction !== null}
-                    className={`min-w-[88px] px-3.5 py-2 rounded-full text-sm font-medium transition-all bg-white/9 text-white/82 hover:-translate-y-0.5 hover:bg-gradient-to-r hover:from-purple-600 hover:to-blue-600 hover:text-white hover:shadow-[0_10px_24px_rgba(109,40,217,0.28)] disabled:cursor-not-allowed ${processingAction !== null && processingAction !== action.id ? 'opacity-35' : 'disabled:opacity-50'} ${showAiPromptPanel && action.id === 'auto-remove-bg' ? 'ring-2 ring-fuchsia-400/60 bg-fuchsia-500/16 text-white' : ''}`}
-                  >
-                    {processingAction === action.id ? '提交中...' : action.label}
-                  </button>
-                ))}
+                  {galleryActions.map((action) => (
+                    <button
+                      key={action.id}
+                      onClick={() => {
+                        if (action.id === 'ai-generate') {
+                          closeDropdowns();
+                          setShowAiPromptPanel((current) => !current);
+                          return;
+                        }
+                        void handleRunAction(action.id);
+                      }}
+                      disabled={processingAction !== null}
+                      className={`min-w-[88px] px-3.5 py-2 rounded-full text-sm font-medium transition-all bg-white/9 text-white/82 hover:-translate-y-0.5 hover:bg-gradient-to-r hover:from-purple-600 hover:to-blue-600 hover:text-white hover:shadow-[0_10px_24px_rgba(109,40,217,0.28)] disabled:cursor-not-allowed ${processingAction !== null && processingAction !== action.id ? 'opacity-35' : 'disabled:opacity-50'} ${showAiPromptPanel && action.id === 'ai-generate' ? 'ring-2 ring-fuchsia-400/60 bg-fuchsia-500/16 text-white' : ''}`}
+                    >
+                      {processingAction === action.id ? '提交中...' : action.label}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
@@ -1957,12 +2685,15 @@ export default function QuickCreatePage() {
           >
             ×
           </button>
-          <img
-            src={previewImageUrl}
-            alt="素材大图预览"
-            className="max-h-[90vh] max-w-[92vw] rounded-2xl object-contain shadow-[0_28px_90px_rgba(0,0,0,0.5)]"
-            onClick={(event) => event.stopPropagation()}
-          />
+          <div className="relative flex h-[90vh] w-[92vw] max-w-[92vw] items-center justify-center" onClick={() => setPreviewImageUrl(null)}>
+            <SafeImage
+              src={previewImageUrl}
+              alt="素材大图预览"
+              fill
+              sizes="92vw"
+              className="pointer-events-none rounded-2xl object-contain shadow-[0_28px_90px_rgba(0,0,0,0.5)]"
+            />
+          </div>
         </div>,
         document.body
       )}

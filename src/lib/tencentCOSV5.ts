@@ -6,6 +6,10 @@
 import COS from 'cos-nodejs-sdk-v5';
 import { getTencentCOSUrl } from './tencentCOS';
 
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : '腾讯云COS V5操作失败';
+}
+
 // 初始化COS客户端
 const cos = new COS({
   SecretId: process.env.COS_ACCESS_KEY || '',
@@ -28,7 +32,7 @@ console.log('[腾讯云COS V5] 初始化配置:', {
 /**
  * 上传Buffer到腾讯云COS
  * @param buffer - 文件内容Buffer
- * @param fileName - 文件名（包含路径，如 'sjkch_png/image.png'）
+ * @param fileName - 文件名（包含路径，如 'remove-bg/results/image.png'）
  * @param contentType - 内容类型（如 'image/png'）
  * @returns 文件key
  */
@@ -98,9 +102,9 @@ export async function uploadFromUrlToTencentCOSV5(
     const key = await uploadToTencentCOSV5(buffer, fileName, finalContentType);
 
     return key;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[腾讯云COS V5] 从URL上传失败:', error);
-    throw new Error(`从URL上传到腾讯云COS失败: ${error.message}`);
+    throw new Error(`从URL上传到腾讯云COS失败: ${getErrorMessage(error)}`);
   }
 }
 
@@ -118,7 +122,7 @@ export function getTencentCOSV5Url(key: string): string {
 
 /**
  * 上传PSD文件到腾讯云COS（带签名URL）
- * @param key - 文件key（包含路径，如 'andy-1390504588/cjkch_PSD/psd_123.psd'）
+ * @param key - 文件key（包含路径，如 'andy-1521-1390504588/color-extraction/psd/psd_123.psd'）
  * @param buffer - PSD文件Buffer
  * @returns 签名URL（有效期1年）
  */
@@ -132,7 +136,7 @@ export async function uploadPsdToTencentCOS(key: string, buffer: Buffer): Promis
       Key: key,
       Body: buffer,
       ContentType: 'application/octet-stream',
-    }, async (err, data) => {
+    }, async (err) => {
       if (err) {
         console.error('[腾讯云COS V5] 上传PSD失败:', err);
         reject(new Error(`上传PSD到腾讯云COS失败: ${err.message}`));
@@ -146,9 +150,9 @@ export async function uploadPsdToTencentCOS(key: string, buffer: Buffer): Promis
           const signedUrl = await getTencentCOSUrl(key, 365 * 24 * 60 * 60); // 1年有效期
           console.log('[腾讯云COS V5] 签名URL生成成功:', signedUrl.substring(0, 80) + '...');
           resolve(signedUrl);
-        } catch (signErr: any) {
+        } catch (signErr: unknown) {
           console.error('[腾讯云COS V5] 生成签名URL失败:', signErr);
-          reject(new Error(`生成签名URL失败: ${signErr.message}`));
+          reject(new Error(`生成签名URL失败: ${getErrorMessage(signErr)}`));
         }
       }
     });

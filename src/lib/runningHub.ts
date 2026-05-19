@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const BASE_URL = 'https://www.runninghub.cn';
-const API_KEY = process.env.RUNNINGHUB_API_KEY || 'f95a3b89ec9d4f06a0498d27aefac4d2';
+const API_KEY = process.env.RUNNINGHUB_API_KEY || '';
 const WEBAPP_ID = '2002961339758833665'; // 彩绘提取1
 const UPSAMPLING_APP_ID = '1990958565772963841'; // 高清放大
 
@@ -53,6 +53,26 @@ export interface TaskOutputsResponse {
   msg: string;
 }
 
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : 'RunningHub请求失败';
+}
+
+function getAxiosErrorDetails(error: unknown) {
+  if (axios.isAxiosError(error)) {
+    return {
+      message: error.message,
+      code: error.code,
+      response: error.response?.data,
+    };
+  }
+
+  return {
+    message: getErrorMessage(error),
+    code: undefined,
+    response: undefined,
+  };
+}
+
 /**
  * 查询账号当前状态
  */
@@ -86,12 +106,8 @@ export async function getAccountStatus(): Promise<number> {
     } else {
       throw new Error(`查询账号状态失败: ${response.data.msg}`);
     }
-  } catch (error: any) {
-    console.error('[RunningHub] 查询账号状态异常:', {
-      message: error.message,
-      code: error.code,
-      response: error.response?.data,
-    });
+  } catch (error: unknown) {
+    console.error('[RunningHub] 查询账号状态异常:', getAxiosErrorDetails(error));
     throw error;
   }
 }
@@ -279,7 +295,7 @@ export interface UpsamplingTaskResponse {
   status: string;
   errorCode: string;
   errorMessage: string;
-  results: any[];
+  results: UpsamplingOutput[];
   clientId: string;
   promptTips: string;
 }
@@ -339,11 +355,8 @@ export async function createUpsamplingTask(imageFileName: string): Promise<strin
     const taskId = response.data.taskId;
     console.log(`[RunningHub] 高清放大任务创建成功: ${taskId}`);
     return taskId;
-  } catch (error: any) {
-    console.error('[RunningHub] 创建高清放大任务异常:', {
-      message: error.message,
-      response: error.response?.data,
-    });
+  } catch (error: unknown) {
+    console.error('[RunningHub] 创建高清放大任务异常:', getAxiosErrorDetails(error));
     throw error;
   }
 }
@@ -395,7 +408,7 @@ export async function getUpsamplingTaskStatus(taskId: string): Promise<{
       status: data.status,
       results: data.results,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[RunningHub] 查询高清放大任务状态异常:', error);
     throw error;
   }
@@ -436,9 +449,9 @@ export async function waitForUpsamplingTaskComplete(
 
       // 等待后重试
       await new Promise(resolve => setTimeout(resolve, checkInterval));
-    } catch (error: any) {
+    } catch (error: unknown) {
       // 如果是已知错误，抛出
-      if (error.message && (error.message.includes('失败') || error.message.includes('完成'))) {
+      if (error instanceof Error && (error.message.includes('失败') || error.message.includes('完成'))) {
         throw error;
       }
       console.error(`[RunningHub] 检查高清放大任务状态失败，重试中... taskId: ${taskId}`, error);
@@ -448,4 +461,3 @@ export async function waitForUpsamplingTaskComplete(
 
   throw new Error(`等待高清放大任务完成超时，已等待${maxWaitTime}分钟`);
 }
-

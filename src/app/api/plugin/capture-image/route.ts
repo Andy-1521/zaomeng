@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { mkdir, writeFile } from 'fs/promises';
-import path from 'path';
+import net from 'net';
+import { lookup } from 'dns/promises';
 import { capturedImageManager, userManager } from '@/storage/database';
 import { uploadToCozeStorage } from '@/lib/dualStorage';
-import { normalizeFileExtension } from '@/lib/localUploadStorage';
+import { normalizeFileExtension, saveBufferToLocalMaterialFile } from '@/lib/localUploadStorage';
+import { buildBrowserImageHeaders } from '@/lib/browserFetch';
+
+const IMAGE_DOWNLOAD_TIMEOUT_MS = 30000;
+const MAX_PLUGIN_CAPTURE_BYTES = 30 * 1024 * 1024;
+const MAX_PLUGIN_REDIRECTS = 3;
 
 type CaptureImageRequest = {
   imageUrl?: string;
@@ -13,6 +18,11 @@ type CaptureImageRequest = {
   capturedAt?: number;
   imageType?: 'main' | 'detail';
   captureMethod?: string;
+};
+
+type ResolvedAddress = {
+  address: string;
+  family: number;
 };
 
 function getErrorMessage(error: unknown) {
@@ -45,6 +55,69 @@ function getImageExtension(imageUrl: string) {
   }
 }
 
+function isAllowedImageType(value: unknown): value is NonNullable<CaptureImageRequest['imageType']> {
+  return value === 'main' || value === 'detail';
+}
+
+function stripIpv6Brackets(hostname: string) {
+  return hostname.replace(/^\[/, '').replace(/\]$/, '');
+}
+
+function isPrivateIpAddress(address: string) {
+  const normalizedAddress = stripIpv6Brackets(address.toLowerCase());
+  const ipVersion = net.isIP(normalizedAddress);
+
+  if (ipVersion === 4) {
+    const parts = normalizedAddress.split('.').map((part) => Number.parseInt(part, 10));
+    const [a, b] = parts;
+    return a === 0
+      || a === 10
+      || a === 127
+      || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 168)
+      || a >= 224;
+  }
+
+  if (ipVersion === 6) {
+    return normalizedAddress === '::1'
+      || normalizedAddress === '::'
+      || normalizedAddress.startsWith('fc')
+      || normalizedAddress.startsWith('fd')
+      || normalizedAddress.startsWith('fe80:')
+      || normalizedAddress.startsWith('ff');
+  }
+
+  return false;
+}
+
+async function assertSafeRemoteUrl(imageUrl: string) {
+  const url = new URL(imageUrl);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('只支持 http/https 图片地址');
+  }
+
+  const hostname = stripIpv6Brackets(url.hostname.toLowerCase());
+  if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+    throw new Error('不支持采集本机地址图片');
+  }
+
+  if (isPrivateIpAddress(hostname)) {
+    throw new Error('不支持采集内网地址图片');
+  }
+
+  let resolvedAddresses: ResolvedAddress[];
+  try {
+    resolvedAddresses = await lookup(hostname, { all: true, verbatim: false });
+  } catch {
+    throw new Error('图片地址无法解析');
+  }
+
+  if (!resolvedAddresses.length || resolvedAddresses.some((item) => isPrivateIpAddress(item.address))) {
+    throw new Error('不支持采集内网地址图片');
+  }
+}
+
 function getContentType(extension: string) {
   switch (extension) {
     case 'png':
@@ -72,32 +145,107 @@ function getExtensionFromContentType(contentType: string, fallback: string) {
   return fallback;
 }
 
-async function downloadImageBuffer(imageUrl: string, pageUrl: string): Promise<{ buffer: Buffer; contentType: string; extension: string }> {
+async function fetchImageResponse(imageUrl: string, pageUrl: string, signal: AbortSignal, redirectCount = 0): Promise<Response> {
+  await assertSafeRemoteUrl(imageUrl);
+
   const response = await fetch(imageUrl, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      Referer: pageUrl || imageUrl,
-      Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-    },
+    headers: buildBrowserImageHeaders(imageUrl, {
+      refererUrl: pageUrl || imageUrl,
+      accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+    }),
+    redirect: 'manual',
+    signal,
   });
 
-  if (!response.ok) {
-    throw new Error(`无法下载图片资源 (${response.status})`);
+  if ([301, 302, 303, 307, 308].includes(response.status)) {
+    if (redirectCount >= MAX_PLUGIN_REDIRECTS) {
+      throw new Error('图片地址重定向次数过多');
+    }
+
+    const location = response.headers.get('location');
+    if (!location) {
+      throw new Error('图片地址重定向无效');
+    }
+
+    return fetchImageResponse(new URL(location, imageUrl).toString(), pageUrl, signal, redirectCount + 1);
   }
 
-  const responseContentType = response.headers.get('content-type') || '';
-  if (!responseContentType.toLowerCase().startsWith('image/')) {
-    throw new Error(`当前资源不是图片，无法保存 (${responseContentType || 'unknown'})`);
+  return response;
+}
+
+async function readLimitedResponseBuffer(response: Response) {
+  if (!response.body) {
+    const arrayBuffer = await response.arrayBuffer();
+    if (arrayBuffer.byteLength > MAX_PLUGIN_CAPTURE_BYTES) {
+      throw new Error('图片文件过大，暂不支持插件采集');
+    }
+    return Buffer.from(arrayBuffer);
   }
 
-  const arrayBuffer = await response.arrayBuffer();
-  const fallbackExtension = getImageExtension(imageUrl);
-  const extension = getExtensionFromContentType(responseContentType, fallbackExtension);
-  return {
-    buffer: Buffer.from(arrayBuffer),
-    contentType: getContentType(extension),
-    extension,
-  };
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+
+    totalBytes += value.byteLength;
+    if (totalBytes > MAX_PLUGIN_CAPTURE_BYTES) {
+      await reader.cancel();
+      throw new Error('图片文件过大，暂不支持插件采集');
+    }
+
+    chunks.push(Buffer.from(value));
+  }
+
+  return Buffer.concat(chunks);
+}
+
+async function downloadImageBuffer(imageUrl: string, pageUrl: string): Promise<{ buffer: Buffer; contentType: string; extension: string }> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), IMAGE_DOWNLOAD_TIMEOUT_MS);
+
+  try {
+    const response = await fetchImageResponse(imageUrl, pageUrl, controller.signal);
+
+    if (!response.ok) {
+      throw new Error(`无法下载图片资源 (${response.status})`);
+    }
+
+    const responseContentType = response.headers.get('content-type') || '';
+    const normalizedContentType = responseContentType.toLowerCase();
+    if (!normalizedContentType.startsWith('image/')) {
+      throw new Error(`当前资源不是图片，无法保存 (${responseContentType || 'unknown'})`);
+    }
+
+    if (normalizedContentType.includes('image/svg')) {
+      throw new Error('暂不支持 SVG 图片采集');
+    }
+
+    const contentLength = Number.parseInt(response.headers.get('content-length') || '0', 10);
+    if (contentLength > MAX_PLUGIN_CAPTURE_BYTES) {
+      throw new Error('图片文件过大，暂不支持插件采集');
+    }
+
+    const buffer = await readLimitedResponseBuffer(response);
+
+    const fallbackExtension = getImageExtension(imageUrl);
+    const extension = getExtensionFromContentType(responseContentType, fallbackExtension);
+    return {
+      buffer,
+      contentType: getContentType(extension),
+      extension,
+    };
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error('下载图片超时，请稍后重试');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function normalizeLocalMaterialUrl(url: string) {
@@ -105,13 +253,6 @@ function normalizeLocalMaterialUrl(url: string) {
     return `/api/material-file${url}`;
   }
   return url;
-}
-
-async function saveToLocalPublic(buffer: Buffer, fileName: string) {
-  const filePath = path.join('/home/ubuntu/Downloads/zaomeng/project/projects/public', fileName)
-  await mkdir(path.dirname(filePath), { recursive: true })
-  await writeFile(filePath, buffer)
-  return `/${fileName.replace(/\\/g, '/')}`
 }
 
 export async function POST(request: NextRequest) {
@@ -133,7 +274,8 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json() as CaptureImageRequest;
-    const { imageUrl, pageUrl = '', pageTitle = '', sourceHost = '', capturedAt, imageType = 'main' } = body;
+    const { imageUrl, pageUrl = '', pageTitle = '', sourceHost = '', capturedAt } = body;
+    const imageType = isAllowedImageType(body.imageType) ? body.imageType : 'main';
 
     if (!imageUrl) {
       return NextResponse.json(
@@ -161,8 +303,7 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       console.warn('[插件采集] 对象存储上传失败，回退到本地 public 存储:', error)
       const localFileName = `plugin-capture/${userId}/${Date.now()}-${Math.floor(Math.random() * 10000)}-${imageType}.${extension}`
-      const localPath = await saveToLocalPublic(imageBuffer, localFileName)
-      uploadedUrl = normalizeLocalMaterialUrl(localPath)
+      uploadedUrl = normalizeLocalMaterialUrl(await saveBufferToLocalMaterialFile(imageBuffer, localFileName))
     }
 
     console.log('[插件采集] 采集成功:', {

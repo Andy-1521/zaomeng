@@ -94,6 +94,7 @@ export function showToast(
   options: ToastOptions = {}
 ) {
   const toast = document.createElement('div');
+  toast.dataset.toastType = type;
 
   // 统一使用毛玻璃背景
   toast.className = `bg-white/10 backdrop-blur-xl text-white px-6 py-3 rounded-2xl text-sm shadow-2xl border border-white/20 flex items-center gap-2 min-w-[200px]`;

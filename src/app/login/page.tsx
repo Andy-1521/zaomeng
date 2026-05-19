@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
+import Image from 'next/image';
 import { showToast } from '@/lib/toast';
+import { toUserFacingErrorMessage } from '@/lib/userFacingError';
 
 // 使用种子生成一致的随机值
 function seededRandom(seed: number) {
@@ -102,7 +104,7 @@ export default function AuthPage() {
       if (result.success) {
         showToast('验证码已发送，请查看邮箱', 'success');
       } else {
-        showToast(result.message || '验证码发送失败', 'error');
+        showToast(toUserFacingErrorMessage(result.message, '验证码发送失败，请稍后重试'), 'error');
         setCountdown(0);
       }
     } catch (error) {
@@ -182,7 +184,7 @@ export default function AuthPage() {
           window.location.href = '/home';
         }, 500);
       } else {
-        showToast(result.message || '注册失败', 'error');
+        showToast(toUserFacingErrorMessage(result.message, '注册失败，请稍后重试'), 'error');
       }
     } catch (error) {
       console.error('注册失败:', error);
@@ -213,7 +215,7 @@ export default function AuthPage() {
           window.location.href = '/home';
         }, 500);
       } else {
-        showToast(result.message || '登录失败', 'error');
+        showToast(toUserFacingErrorMessage(result.message, '登录失败，请稍后重试'), 'error');
       }
     } catch (error) {
       console.error('登录失败:', error);
@@ -242,7 +244,7 @@ export default function AuthPage() {
         setMode('login');
         setFormData({ email: '', username: '', password: '', confirmPassword: '', verifyCode: '', newPassword: '' });
       } else {
-        showToast(result.message || '密码重置失败', 'error');
+        showToast(toUserFacingErrorMessage(result.message, '密码重置失败，请稍后重试'), 'error');
       }
     } catch (error) {
       console.error('密码重置失败:', error);
@@ -372,7 +374,7 @@ export default function AuthPage() {
           <div className="text-center mb-8">
             <div className="inline-block mb-4">
               <div className="w-14 h-14 bg-gradient-to-br from-purple-600 via-purple-700 to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-purple-500/30 overflow-hidden">
-                <img src="/images/avatar.png" alt="造梦AI" className="w-full h-full object-cover" />
+                <Image src="/images/avatar.png" alt="造梦AI" width={56} height={56} className="w-full h-full object-cover" />
               </div>
             </div>
             <h1 className="text-3xl font-bold text-white mb-2 bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
