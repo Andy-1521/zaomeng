@@ -15,9 +15,7 @@ function getCookieUserId(request: NextRequest): string | null {
 
 function isLikelyDisplayableImage(imageUrl: string) {
   const normalized = imageUrl.split('?')[0].toLowerCase()
-  if (normalized.includes('/api/material-file/')) return !/\.(mp4|webm|mov|m4v|avi)$/.test(normalized)
-  if (normalized.startsWith('/')) return !/\.(mp4|webm|mov|m4v|avi)$/.test(normalized)
-  return /\.(jpg|jpeg|png|webp|gif|bmp|svg)$/.test(normalized)
+  return /\.(jpg|jpeg|png|webp|gif|bmp)$/.test(normalized)
 }
 
 export async function GET(request: NextRequest) {

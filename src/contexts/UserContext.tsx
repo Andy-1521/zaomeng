@@ -55,7 +55,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
       if (typeof points === 'number') {
         setUserState(prev => {
           if (!prev) return prev;
-          return { ...prev, points };
+          const updated = { ...prev, points };
+          localStorage.setItem('user', JSON.stringify(updated));
+          return updated;
         });
       }
     };

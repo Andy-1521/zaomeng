@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeFileExtension, normalizeFolder, saveBufferToLocalMaterialFile } from '@/lib/localUploadStorage';
+import { isImageValidationError, validateUploadedImageBuffer } from '@/lib/serverImageValidation';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '图片上传失败';
@@ -37,11 +38,12 @@ export async function POST(request: NextRequest) {
     const mimeType = matches[1];
     const base64Data = matches[2];
     const buffer = Buffer.from(base64Data, 'base64');
+    const imageInfo = await validateUploadedImageBuffer(buffer, { declaredContentType: mimeType });
 
     // 生成文件名
     const timestamp = Date.now();
     const random = Math.floor(Math.random() * 10000);
-    const extension = normalizeFileExtension(mimeType.split('/')[1] || 'jpg');
+    const extension = normalizeFileExtension(imageInfo.extension);
     const fileName = `${normalizedFolder}/${timestamp}_${random}.${extension}`;
 
     // 使用Coze对象存储上传（1年有效期）
@@ -59,7 +61,7 @@ export async function POST(request: NextRequest) {
       const key = await cozeStorage.uploadFile({
         fileContent: buffer,
         fileName: fileName,
-        contentType: mimeType,
+        contentType: imageInfo.contentType,
       });
 
       console.log('[图片上传] Coze对象存储上传成功，key:', key);
@@ -93,6 +95,13 @@ export async function POST(request: NextRequest) {
     }
 
   } catch (error: unknown) {
+    if (isImageValidationError(error)) {
+      return NextResponse.json(
+        { success: false, message: error.message },
+        { status: 400 }
+      );
+    }
+
     console.error('[图片上传] 失败:', error);
     return NextResponse.json(
       {

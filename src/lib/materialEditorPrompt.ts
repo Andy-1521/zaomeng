@@ -21,9 +21,9 @@ export type ComposePromptResult = {
   source: 'agent' | 'fallback';
 };
 
-function resolveImageUrl(imageUrl: string, request: NextRequest) {
+function resolveImageUrl(imageUrl: string, origin?: string) {
   if (imageUrl.startsWith('/')) {
-    return new URL(imageUrl, request.nextUrl.origin).toString();
+    return new URL(imageUrl, origin || 'http://localhost').toString();
   }
   return imageUrl;
 }
@@ -121,7 +121,8 @@ export function fallbackComposePrompt(params: {
 }
 
 export async function composePromptFromImage(params: {
-  request: NextRequest;
+  request?: NextRequest;
+  origin?: string;
   imageUrl: string;
   mode: 'brush' | 'tag';
   instruction: string;
@@ -129,6 +130,7 @@ export async function composePromptFromImage(params: {
   sessionId?: string;
 }): Promise<ComposePromptResult> {
   const { request, imageUrl, mode, instruction, regions, sessionId } = params;
+  const origin = params.origin || request?.nextUrl.origin;
   const fallback = fallbackComposePrompt({ imageUrl, mode, instruction, regions });
   const apiKey = getOpenAICompatApiKey();
   const startedAt = Date.now();
@@ -176,7 +178,7 @@ ${instruction || '用户未填写额外要求，请根据图片内容做自然�
 }`;
 
   try {
-    const result = await callVisionModel(apiKey, resolveImageUrl(imageUrl, request), prompt);
+    const result = await callVisionModel(apiKey, resolveImageUrl(imageUrl, origin), prompt);
     const cleaned = result.trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
 
     try {

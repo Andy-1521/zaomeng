@@ -43,6 +43,7 @@ type RawOrderRecord = {
   resultData?: unknown;
   requestParams?: unknown;
   uploadedImage?: string | null;
+  remainingPoints?: number | null;
   createdAt?: string | number | Date | null;
   time?: string | number | Date | null;
 };
@@ -771,7 +772,14 @@ export default function QuickCreatePage() {
         throw new Error(toUserFacingErrorMessage(data.message, '刷新订单记录失败，请重试'));
       }
 
-      setHasProcessingOrders(data.data.some((item) => getOrderStatusLabel(item.status) === '处理中'));
+      const hasProcessingOrdersNow = data.data.some((item) => getOrderStatusLabel(item.status) === '处理中');
+      setHasProcessingOrders(hasProcessingOrdersNow);
+      const latestSettledOrder = hasProcessingOrdersNow
+        ? null
+        : data.data.find((item) => getOrderStatusLabel(item.status) !== '处理中' && typeof item.remainingPoints === 'number');
+      if (latestSettledOrder && typeof latestSettledOrder.remainingPoints === 'number') {
+        syncPoints(latestSettledOrder.remainingPoints);
+      }
 
       const cards = data.data.flatMap((item) => {
         const resultImages = extractImageUrls(item.resultData);
@@ -835,7 +843,7 @@ export default function QuickCreatePage() {
         showToast(toUserFacingErrorFromUnknown(error, '刷新订单记录失败，请重试'), 'error');
       }
     }
-  }, [user?.id]);
+  }, [syncPoints, user?.id]);
 
   const loadMaterialFolders = useCallback(async () => {
     try {
@@ -1660,6 +1668,11 @@ export default function QuickCreatePage() {
     }
 
     const selectedImageUrl = selectedImageList[0];
+    if (failedImageUrls.has(selectedImageUrl)) {
+      showToast('图片不可用，请重新上传后再编辑', 'error');
+      return;
+    }
+
     const selectedOrder = libraryView === 'orders'
       ? orderResults.find((item) => item.imageUrl === selectedImageUrl)
       : null;
@@ -1681,7 +1694,7 @@ export default function QuickCreatePage() {
       setLocalEditImageUrl(selectedImageUrl);
       setShowLocalEdit(true);
     }
-  }, [libraryView, orderResults, selectedImageList]);
+  }, [failedImageUrls, libraryView, orderResults, selectedImageList]);
 
   const closeImageEditor = useCallback(() => {
     setImageEditor({ open: false, mode: 'crop', imageUrl: '', destination: 'gallery' });
@@ -1704,11 +1717,19 @@ export default function QuickCreatePage() {
     showToast('编辑后的素材已加入素材库', 'success');
   }, [imageEditor.destination, loadCapturedImages, loadOrderResults]);
 
-  const handleLocalEditComplete = useCallback((resultUrl: string) => {
+  const handleLocalEditComplete = useCallback((resultUrl: string, meta?: { orderId?: string; status?: string; remainingPoints?: number }) => {
     clearSelectionState();
+    if (typeof meta?.remainingPoints === 'number') {
+      syncPoints(meta.remainingPoints);
+    }
+    dispatchTaskHistoryUpdated();
     void loadOrderResults();
+    if (meta?.status === '处理中' || meta?.orderId) {
+      showToast('智能改图已提交到后台处理', 'success');
+      return;
+    }
     handleEditorComplete(resultUrl);
-  }, [clearSelectionState, handleEditorComplete, loadOrderResults]);
+  }, [clearSelectionState, dispatchTaskHistoryUpdated, handleEditorComplete, loadOrderResults, syncPoints]);
 
   const handleMasonryBlankClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (selectedImageList.length === 0) return;

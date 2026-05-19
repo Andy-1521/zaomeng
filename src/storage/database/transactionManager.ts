@@ -362,6 +362,8 @@ export class TransactionManager {
       points?: number;
       uploadedImage?: string;
       actualPoints?: number;
+      prompt?: string;
+      description?: string;
     }
   ): Promise<Transaction | null> {
     const db = await getDb();
@@ -374,6 +376,8 @@ export class TransactionManager {
       points: updates.points,
       uploadedImage: updates.uploadedImage,
       actualPoints: updates.actualPoints,
+      prompt: updates.prompt,
+      description: updates.description,
     };
 
     const finalUpdateData = Object.fromEntries(

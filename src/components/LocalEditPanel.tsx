@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import Image, { type ImageLoaderProps } from 'next/image';
 import { showToast } from '@/lib/toast';
 import { DEFAULT_SMART_EDIT_SIZE_OPTION, SMART_EDIT_SIZE_OPTIONS, formatSmartEditSizeLabel, getSmartEditOutputSize, type SmartEditAspectRatioOption, type SmartEditResolution } from '@/lib/smartEditSize';
@@ -10,6 +10,7 @@ type TagRegion = {
   id: string;
   naturalX: number;
   naturalY: number;
+  maskRadius?: number;
   description: string;
   candidates: string[];
   selectedCandidate: string;
@@ -41,8 +42,17 @@ type MaterialEditorResponse = {
   success?: boolean;
   message?: string;
   data?: {
+    orderId?: string;
+    status?: string;
     url?: string;
+    remainingPoints?: number;
   };
+};
+
+type LocalEditCompleteMeta = {
+  orderId?: string;
+  status?: string;
+  remainingPoints?: number;
 };
 
 type ToolMode = 'brush' | 'tag';
@@ -50,12 +60,15 @@ type ToolMode = 'brush' | 'tag';
 type Props = {
   imageUrl: string;
   onClose: () => void;
-  onComplete: (resultUrl: string) => void | Promise<void>;
+  onComplete: (resultUrl: string, meta?: LocalEditCompleteMeta) => void | Promise<void>;
 };
 
 const TAG_REGION_COLORS = ['#a855f7', '#2563eb', '#ec4899', '#14b8a6', '#f97316', '#8b5cf6'];
 const BRUSH_SIZE_PRESETS = [16, 32, 56, 84];
-const TAG_MASK_DISPLAY_RADIUS = 36;
+const TAG_MASK_DEFAULT_RADIUS = 96;
+const TAG_MASK_RADIUS_PRESETS = [48, 96, 180];
+const TAG_MASK_RADIUS_MIN = 24;
+const TAG_MASK_RADIUS_MAX = 420;
 const BRUSH_COLOR_OPTIONS = [
   { label: '洋红', value: '#ec4899' },
   { label: '紫色', value: '#a855f7' },
@@ -63,10 +76,10 @@ const BRUSH_COLOR_OPTIONS = [
   { label: '青色', value: '#14b8a6' },
   { label: '橙色', value: '#f97316' },
 ];
-const SMART_EDIT_RESOLUTION_OPTIONS: Array<{ value: SmartEditResolution; label: string }> = [
-  { value: '1k', label: '1k' },
-  { value: '2k', label: '2k' },
-  { value: '4k', label: '4k' },
+const SMART_EDIT_RESOLUTION_OPTIONS: Array<{ value: SmartEditResolution; label: string; description: string }> = [
+  { value: '1k', label: '1k', description: '快速预览' },
+  { value: '2k', label: '2k', description: '推荐' },
+  { value: '4k', label: '4k', description: '更慢，适合最终出图' },
 ];
 
 const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
@@ -89,6 +102,10 @@ function withAlpha(hex: string, alpha: number) {
 
 function getRegionTarget(region: TagRegion) {
   return region.customTarget.trim() || region.confirmedCandidate.trim() || region.selectedCandidate.trim() || region.description.trim();
+}
+
+function isGifImageUrl(url: string) {
+  return /\.gif(?:$|[?#])/i.test(url);
 }
 
 async function parseJsonApiResponse<T extends ApiJsonObject>(response: Response, fallbackMessage: string): Promise<T> {
@@ -149,6 +166,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
   const [draggingRegionId, setDraggingRegionId] = useState<string | null>(null);
   const [outputSize, setOutputSize] = useState<SmartEditAspectRatioOption>(DEFAULT_SMART_EDIT_SIZE_OPTION);
   const [outputResolution, setOutputResolution] = useState<SmartEditResolution>('2k');
+  const [tagMaskRadius, setTagMaskRadius] = useState(TAG_MASK_DEFAULT_RADIUS);
 
   const resolvedActiveRegionId = useMemo(() => {
     if (!tagRegions.length) return null;
@@ -229,6 +247,19 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
   const resolvedOutputSize = useMemo(() => {
     return getSmartEditOutputSize(outputSize, outputResolution, naturalSize);
   }, [naturalSize, outputResolution, outputSize]);
+
+  const outputSizeSummary = useMemo(() => {
+    if (outputSize === 'auto') {
+      return `自动：${resolvedOutputSize.resolvedAspectRatio} · ${resolvedOutputSize.width}×${resolvedOutputSize.height}`;
+    }
+    return `${resolvedOutputSize.resolvedAspectRatio} · ${resolvedOutputSize.width}×${resolvedOutputSize.height}`;
+  }, [outputSize, resolvedOutputSize.height, resolvedOutputSize.resolvedAspectRatio, resolvedOutputSize.width]);
+
+  const selectedResolutionOption = useMemo(() => {
+    return SMART_EDIT_RESOLUTION_OPTIONS.find((option) => option.value === outputResolution) || SMART_EDIT_RESOLUTION_OPTIONS[1];
+  }, [outputResolution]);
+
+  const isGifImage = useMemo(() => isGifImageUrl(imageUrl), [imageUrl]);
 
   const removeRegionTokensFromEditor = useCallback((regionId: string, options?: { keepPlaceholder?: boolean }) => {
     const editor = promptEditorRef.current;
@@ -561,6 +592,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
 
     setImageReady(true);
     setNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
+    let nextCanvasSize = { width: img.clientWidth || img.naturalWidth, height: img.clientHeight || img.naturalHeight };
 
     const viewport = imageViewportRef.current;
     const viewportWidth = viewport?.clientWidth || 0;
@@ -575,21 +607,25 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
 
       setDisplaySize(nextDisplaySize);
       setDisplayScale(nextDisplaySize.width / img.naturalWidth);
+      nextCanvasSize = nextDisplaySize;
     } else {
       const rect = img.getBoundingClientRect();
       if (rect.width && rect.height) {
         setDisplaySize({ width: rect.width, height: rect.height });
         setDisplayScale(rect.width / img.naturalWidth);
+        nextCanvasSize = { width: rect.width, height: rect.height };
       }
     }
 
     const brushCanvas = brushCanvasRef.current;
     const brushLayer = brushLayerRef.current;
     if (brushCanvas && brushLayer) {
-      brushCanvas.width = img.naturalWidth;
-      brushCanvas.height = img.naturalHeight;
-      brushLayer.width = img.naturalWidth;
-      brushLayer.height = img.naturalHeight;
+      const canvasWidth = Math.max(1, Math.round(nextCanvasSize.width));
+      const canvasHeight = Math.max(1, Math.round(nextCanvasSize.height));
+      brushCanvas.width = canvasWidth;
+      brushCanvas.height = canvasHeight;
+      brushLayer.width = canvasWidth;
+      brushLayer.height = canvasHeight;
     }
   }, []);
 
@@ -676,23 +712,26 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
 
   const redrawBrushLayer = useCallback((segments: BrushMaskSegment[]) => {
     const canvas = brushLayerRef.current;
-    if (!canvas) return;
+    if (!canvas || naturalSize.width <= 0 || naturalSize.height <= 0) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    const scaleX = canvas.width / naturalSize.width;
+    const scaleY = canvas.height / naturalSize.height;
+    const radiusScale = Math.max(scaleX, scaleY);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     segments.forEach((segment) => {
       ctx.fillStyle = withAlpha(segment.color, 0.88);
       ctx.beginPath();
-      ctx.arc(segment.x, segment.y, segment.r, 0, Math.PI * 2);
+      ctx.arc(segment.x * scaleX, segment.y * scaleY, segment.r * radiusScale, 0, Math.PI * 2);
       ctx.fill();
     });
-  }, []);
+  }, [naturalSize.height, naturalSize.width]);
 
   useEffect(() => {
     redrawBrushLayer(brushMaskSegments);
-  }, [brushMaskSegments, redrawBrushLayer]);
+  }, [brushMaskSegments, displaySize.height, displaySize.width, redrawBrushLayer]);
 
   const handleBrushPointer = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = brushCanvasRef.current;
@@ -704,8 +743,8 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
 
     const offsetX = Math.min(Math.max(event.clientX - rect.left, 0), rect.width);
     const offsetY = Math.min(Math.max(event.clientY - rect.top, 0), rect.height);
-    const naturalX = (offsetX / rect.width) * canvas.width;
-    const naturalY = (offsetY / rect.height) * canvas.height;
+    const naturalX = (offsetX / rect.width) * img.naturalWidth;
+    const naturalY = (offsetY / rect.height) * img.naturalHeight;
     const radius = displayScale > 0 ? Math.max(8, brushSize / displayScale) : brushSize;
 
     const strokeId = drawGestureRef.current?.strokeId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -867,10 +906,10 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
 
     setSubmitError('');
     setActiveTool('tag');
-    setTagRegions((current) => [...current, { id: regionId, naturalX, naturalY, description: '', candidates: [], selectedCandidate: '', confirmedCandidate: '', customTarget: '', identifyError: '', isIdentifying: true, hasEditorToken: false }]);
+    setTagRegions((current) => [...current, { id: regionId, naturalX, naturalY, maskRadius: tagMaskRadius, description: '', candidates: [], selectedCandidate: '', confirmedCandidate: '', customTarget: '', identifyError: '', isIdentifying: true, hasEditorToken: false }]);
     setActiveRegionId(regionId);
     void identifyRegion(regionId, naturalX, naturalY, imageWidth, imageHeight);
-  }, [getNaturalPointFromClientPoint, identifyRegion, imageReady, isSubmitting]);
+  }, [getNaturalPointFromClientPoint, identifyRegion, imageReady, isSubmitting, tagMaskRadius]);
 
   const handleBrushUp = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
     const gesture = drawGestureRef.current;
@@ -1109,60 +1148,43 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
     setIsSubmitting(true);
     setIsResolvingPrompt(true);
     let completedResultUrl = '';
+    let completedMeta: LocalEditCompleteMeta | undefined;
 
     try {
-      const maskCanvas = document.createElement('canvas');
-      maskCanvas.width = naturalSize.width;
-      maskCanvas.height = naturalSize.height;
-      const ctx = maskCanvas.getContext('2d');
-      if (!ctx) throw new Error('生成遮罩失败');
-
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
-      ctx.fillStyle = '#ffffff';
-
-      if (submitMode === 'brush') {
-        submitBrushSegments.forEach((segment) => {
-          ctx.beginPath();
-          ctx.arc(segment.x, segment.y, segment.r, 0, Math.PI * 2);
-          ctx.fill();
-        });
-      }
-
-      if (submitMode === 'tag') {
-        const radius = displayScale > 0 ? Math.max(26, Math.round(TAG_MASK_DISPLAY_RADIUS / displayScale)) : TAG_MASK_DISPLAY_RADIUS;
-        submitRegions.forEach((region) => {
-          ctx.beginPath();
-          ctx.arc(region.naturalX, region.naturalY, radius, 0, Math.PI * 2);
-          ctx.fill();
-        });
-      }
+      const formData = new FormData();
+      formData.append('action', 'redraw');
+      formData.append('imageUrl', imageUrl);
+      formData.append('aspectRatio', outputSize);
+      formData.append('outputSize', JSON.stringify({
+        width: resolvedOutputSize.width,
+        height: resolvedOutputSize.height,
+      }));
+      formData.append('resolution', outputResolution);
+      formData.append('sourceSize', JSON.stringify(naturalSize));
+      formData.append('sessionId', sessionIdRef.current);
+      formData.append('mode', submitMode);
+      formData.append('regions', JSON.stringify(submitRegions));
+      formData.append('brushSegments', JSON.stringify(submitBrushSegments));
+      formData.append('tagMaskRadius', String(tagMaskRadius));
+      formData.append('prompt', promptText);
 
       const response = await fetch('/api/material-editor', {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'redraw',
-            imageUrl,
-            aspectRatio: outputSize,
-            outputSize: resolvedOutputSize,
-            resolution: outputResolution,
-            sourceSize: naturalSize,
-            sessionId: sessionIdRef.current,
-            mode: submitMode,
-          regions: submitRegions,
-          maskImageBase64: maskCanvas.toDataURL('image/png'),
-          prompt: promptText,
-        }),
+        body: formData,
       });
 
       const data = await parseJsonApiResponse<MaterialEditorResponse>(response, '暂时未能完成处理，请稍后重试');
-      if (!response.ok || !data.success || !data.data?.url) {
+      if (!response.ok || !data.success || (!data.data?.url && !data.data?.orderId)) {
         throw new Error(toUserFacingErrorMessage(data.message, '暂时未能完成处理，请稍后重试'));
       }
 
-      completedResultUrl = data.data.url;
+      completedResultUrl = data.data.url || '';
+      completedMeta = {
+        orderId: data.data.orderId,
+        status: data.data.status,
+        remainingPoints: data.data.remainingPoints,
+      };
     } catch (error) {
       const message = toUserFacingErrorFromUnknown(error, '暂时未能完成处理，请稍后重试');
       setSubmitError(message);
@@ -1173,16 +1195,16 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
       setIsSubmitting(false);
     }
 
-    if (completedResultUrl) {
+    if (completedResultUrl || completedMeta?.orderId) {
       Promise.resolve()
-        .then(() => onComplete(completedResultUrl))
+        .then(() => onComplete(completedResultUrl, completedMeta))
         .catch((error) => {
-        console.error('[LocalEditPanel] 完成后刷新素材库失败:', error);
-        showToast('结果已生成，但素材库刷新稍慢，请稍后查看', 'info');
-      });
+          console.error('[LocalEditPanel] 完成后刷新素材库失败:', error);
+          showToast('任务已提交，但订单记录刷新稍慢，请稍后查看', 'info');
+        });
       onClose();
     }
-  }, [activeTool, brushMaskSegments, displayScale, imageUrl, instruction, isResolvingPrompt, isSubmitting, naturalSize, onClose, onComplete, outputResolution, outputSize, resolvedOutputSize, tagRegions]);
+  }, [activeTool, brushMaskSegments, imageUrl, instruction, isResolvingPrompt, isSubmitting, naturalSize, onClose, onComplete, outputResolution, outputSize, resolvedOutputSize, tagMaskRadius, tagRegions]);
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/72 px-4 py-4 backdrop-blur-[2px]">
@@ -1259,50 +1281,66 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                       const isDragging = draggingRegionId === region.id;
                       const hasError = Boolean(region.identifyError);
                       const color = getRegionColor(index);
+                      const pointLeft = `${(region.naturalX / naturalSize.width) * 100}%`;
+                      const pointTop = `${(region.naturalY / naturalSize.height) * 100}%`;
+                      const rangeDiameter = Math.max(28, tagMaskRadius * displayScale * 2);
                       return (
-                        <button
-                          key={region.id}
-                          type="button"
-                          data-role="tag-point-button"
-                           onPointerDown={(event) => {
-                             event.preventDefault();
-                             event.stopPropagation();
-                             draggingRegionIdRef.current = region.id;
-                             regionDragGestureRef.current = {
-                               regionId: region.id,
-                               startX: event.clientX,
-                               startY: event.clientY,
-                               moved: false,
-                             };
-                             setDraggingRegionId(region.id);
-                             setActiveRegionId(region.id);
-                           }}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setActiveRegionId(region.id);
-                          }}
-                        className={`pointer-events-auto absolute flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 text-xs font-semibold text-white shadow-[0_10px_24px_rgba(0,0,0,0.2)] transition ${isDragging ? 'scale-110 cursor-grabbing' : 'hover:scale-105 cursor-grab'} ${isConfirmed ? '' : 'bg-black/40 backdrop-blur-[2px]'}`}
-                             style={{
-                             left: `${(region.naturalX / naturalSize.width) * 100}%`,
-                             top: `${(region.naturalY / naturalSize.height) * 100}%`,
-                             backgroundColor: color,
-                             borderColor: hasError ? '#fca5a5' : isActive ? '#ffffff' : 'rgba(255,255,255,0.55)',
-                             boxShadow: hasError ? '0 0 0 6px rgba(239,68,68,0.18)' : isActive ? `0 0 0 6px ${color}33` : `0 0 0 4px ${color}1f`,
-                             opacity: region.isIdentifying ? 0.88 : 1,
-                           }}
-                        >
-                          {region.isIdentifying ? (
-                            <span className="pointer-events-none absolute inset-[-6px] rounded-full border border-white/30" />
-                          ) : !isConfirmed ? (
-                            <span
-                              className="pointer-events-none absolute inset-[-8px] rounded-full animate-ping"
-                              style={{ backgroundColor: `${color}55` }}
-                            />
-                          ) : null}
-                          <span className={`relative z-10 ${!isConfirmed ? 'text-white' : 'text-white'}`}>
-                          {index + 1}
-                          </span>
-                        </button>
+                        <Fragment key={region.id}>
+                          <div
+                            className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full border border-dashed"
+                            style={{
+                              left: pointLeft,
+                              top: pointTop,
+                              width: `${rangeDiameter}px`,
+                              height: `${rangeDiameter}px`,
+                              borderColor: isActive ? `${color}cc` : `${color}66`,
+                              backgroundColor: `${color}${isActive ? '16' : '0d'}`,
+                              boxShadow: isActive ? `0 0 0 1px ${color}33, inset 0 0 28px ${color}18` : undefined,
+                            }}
+                          />
+                          <button
+                            type="button"
+                            data-role="tag-point-button"
+                              onPointerDown={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                draggingRegionIdRef.current = region.id;
+                                regionDragGestureRef.current = {
+                                  regionId: region.id,
+                                  startX: event.clientX,
+                                  startY: event.clientY,
+                                  moved: false,
+                                };
+                                setDraggingRegionId(region.id);
+                                setActiveRegionId(region.id);
+                              }}
+                             onClick={(event) => {
+                               event.stopPropagation();
+                               setActiveRegionId(region.id);
+                             }}
+                          className={`pointer-events-auto absolute flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 text-xs font-semibold text-white shadow-[0_10px_24px_rgba(0,0,0,0.2)] transition ${isDragging ? 'scale-110 cursor-grabbing' : 'hover:scale-105 cursor-grab'} ${isConfirmed ? '' : 'bg-black/40 backdrop-blur-[2px]'}`}
+                                style={{
+                                left: pointLeft,
+                                top: pointTop,
+                                backgroundColor: color,
+                                borderColor: hasError ? '#fca5a5' : isActive ? '#ffffff' : 'rgba(255,255,255,0.55)',
+                                boxShadow: hasError ? '0 0 0 6px rgba(239,68,68,0.18)' : isActive ? `0 0 0 6px ${color}33` : `0 0 0 4px ${color}1f`,
+                                opacity: region.isIdentifying ? 0.88 : 1,
+                              }}
+                          >
+                            {region.isIdentifying ? (
+                              <span className="pointer-events-none absolute inset-[-6px] rounded-full border border-white/30" />
+                            ) : !isConfirmed ? (
+                              <span
+                                className="pointer-events-none absolute inset-[-8px] rounded-full animate-ping"
+                                style={{ backgroundColor: `${color}55` }}
+                              />
+                            ) : null}
+                            <span className={`relative z-10 ${!isConfirmed ? 'text-white' : 'text-white'}`}>
+                            {index + 1}
+                            </span>
+                          </button>
+                        </Fragment>
                       );
                     })}
 
@@ -1429,6 +1467,13 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                 </div>
 
                 <div className="mb-2 text-[11px] text-white/34">{activeTool === 'tag' ? '当前为标记模式：单击图片添加标记点位，点位识别后会自动写进下方要求。' : '当前为画笔模式：拖动即可圈选修改区域，颜色仅用于区分操作层，不影响最终出图。'} </div>
+                <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-white/42">
+                  <span className="rounded-full border border-white/8 bg-white/[0.04] px-2.5 py-1">输出 {outputSizeSummary}</span>
+                  <span className="rounded-full border border-white/8 bg-white/[0.04] px-2.5 py-1">{outputResolution} · {selectedResolutionOption.description}</span>
+                  {isGifImage ? (
+                    <span className="rounded-full border border-amber-300/20 bg-amber-500/12 px-2.5 py-1 text-amber-100/78">GIF 按静态首帧处理</span>
+                  ) : null}
+                </div>
 
                 <div className="relative rounded-[1.25rem] border border-white/10 bg-[#0d0d12] transition focus-within:ring-2 focus-within:ring-fuchsia-500/30">
                   <div
@@ -1451,7 +1496,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                           onClick={() => setIsAspectRatioMenuOpen((current) => !current)}
                           className="flex max-w-full items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white/78 transition hover:bg-white/[0.08]"
                         >
-                          <span>{formatSmartEditSizeLabel(outputSize) || '1:1'}</span>
+                          <span>{outputSize === 'auto' ? `自动：${resolvedOutputSize.resolvedAspectRatio}` : (formatSmartEditSizeLabel(outputSize) || '1:1')}</span>
                           <span className="hidden text-white/42 sm:inline">/</span>
                           <span className="hidden text-white/52 sm:inline">{SMART_EDIT_SIZE_OPTIONS.find((option) => option.value === outputSize)?.description || '比例'}</span>
                           <span className={`text-[10px] text-white/45 transition ${isAspectRatioMenuOpen ? 'rotate-180' : ''}`}>▾</span>
@@ -1488,11 +1533,12 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                           className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white/78 transition hover:bg-white/[0.08]"
                         >
                           <span>{outputResolution}</span>
+                          <span className="hidden text-white/48 sm:inline">{selectedResolutionOption.description}</span>
                           <span className={`text-[10px] text-white/45 transition ${isResolutionMenuOpen ? 'rotate-180' : ''}`}>▾</span>
                         </button>
 
                         {isResolutionMenuOpen ? (
-                          <div className="absolute bottom-full left-0 z-30 mb-2 min-w-[112px] overflow-hidden rounded-2xl border border-white/12 bg-[#0d0d12] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.4)]">
+                          <div className="absolute bottom-full left-0 z-30 mb-2 min-w-[188px] overflow-hidden rounded-2xl border border-white/12 bg-[#0d0d12] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.4)]">
                             {SMART_EDIT_RESOLUTION_OPTIONS.map((option) => {
                               const selected = option.value === outputResolution;
                               return (
@@ -1505,7 +1551,8 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                                   }}
                                   className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs transition ${selected ? 'bg-white text-slate-950' : 'text-white/72 hover:bg-white/[0.08] hover:text-white'}`}
                                 >
-                                  <span className="flex-1">{option.label}</span>
+                                  <span className="w-8 shrink-0 font-medium">{option.label}</span>
+                                  <span className="flex-1 opacity-70">{option.description}</span>
                                   {selected ? <span className="text-[10px]">✓</span> : null}
                                 </button>
                               );
@@ -1514,7 +1561,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                         ) : null}
                       </div>
                     </div>
-                    <button type="button" onClick={() => void handleSubmit()} disabled={isSubmitting || isResolvingPrompt} className="rounded-xl bg-gradient-to-r from-fuchsia-600 to-violet-600 px-4 py-2 text-sm font-medium text-white shadow-[0_10px_24px_rgba(168,85,247,0.24)] transition hover:from-fuchsia-500 hover:to-violet-500 disabled:cursor-not-allowed disabled:opacity-50">{isSubmitting ? '提交中...' : isResolvingPrompt ? '智能整理中...' : '提交智能改图'}</button>
+                    <button type="button" onClick={() => void handleSubmit()} disabled={isSubmitting || isResolvingPrompt} className="rounded-xl bg-gradient-to-r from-fuchsia-600 to-violet-600 px-4 py-2 text-sm font-medium text-white shadow-[0_10px_24px_rgba(168,85,247,0.24)] transition hover:from-fuchsia-500 hover:to-violet-500 disabled:cursor-not-allowed disabled:opacity-50">{isSubmitting ? '提交中...' : '提交到后台'}</button>
                   </div>
                 </div>
 
@@ -1576,7 +1623,17 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                     </>
                   ) : null}
                   {activeTool === 'tag' ? (
-                    <span className="text-xs text-white/32">标记点位可拖动后重识别，已写入输入框的标记也可直接切换候选。</span>
+                    <div className="flex min-w-[320px] flex-1 flex-wrap items-center gap-2">
+                      <span className="text-xs text-white/48">修改范围</span>
+                      <input type="range" min={TAG_MASK_RADIUS_MIN} max={TAG_MASK_RADIUS_MAX} step="4" value={tagMaskRadius} onChange={(event) => setTagMaskRadius(Number(event.target.value))} className="min-w-[160px] flex-1 accent-fuchsia-400" />
+                      <span className="w-14 text-right text-xs text-white/42">{tagMaskRadius}px</span>
+                      <div className="flex items-center gap-1">
+                        {TAG_MASK_RADIUS_PRESETS.map((radius) => (
+                          <button key={radius} type="button" onClick={() => setTagMaskRadius(radius)} className={`rounded-lg border px-2 py-1 text-[11px] transition ${tagMaskRadius === radius ? 'border-fuchsia-300/45 bg-fuchsia-500/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.04] text-white/48 hover:bg-white/[0.08] hover:text-white/75'}`}>{radius === 48 ? '小' : radius === 96 ? '中' : '大'}</button>
+                        ))}
+                      </div>
+                      <span className="basis-full text-xs text-white/32">标记点位可拖动后重识别，圆形区域表示本次会重点修改的范围。</span>
+                    </div>
                   ) : null}
                 </div>
                 </div>

@@ -24,15 +24,21 @@ type ImageEditTarget = {
   usedFallback: boolean;
 };
 
-type ImageEditParams = {
-  imageUrl: string;
+type ImageEditFormParams = {
   prompt: string;
   size?: string;
   aspectRatio?: string;
   quality?: string;
   maskImageBase64?: string;
+  maskImageBuffer?: Buffer;
+};
+
+type ImageEditParams = ImageEditFormParams & {
+  imageUrl: string;
   localMaterialOrigin?: string | null;
 };
+
+type PreparedImageEditParams = ImageEditFormParams;
 
 type ImageEditResponse = {
   data?: Array<{ b64_json?: string; url?: string }>;
@@ -137,20 +143,26 @@ function decodeImageBase64(data: string): Buffer {
   return Buffer.from(data, 'base64');
 }
 
-function createImageEditForm(params: ImageEditParams, normalizedBuffer: Buffer, model: string) {
+function bufferToBlob(buffer: Buffer, type: string) {
+  const arrayBuffer = buffer.buffer.slice(
+    buffer.byteOffset,
+    buffer.byteOffset + buffer.byteLength,
+  ) as ArrayBuffer;
+  return new Blob([arrayBuffer], { type });
+}
+
+function createImageEditForm(params: ImageEditFormParams, normalizedBuffer: Buffer, model: string) {
   const form = new FormData();
   form.append('model', model);
   form.append('prompt', params.prompt);
-  const arrayBuffer = normalizedBuffer.buffer.slice(
-    normalizedBuffer.byteOffset,
-    normalizedBuffer.byteOffset + normalizedBuffer.byteLength,
-  ) as ArrayBuffer;
-  form.append('image', new Blob([arrayBuffer], { type: 'image/png' }), 'source.png');
+  form.append('image', bufferToBlob(normalizedBuffer, 'image/png'), 'source.png');
 
-  if (params.maskImageBase64) {
+  if (params.maskImageBuffer) {
+    form.append('mask_image', bufferToBlob(params.maskImageBuffer, 'image/png'), 'mask.png');
+  } else if (params.maskImageBase64) {
     const maskMatch = params.maskImageBase64.match(/^data:image\/png;base64,(.+)$/);
     const maskData = maskMatch ? maskMatch[1] : params.maskImageBase64;
-    form.append('mask_image', new Blob([Buffer.from(maskData, 'base64')], { type: 'image/png' }), 'mask.png');
+    form.append('mask_image', bufferToBlob(Buffer.from(maskData, 'base64'), 'image/png'), 'mask.png');
   }
 
   if (params.size) {
@@ -188,7 +200,7 @@ export async function runPsydoImageEditFromUrl(params: ImageEditParams): Promise
 }
 
 async function runImageEditWithTarget(
-  params: ImageEditParams,
+  params: ImageEditFormParams,
   normalizedBuffer: Buffer,
   target: ImageEditTarget,
 ): Promise<Buffer> {
@@ -271,9 +283,17 @@ async function runImageEditWithTarget(
 }
 
 export async function runPsydoImageEditWithMetaFromUrl(params: ImageEditParams): Promise<{ buffer: Buffer; meta: ImageEditMeta }> {
-  const targets = getImageEditTargets();
   const sourceBuffer = await fetchImageBuffer(params.imageUrl, IMAGE_DOWNLOAD_MAX_BYTES, params.localMaterialOrigin);
   const normalizedBuffer = await sharp(sourceBuffer).rotate().png().toBuffer();
+
+  return runPsydoImageEditWithMetaFromPreparedBuffer(params, normalizedBuffer);
+}
+
+export async function runPsydoImageEditWithMetaFromPreparedBuffer(
+  params: PreparedImageEditParams,
+  normalizedBuffer: Buffer,
+): Promise<{ buffer: Buffer; meta: ImageEditMeta }> {
+  const targets = getImageEditTargets();
 
   let lastTimeoutError: ImageEditTimeoutError | null = null;
   let lastFallbackEligibleError: Error | null = null;

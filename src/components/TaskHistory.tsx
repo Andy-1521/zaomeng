@@ -446,6 +446,14 @@ export const forceRefreshCache = (userId?: string) => {
             if (Array.isArray(parsed) && parsed.length > 0) {
               imageUrl = parsed;
               console.log('[TaskHistory] resultData解析为数组，图片数量:', parsed.length);
+            } else if (parsed && typeof parsed === 'object') {
+              const parsedObject = parsed as ResultDataObject;
+              imageUrl = parsedObject.imageUrl || parsedObject.image_url || parsedObject.result_image_url || '';
+              const errorValue = parsedObject.error;
+              if (typeof errorValue === 'string' && errorValue.trim()) {
+                errorMessage = toUserFacingErrorMessage(errorValue, '暂时未能完成处理，请稍后重试');
+              }
+              console.log('[TaskHistory] resultData解析为对象，提取图片或失败原因');
             } else {
               imageUrl = item.resultData;
               console.log('[TaskHistory] 解析结果不是有效数组，使用原始字符串');
@@ -1022,16 +1030,54 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     }
   };
 
-  const handleRetryColorExtraction = async (task: TaskRecord, e: React.MouseEvent) => {
+  const handleRetryFailedTask = async (task: TaskRecord, e: React.MouseEvent) => {
     e.stopPropagation();
 
-    if (task.tab !== 'color-extraction') {
-      showToast('当前仅支持重新提交彩绘提取任务', 'info');
+    if (task.tab !== 'color-extraction' && task.tab !== 'smart-edit') {
+      showToast('当前仅支持重新提交彩绘提取和智能改图任务', 'info');
       return;
     }
 
     if (!task.orderId) {
       showToast('订单号缺失，无法重新提交', 'error');
+      return;
+    }
+
+    if (task.tab === 'smart-edit') {
+      setRetryingOrder(task.orderId);
+      try {
+        const response = await fetch('/api/material-editor', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'retry-redraw', orderId: task.orderId }),
+        });
+
+        const result = await response.json() as {
+          success?: boolean;
+          message?: string;
+          data?: { remainingPoints?: number };
+        };
+
+        if (!response.ok || !result.success) {
+          throw new Error(toUserFacingErrorMessage(result.message, '重新提交失败，请稍后重试'));
+        }
+
+        if (typeof result.data?.remainingPoints === 'number') {
+          window.dispatchEvent(new CustomEvent('userPointsChanged', {
+            detail: { points: result.data.remainingPoints },
+          }));
+        }
+
+        await loadTasks(userId);
+        window.dispatchEvent(new Event('taskHistoryUpdated'));
+        showToast('已重新提交智能改图任务', 'success');
+      } catch (error) {
+        console.error('[TaskHistory] 重新提交智能改图失败:', error);
+        showToast(toUserFacingErrorFromUnknown(error, '重新提交失败，请稍后重试'), 'error');
+      } finally {
+        setRetryingOrder(null);
+      }
       return;
     }
 
@@ -1491,8 +1537,8 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                                   <div className="mt-2.5 flex flex-wrap gap-1.5">
                                     <button
                                       type="button"
-                                      onClick={(e) => void handleRetryColorExtraction(task, e)}
-                                      disabled={retryingOrder === task.orderId || task.tab !== 'color-extraction'}
+                                      onClick={(e) => void handleRetryFailedTask(task, e)}
+                                      disabled={retryingOrder === task.orderId || (task.tab !== 'color-extraction' && task.tab !== 'smart-edit')}
                                       className="rounded-full border border-red-300/18 bg-red-500/14 px-2.5 py-1 text-[11px] text-red-200 transition-colors hover:bg-red-500/22 disabled:cursor-not-allowed disabled:opacity-40"
                                     >
                                       {retryingOrder === task.orderId ? '重新提交中...' : '重新提交'}
