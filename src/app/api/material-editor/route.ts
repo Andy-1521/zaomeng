@@ -12,8 +12,9 @@ import { DEFAULT_SMART_EDIT_SIZE_OPTION, resolveSmartEditAspectRatio } from '@/l
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 
 const MAX_MASK_IMAGE_BYTES = 10 * 1024 * 1024;
-const SMART_EDIT_SOURCE_MAX_EDGE = 2048;
+const SMART_EDIT_SOURCE_MAX_EDGE = 1536;
 const SMART_EDIT_REQUIRED_POINTS = 30;
+const SMART_EDIT_IMAGE_EDIT_TIMEOUT_MS = 120000;
 
 type CropPayload = {
   action?: 'crop';
@@ -208,7 +209,8 @@ async function parseEditorPayload(request: NextRequest): Promise<ParsedEditorPay
     throw new MaterialEditorBadRequestError('未知编辑动作');
   }
 
-  const maskFile = parseMultipartMaskFile(formData);
+  const mode = normalizeRedrawMode(getFormString(formData, 'mode'));
+  const maskFile = mode === 'brush' ? parseMultipartMaskFile(formData) : null;
   const maskImageBuffer = maskFile ? Buffer.from(await maskFile.arrayBuffer()) : undefined;
   const parsedRegions = parseFormJsonValue<RedrawPayload['regions']>(formData, 'regions');
   const parsedBrushSegments = parseFormJsonValue<RedrawPayload['brushSegments']>(formData, 'brushSegments');
@@ -223,7 +225,7 @@ async function parseEditorPayload(request: NextRequest): Promise<ParsedEditorPay
       sourceSize: parseFormJsonValue<RedrawPayload['sourceSize']>(formData, 'sourceSize'),
       sessionId: getFormString(formData, 'sessionId'),
       prompt: getFormString(formData, 'prompt'),
-      mode: normalizeRedrawMode(getFormString(formData, 'mode')),
+      mode,
       regions: Array.isArray(parsedRegions) ? parsedRegions : [],
       brushSegments: normalizeRedrawBrushSegments(parsedBrushSegments),
       tagMaskRadius: normalizeTagMaskRadius(Number(getFormString(formData, 'tagMaskRadius'))),
@@ -551,12 +553,28 @@ function getRedrawMode(body: RedrawPayload) {
   return body.mode === 'tag' ? 'tag' : 'brush';
 }
 
-function getRedrawSelectionError(body: RedrawPayload) {
+function getSmartEditImageQuality(resolution: RedrawPayload['resolution']) {
+  return resolution === '4k' ? 'high' : 'medium';
+}
+
+function getSmartEditImageEditRequest(resolvedAspectRatio: string): { aspectRatio?: string; size?: string } {
+  if (resolvedAspectRatio === '9:16') {
+    return { size: '1024x1792' };
+  }
+
+  return { aspectRatio: resolvedAspectRatio };
+}
+
+function getRedrawSelectionError(body: RedrawPayload, options?: { hasExternalRange?: boolean }) {
   const mode = getRedrawMode(body);
   if (mode === 'tag') {
     const regions = Array.isArray(body.regions) ? body.regions : [];
     const hasValidRegion = regions.some((region) => typeof region.naturalX === 'number' && typeof region.naturalY === 'number');
     return hasValidRegion ? null : '请先点击图片添加标记点位';
+  }
+
+  if (options?.hasExternalRange) {
+    return null;
   }
 
   return normalizeRedrawBrushSegments(body.brushSegments).length > 0 ? null : '请先用画笔涂抹要修改的区域';
@@ -576,12 +594,15 @@ function buildSmartEditRequestParams(params: {
   imageEditMeta?: Awaited<ReturnType<typeof runPsydoImageEditWithMetaFromPreparedBuffer>>['meta'];
 }) {
   const { body, resolvedAspectRatio, outputWidth, outputHeight, promptSummary, finalPrompt, agentPrompt, negativePrompt, promptSource, preparedSource, imageEditMeta } = params;
+  const mode = getRedrawMode(body);
+  const imageEditRequest = getSmartEditImageEditRequest(resolvedAspectRatio);
   return {
     toolPage: '智能改图',
     imageUrl: body.imageUrl,
     uploadedImage: body.imageUrl,
     sessionId: body.sessionId || '',
-    mode: getRedrawMode(body),
+    mode,
+    editControlMode: mode === 'brush' ? 'brush-range' : 'tag-prompt',
     userInstruction: body.prompt?.trim() || '',
     summary: promptSummary || body.prompt?.trim() || '智能改图处理中',
     promptSummary: promptSummary || body.prompt?.trim() || '智能改图处理中',
@@ -599,7 +620,10 @@ function buildSmartEditRequestParams(params: {
     preparedSourceSize: preparedSource ? { width: preparedSource.width, height: preparedSource.height } : null,
     originalSourceSize: preparedSource ? { width: preparedSource.sourceWidth, height: preparedSource.sourceHeight } : null,
     sourceWasResized: preparedSource?.wasResized ?? null,
-    requestedImageEditTimeoutMs: 300000,
+    requestedImageEditTimeoutMs: SMART_EDIT_IMAGE_EDIT_TIMEOUT_MS,
+    imageEditQuality: getSmartEditImageQuality(body.resolution),
+    imageEditAspectRatio: imageEditRequest.aspectRatio || null,
+    imageEditSize: imageEditRequest.size || null,
     agentName: 'material-editor-prompt-agent',
     agentModel: 'gpt-5.4-mini',
     editModel: imageEditMeta?.model,
@@ -608,7 +632,7 @@ function buildSmartEditRequestParams(params: {
     usedFallback: imageEditMeta?.usedFallback,
     regionCount: Array.isArray(body.regions) ? body.regions.length : 0,
     regions: sanitizeRegionsForRequest(body.regions),
-    hasMask: true,
+    hasMask: mode === 'brush',
   };
 }
 
@@ -695,44 +719,88 @@ async function completeSmartEditRedrawInBackground(params: {
   const resolvedAspectRatio = resolveSmartEditAspectRatio(body.aspectRatio, body.sourceSize);
   const outputWidth = normalizeOutputDimension(body.outputSize?.width);
   const outputHeight = normalizeOutputDimension(body.outputSize?.height);
+  const startedAt = Date.now();
+  let stepStartedAt = startedAt;
+
+  const logStep = (step: string, extra?: Record<string, unknown>) => {
+    const now = Date.now();
+    console.info('[MaterialEditor] smart-edit-background-step', {
+      orderNumber,
+      step,
+      stepMs: now - stepStartedAt,
+      totalMs: now - startedAt,
+      ...extra,
+    });
+    stepStartedAt = now;
+  };
 
   try {
+    const mode = getRedrawMode(body);
     const promptResult = await composePromptFromImage({
       origin,
       imageUrl: body.imageUrl || '',
-      mode: getRedrawMode(body),
+      mode,
       instruction: body.prompt?.trim() || '',
       regions: Array.isArray(body.regions) ? body.regions : [],
       sessionId: body.sessionId,
     });
+    logStep('compose-prompt', { promptSource: promptResult.source });
 
     console.info('[MaterialEditor] smart-edit-background-submit', {
       orderNumber,
       sessionId: body.sessionId || 'unknown',
-      mode: getRedrawMode(body),
+      mode,
       regionCount: Array.isArray(body.regions) ? body.regions.length : 0,
       promptSource: promptResult.source,
     });
 
     const finalPrompt = `${promptResult.prompt}${promptResult.negativePrompt ? `\n\n负面约束：${promptResult.negativePrompt}` : ''}`.trim();
     const preparedSource = await prepareSourceImageForSmartEdit(body.imageUrl || '', origin);
-    const resolvedMaskImageBuffer = await resolveRedrawMaskImageBuffer(body, preparedSource.width, preparedSource.height, maskImageBuffer);
-    if (!resolvedMaskImageBuffer) {
+    logStep('prepare-source', {
+      preparedWidth: preparedSource.width,
+      preparedHeight: preparedSource.height,
+      sourceWasResized: preparedSource.wasResized,
+    });
+    const resolvedMaskImageBuffer = mode === 'brush'
+      ? await resolveRedrawMaskImageBuffer(body, preparedSource.width, preparedSource.height, maskImageBuffer)
+      : undefined;
+    if (mode === 'brush' && !resolvedMaskImageBuffer) {
       throw new MaterialEditorBadRequestError(getRedrawSelectionError(body) || '请先选择修改区域');
     }
+    logStep(mode === 'brush' ? 'prepare-range' : 'skip-range', { hasMask: Boolean(resolvedMaskImageBuffer) });
+
+    const imageEditRequest = getSmartEditImageEditRequest(resolvedAspectRatio);
+    const imageEditQuality = getSmartEditImageQuality(body.resolution);
+    logStep('image-edit-request', {
+      imageEditAspectRatio: imageEditRequest.aspectRatio || null,
+      imageEditSize: imageEditRequest.size || null,
+      imageEditQuality,
+      timeoutMs: SMART_EDIT_IMAGE_EDIT_TIMEOUT_MS,
+    });
 
     const imageEditResult = await runPsydoImageEditWithMetaFromPreparedBuffer({
       prompt: finalPrompt,
-      aspectRatio: resolvedAspectRatio,
-      quality: 'high',
-      maskImageBuffer: resolvedMaskImageBuffer,
+      ...imageEditRequest,
+      quality: imageEditQuality,
+      ...(resolvedMaskImageBuffer ? { maskImageBuffer: resolvedMaskImageBuffer } : {}),
+      timeoutMs: SMART_EDIT_IMAGE_EDIT_TIMEOUT_MS,
+      allowFallbackOnTimeout: false,
     }, preparedSource.buffer);
+    logStep('image-edit', {
+      editModel: imageEditResult.meta.model,
+      editTarget: imageEditResult.meta.targetName,
+      usedFallback: imageEditResult.meta.usedFallback,
+    });
     const resultBuffer = outputWidth && outputHeight
       ? await sharp(imageEditResult.buffer)
         .resize({ width: outputWidth, height: outputHeight, fit: 'fill' })
         .png()
         .toBuffer()
       : imageEditResult.buffer;
+    logStep('resize-result', {
+      outputWidth,
+      outputHeight,
+    });
 
     let editedUrl = '';
     try {
@@ -742,11 +810,13 @@ async function completeSmartEditRedrawInBackground(params: {
       const localUrl = await saveBufferToLocalMaterialFile(resultBuffer, `material-editor/${userId}/${orderNumber}-redraw.png`);
       editedUrl = new URL(localUrl, origin).toString();
     }
+    logStep('upload-result');
 
     const updatedUser = await userManager.deductPointsAtomically(userId, SMART_EDIT_REQUIRED_POINTS);
     if (!updatedUser) {
       throw new MaterialEditorBadRequestError('积分不足');
     }
+    logStep('deduct-points', { remainingPoints: updatedUser.points });
 
     await transactionManager.updateTransaction(orderNumber, {
       status: '成功',
@@ -771,14 +841,16 @@ async function completeSmartEditRedrawInBackground(params: {
       resultData: editedUrl,
       uploadedImage: body.imageUrl,
     });
+    logStep('update-order-success');
 
     try {
       await createMaterialRecord(userId, editedUrl, 'redraw');
+      logStep('create-material-record');
     } catch (recordError) {
       console.warn('[MaterialEditor] smart-edit-material-record-failed', { orderNumber, error: recordError });
     }
   } catch (error) {
-    console.error('[MaterialEditor] smart-edit-background-failed', { orderNumber, error });
+    console.error('[MaterialEditor] smart-edit-background-failed', { orderNumber, totalMs: Date.now() - startedAt, error });
     try {
       await transactionManager.updateTransaction(orderNumber, {
         status: isImageEditTimeoutError(error) ? '超时' : '失败',
@@ -863,7 +935,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, message: '缺少修改提示词' }, { status: 400 });
       }
 
-      const selectionError = !maskImageBuffer && !body.maskImageBase64 ? getRedrawSelectionError(body) : null;
+      const selectionError = getRedrawSelectionError(body, { hasExternalRange: Boolean(maskImageBuffer || body.maskImageBase64) });
       if (selectionError) {
         return NextResponse.json({ success: false, message: selectionError }, { status: 400 });
       }

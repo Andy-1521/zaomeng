@@ -65,10 +65,6 @@ type Props = {
 
 const TAG_REGION_COLORS = ['#a855f7', '#2563eb', '#ec4899', '#14b8a6', '#f97316', '#8b5cf6'];
 const BRUSH_SIZE_PRESETS = [16, 32, 56, 84];
-const TAG_MASK_DEFAULT_RADIUS = 96;
-const TAG_MASK_RADIUS_PRESETS = [48, 96, 180];
-const TAG_MASK_RADIUS_MIN = 24;
-const TAG_MASK_RADIUS_MAX = 420;
 const BRUSH_COLOR_OPTIONS = [
   { label: '洋红', value: '#ec4899' },
   { label: '紫色', value: '#a855f7' },
@@ -166,7 +162,6 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
   const [draggingRegionId, setDraggingRegionId] = useState<string | null>(null);
   const [outputSize, setOutputSize] = useState<SmartEditAspectRatioOption>(DEFAULT_SMART_EDIT_SIZE_OPTION);
   const [outputResolution, setOutputResolution] = useState<SmartEditResolution>('2k');
-  const [tagMaskRadius, setTagMaskRadius] = useState(TAG_MASK_DEFAULT_RADIUS);
 
   const resolvedActiveRegionId = useMemo(() => {
     if (!tagRegions.length) return null;
@@ -248,16 +243,13 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
     return getSmartEditOutputSize(outputSize, outputResolution, naturalSize);
   }, [naturalSize, outputResolution, outputSize]);
 
-  const outputSizeSummary = useMemo(() => {
-    if (outputSize === 'auto') {
-      return `自动：${resolvedOutputSize.resolvedAspectRatio} · ${resolvedOutputSize.width}×${resolvedOutputSize.height}`;
-    }
-    return `${resolvedOutputSize.resolvedAspectRatio} · ${resolvedOutputSize.width}×${resolvedOutputSize.height}`;
-  }, [outputSize, resolvedOutputSize.height, resolvedOutputSize.resolvedAspectRatio, resolvedOutputSize.width]);
-
   const selectedResolutionOption = useMemo(() => {
     return SMART_EDIT_RESOLUTION_OPTIONS.find((option) => option.value === outputResolution) || SMART_EDIT_RESOLUTION_OPTIONS[1];
   }, [outputResolution]);
+
+  const promptPlaceholder = activeTool === 'tag'
+    ? '例如：把标记目标改成米老鼠，保持动作、背景和光影不变；多个标记可以分别说明。'
+    : '例如：把涂抹范围里的图案改成米老鼠，其他区域保持不变。';
 
   const isGifImage = useMemo(() => isGifImageUrl(imageUrl), [imageUrl]);
 
@@ -417,19 +409,59 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
       menu.appendChild(optionButton);
     });
 
-    const customButton = document.createElement('button');
-    customButton.type = 'button';
-    customButton.className = 'mt-1 flex w-full items-center gap-2 rounded-xl border border-dashed border-white/12 px-3 py-2 text-left text-sm text-white/70 transition hover:bg-white/8 hover:text-white';
-    customButton.textContent = '自定义输入...';
-    customButton.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const customValue = window.prompt('输入自定义标记', region.customTarget || label || region.description || '');
-      if (!customValue) return;
+    const customSection = document.createElement('div');
+    customSection.className = 'mt-1 rounded-xl border border-dashed border-white/12 bg-white/[0.03] p-2';
+
+    const customLabel = document.createElement('div');
+    customLabel.className = 'mb-1.5 text-[11px] text-white/42';
+    customLabel.textContent = '自定义输入';
+
+    const customRow = document.createElement('div');
+    customRow.className = 'flex items-center gap-1.5';
+
+    const customInput = document.createElement('input');
+    customInput.type = 'text';
+    customInput.value = region.customTarget || '';
+    customInput.placeholder = '输入标记名称';
+    customInput.className = 'min-w-0 flex-1 rounded-lg border border-white/10 bg-black/28 px-2.5 py-1.5 text-xs text-white outline-none placeholder:text-white/28 focus:border-fuchsia-300/45 focus:bg-black/38';
+
+    const applyCustomInput = () => {
+      const customValue = customInput.value.trim();
+      if (!customValue) {
+        customInput.focus();
+        return;
+      }
       closeAllTagTokenMenus();
       applyCustomRegionLabelRef.current(region.id, customValue);
+    };
+
+    customInput.addEventListener('pointerdown', (event) => event.stopPropagation());
+    customInput.addEventListener('click', (event) => event.stopPropagation());
+    customInput.addEventListener('keydown', (event) => {
+      event.stopPropagation();
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        applyCustomInput();
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeAllTagTokenMenus();
+      }
     });
-    menu.appendChild(customButton);
+
+    const customApplyButton = document.createElement('button');
+    customApplyButton.type = 'button';
+    customApplyButton.className = 'rounded-lg bg-white/10 px-2.5 py-1.5 text-xs text-white/74 transition hover:bg-white/18 hover:text-white';
+    customApplyButton.textContent = '应用';
+    customApplyButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      applyCustomInput();
+    });
+
+    customRow.append(customInput, customApplyButton);
+    customSection.append(customLabel, customRow);
+    menu.appendChild(customSection);
 
     const toggleMenu = (event: MouseEvent) => {
       event.preventDefault();
@@ -516,39 +548,9 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
     requestAnimationFrame(() => placeEditorSelection(savedSelectionRef.current));
   }, [createTagTokenElement, placeEditorSelection, syncPromptFromEditor, tagRegions]);
 
-  const reconcileRegionsFromEditor = useCallback(() => {
-    const editor = promptEditorRef.current;
-    if (!editor || !tagRegions.length) return;
-
-    const preservedRegionIds = new Set<string>();
-    editor.querySelectorAll<HTMLElement>('[data-role="tag-token"][data-region-id], [data-role="tag-token-placeholder"][data-region-id]').forEach((node) => {
-      const regionId = node.dataset.regionId?.trim();
-      if (regionId) {
-        preservedRegionIds.add(regionId);
-      }
-    });
-
-    const removedRegionIds = tagRegions
-      .filter((region) => region.hasEditorToken && !preservedRegionIds.has(region.id))
-      .map((region) => region.id);
-
-    if (!removedRegionIds.length) return;
-
-    const removedRegionIdSet = new Set(removedRegionIds);
-    removedRegionIds.forEach((regionId) => {
-      identifyControllersRef.current[regionId]?.abort();
-      delete identifyControllersRef.current[regionId];
-    });
-
-    setTagRegions((current) => current.filter((region) => !removedRegionIdSet.has(region.id)));
-    setActiveRegionId((current) => current && removedRegionIdSet.has(current) ? null : current);
-    setSubmitError('');
-  }, [tagRegions]);
-
   const handlePromptEditorInput = useCallback(() => {
     syncPromptFromEditor();
-    reconcileRegionsFromEditor();
-  }, [reconcileRegionsFromEditor, syncPromptFromEditor]);
+  }, [syncPromptFromEditor]);
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
@@ -701,6 +703,53 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
       ctx.clearRect(0, 0, brushCanvasRef.current.width, brushCanvasRef.current.height);
     }
   }, []);
+
+  const clearAllTagRegions = useCallback(() => {
+    Object.values(identifyControllersRef.current).forEach((controller) => controller.abort());
+    identifyControllersRef.current = {};
+    closeAllTagTokenMenus();
+
+    const editor = promptEditorRef.current;
+    if (editor) {
+      editor.querySelectorAll<HTMLElement>('[data-role="tag-token"], [data-role="tag-token-placeholder"]').forEach((node) => {
+        const nextSibling = node.nextSibling;
+        if (nextSibling?.nodeType === Node.TEXT_NODE && nextSibling.textContent?.startsWith(' ')) {
+          nextSibling.textContent = nextSibling.textContent.slice(1);
+          if (!nextSibling.textContent) {
+            nextSibling.parentNode?.removeChild(nextSibling);
+          }
+        }
+        node.parentNode?.removeChild(node);
+      });
+      syncPromptFromEditor();
+    }
+
+    draggingRegionIdRef.current = null;
+    regionDragGestureRef.current = null;
+    setDraggingRegionId(null);
+    setActiveRegionId(null);
+    setTagRegions([]);
+  }, [closeAllTagTokenMenus, syncPromptFromEditor]);
+
+  const handleToolChange = useCallback((nextTool: ToolMode) => {
+    if (nextTool === activeTool) return;
+
+    setSubmitError('');
+    setBrushCursor(null);
+    setIsDrawing(false);
+    drawGestureRef.current = null;
+    closeBrushColorMenu();
+    closeAspectRatioMenu();
+    closeResolutionMenu();
+
+    if (nextTool === 'brush') {
+      clearAllTagRegions();
+    } else {
+      clearBrushMask();
+    }
+
+    setActiveTool(nextTool);
+  }, [activeTool, clearAllTagRegions, clearBrushMask, closeAspectRatioMenu, closeBrushColorMenu, closeResolutionMenu]);
 
   const undoLastBrushStroke = useCallback(() => {
     setBrushMaskSegments((current) => {
@@ -905,11 +954,10 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
     const regionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     setSubmitError('');
-    setActiveTool('tag');
-    setTagRegions((current) => [...current, { id: regionId, naturalX, naturalY, maskRadius: tagMaskRadius, description: '', candidates: [], selectedCandidate: '', confirmedCandidate: '', customTarget: '', identifyError: '', isIdentifying: true, hasEditorToken: false }]);
+    setTagRegions((current) => [...current, { id: regionId, naturalX, naturalY, description: '', candidates: [], selectedCandidate: '', confirmedCandidate: '', customTarget: '', identifyError: '', isIdentifying: true, hasEditorToken: false }]);
     setActiveRegionId(regionId);
     void identifyRegion(regionId, naturalX, naturalY, imageWidth, imageHeight);
-  }, [getNaturalPointFromClientPoint, identifyRegion, imageReady, isSubmitting, tagMaskRadius]);
+  }, [getNaturalPointFromClientPoint, identifyRegion, imageReady, isSubmitting]);
 
   const handleBrushUp = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
     const gesture = drawGestureRef.current;
@@ -1165,7 +1213,6 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
       formData.append('mode', submitMode);
       formData.append('regions', JSON.stringify(submitRegions));
       formData.append('brushSegments', JSON.stringify(submitBrushSegments));
-      formData.append('tagMaskRadius', String(tagMaskRadius));
       formData.append('prompt', promptText);
 
       const response = await fetch('/api/material-editor', {
@@ -1204,7 +1251,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
         });
       onClose();
     }
-  }, [activeTool, brushMaskSegments, imageUrl, instruction, isResolvingPrompt, isSubmitting, naturalSize, onClose, onComplete, outputResolution, outputSize, resolvedOutputSize, tagMaskRadius, tagRegions]);
+  }, [activeTool, brushMaskSegments, imageUrl, instruction, isResolvingPrompt, isSubmitting, naturalSize, onClose, onComplete, outputResolution, outputSize, resolvedOutputSize, tagRegions]);
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/72 px-4 py-4 backdrop-blur-[2px]">
@@ -1244,7 +1291,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                     <canvas
                       ref={brushLayerRef}
                       className="pointer-events-none absolute inset-0 h-full w-full"
-                      style={{ opacity: 0.8 }}
+                      style={{ opacity: activeTool === 'brush' ? 0.8 : 0 }}
                     />
 
                     {activeTool === 'brush' && brushCursor && displaySize.width > 0 && displaySize.height > 0 ? (
@@ -1271,7 +1318,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                       onPointerLeave={handleBrushLeave}
                     />
 
-                   {imageReady && naturalSize.width > 0 ? (
+                    {activeTool === 'tag' && imageReady && naturalSize.width > 0 ? (
                      <div
                        className="pointer-events-none absolute inset-0 z-20 overflow-visible"
                      >
@@ -1283,7 +1330,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                       const color = getRegionColor(index);
                       const pointLeft = `${(region.naturalX / naturalSize.width) * 100}%`;
                       const pointTop = `${(region.naturalY / naturalSize.height) * 100}%`;
-                      const rangeDiameter = Math.max(28, tagMaskRadius * displayScale * 2);
+                       const rangeDiameter = isActive ? 48 : 38;
                       return (
                         <Fragment key={region.id}>
                           <div
@@ -1450,30 +1497,30 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                   <div className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
                     <button
                       type="button"
-                      onClick={() => setActiveTool('tag')}
-                      className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition ${activeTool === 'tag' ? 'bg-white text-slate-950 shadow-[0_8px_22px_rgba(255,255,255,0.12)]' : 'text-white/60 hover:text-white/85'}`}
-                    >
-                      标记
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTool('brush')}
+                      onClick={() => handleToolChange('brush')}
                       className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition ${activeTool === 'brush' ? 'bg-white text-slate-950 shadow-[0_8px_22px_rgba(255,255,255,0.12)]' : 'text-white/60 hover:text-white/85'}`}
                     >
                       画笔
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => handleToolChange('tag')}
+                      className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition ${activeTool === 'tag' ? 'bg-white text-slate-950 shadow-[0_8px_22px_rgba(255,255,255,0.12)]' : 'text-white/60 hover:text-white/85'}`}
+                    >
+                      标记
+                    </button>
                   </div>
-                  <button type="button" onClick={undoLastBrushStroke} disabled={brushStrokeCount === 0} className="rounded-full bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white/55 transition hover:bg-white/[0.08] hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-35">撤销上一步</button>
-                </div>
-
-                <div className="mb-2 text-[11px] text-white/34">{activeTool === 'tag' ? '当前为标记模式：单击图片添加标记点位，点位识别后会自动写进下方要求。' : '当前为画笔模式：拖动即可圈选修改区域，颜色仅用于区分操作层，不影响最终出图。'} </div>
-                <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-white/42">
-                  <span className="rounded-full border border-white/8 bg-white/[0.04] px-2.5 py-1">输出 {outputSizeSummary}</span>
-                  <span className="rounded-full border border-white/8 bg-white/[0.04] px-2.5 py-1">{outputResolution} · {selectedResolutionOption.description}</span>
-                  {isGifImage ? (
-                    <span className="rounded-full border border-amber-300/20 bg-amber-500/12 px-2.5 py-1 text-amber-100/78">GIF 按静态首帧处理</span>
+                  {activeTool === 'brush' ? (
+                    <button type="button" onClick={undoLastBrushStroke} disabled={brushStrokeCount === 0} className="rounded-full bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white/55 transition hover:bg-white/[0.08] hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-35">撤销上一步</button>
                   ) : null}
                 </div>
+
+                <div className="mb-2 text-[11px] text-white/34">{activeTool === 'tag' ? '当前为标记模式：点选目标，AI 根据识别结果和你的文字精准修改；适合不想涂抹范围的对象替换。' : '当前为画笔模式：涂哪里改哪里，适合精细局部；颜色仅用于区分操作层，不影响最终出图。'} 提交后可在订单记录查看进度。</div>
+                {isGifImage ? (
+                  <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-white/42">
+                    <span className="rounded-full border border-amber-300/20 bg-amber-500/12 px-2.5 py-1 text-amber-100/78">GIF 按静态首帧处理</span>
+                  </div>
+                ) : null}
 
                 <div className="relative rounded-[1.25rem] border border-white/10 bg-[#0d0d12] transition focus-within:ring-2 focus-within:ring-fuchsia-500/30">
                   <div
@@ -1484,7 +1531,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                     onKeyUp={saveEditorSelection}
                     onMouseUp={saveEditorSelection}
                     onBlur={saveEditorSelection}
-                    data-placeholder="例如：把这只狗改成猫，保持姿势和背景不变；也可以在文案里结合下方标记继续补充。"
+                    data-placeholder={promptPlaceholder}
                     className="min-h-[108px] whitespace-pre-wrap break-words px-4 py-3.5 pb-24 text-[15px] leading-7 text-white outline-none empty:before:pointer-events-none empty:before:text-white/30 empty:before:content-[attr(data-placeholder)]"
                   />
 
@@ -1561,7 +1608,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                         ) : null}
                       </div>
                     </div>
-                    <button type="button" onClick={() => void handleSubmit()} disabled={isSubmitting || isResolvingPrompt} className="rounded-xl bg-gradient-to-r from-fuchsia-600 to-violet-600 px-4 py-2 text-sm font-medium text-white shadow-[0_10px_24px_rgba(168,85,247,0.24)] transition hover:from-fuchsia-500 hover:to-violet-500 disabled:cursor-not-allowed disabled:opacity-50">{isSubmitting ? '提交中...' : '提交到后台'}</button>
+                    <button type="button" onClick={() => void handleSubmit()} disabled={isSubmitting || isResolvingPrompt} className="rounded-xl bg-gradient-to-r from-fuchsia-600 to-violet-600 px-4 py-2 text-sm font-medium text-white shadow-[0_10px_24px_rgba(168,85,247,0.24)] transition hover:from-fuchsia-500 hover:to-violet-500 disabled:cursor-not-allowed disabled:opacity-50">{isSubmitting ? '提交中...' : '提交生成'}</button>
                   </div>
                 </div>
 
@@ -1624,15 +1671,8 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                   ) : null}
                   {activeTool === 'tag' ? (
                     <div className="flex min-w-[320px] flex-1 flex-wrap items-center gap-2">
-                      <span className="text-xs text-white/48">修改范围</span>
-                      <input type="range" min={TAG_MASK_RADIUS_MIN} max={TAG_MASK_RADIUS_MAX} step="4" value={tagMaskRadius} onChange={(event) => setTagMaskRadius(Number(event.target.value))} className="min-w-[160px] flex-1 accent-fuchsia-400" />
-                      <span className="w-14 text-right text-xs text-white/42">{tagMaskRadius}px</span>
-                      <div className="flex items-center gap-1">
-                        {TAG_MASK_RADIUS_PRESETS.map((radius) => (
-                          <button key={radius} type="button" onClick={() => setTagMaskRadius(radius)} className={`rounded-lg border px-2 py-1 text-[11px] transition ${tagMaskRadius === radius ? 'border-fuchsia-300/45 bg-fuchsia-500/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.04] text-white/48 hover:bg-white/[0.08] hover:text-white/75'}`}>{radius === 48 ? '小' : radius === 96 ? '中' : '大'}</button>
-                        ))}
-                      </div>
-                      <span className="basis-full text-xs text-white/32">标记点位可拖动后重识别，圆形区域表示本次会重点修改的范围。</span>
+                      <span className="text-xs text-white/48">标记提示</span>
+                      <span className="rounded-full border border-white/8 bg-white/[0.04] px-3 py-1.5 text-xs text-white/62">单击目标添加标记，拖动点位可重新识别；提交时靠识别结果和文字控制改图。</span>
                     </div>
                   ) : null}
                 </div>

@@ -14,6 +14,8 @@ export type FilterType = 'all' | TabType;
 type TaskCenterFilter = 'all' | 'processing' | 'success' | 'failed';
 export type TaskStatus = '处理中' | '成功' | '失败' | '超时' | '部分成功';
 
+const TASK_FILTER_VALUES: FilterType[] = ['all', 'color-extraction', 'ai-generate', 'smart-edit', 'watermark', 'custom'];
+
 export interface TaskRecord {
   id: string;
   tab: TabType;
@@ -736,8 +738,10 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   const [retryingOrder, setRetryingOrder] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState<FilterType>('all');
   const [statusFilter, setStatusFilter] = useState<TaskCenterFilter>('all');
+  const [isToolFilterOpen, setIsToolFilterOpen] = useState(false);
   const [showAllHistory, setShowAllHistory] = useState(false);
   const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null);
+  const toolFilterRef = useRef<HTMLDivElement>(null);
   const taskCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const processingCount = tasks.filter((task) => task.status === '处理中').length;
@@ -881,6 +885,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
   useEffect(() => {
     if (isCollapsed) {
+      setIsToolFilterOpen(false);
       return;
     }
 
@@ -897,6 +902,29 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       window.clearInterval(intervalId);
     };
   }, [isCollapsed, loadTasks, tasks, userId]);
+
+  useEffect(() => {
+    if (!isToolFilterOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target || toolFilterRef.current?.contains(target)) return;
+      setIsToolFilterOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsToolFilterOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isToolFilterOpen]);
 
 
 
@@ -1386,18 +1414,48 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
         {!isCollapsed && (
           <>
             <div className="border-b border-white/10 px-4 py-3">
-              <div className="flex items-center gap-2">
-                    <div className="rounded-full border border-white/8 bg-white/[0.04] px-3 py-2 text-xs text-white/55">
-                      <select
-                        value={filterTab}
-                        onChange={(event) => setFilterTab(event.target.value as FilterType)}
-                        className="min-w-[110px] appearance-none bg-transparent pr-5 text-white outline-none cursor-pointer"
-                      >
-                        {(['all', 'color-extraction', 'ai-generate', 'smart-edit', 'watermark', 'custom'] as FilterType[]).map((filter) => (
-                          <option key={filter} value={filter} className="bg-[#111] text-white">{getFilterLabel(filter)}</option>
-                        ))}
-                      </select>
+              <div className="mb-3 flex items-center gap-2">
+                <div ref={toolFilterRef} data-role="task-history-tool-filter" className="relative min-w-[150px]">
+                  <button
+                    type="button"
+                    data-role="task-history-tool-filter-button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setIsToolFilterOpen((current) => !current);
+                    }}
+                    className="flex w-full items-center justify-between gap-2 rounded-full border border-white/10 bg-white/[0.055] px-3 py-2 text-left text-xs text-white/78 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition hover:border-white/16 hover:bg-white/[0.08] hover:text-white"
+                    aria-expanded={isToolFilterOpen}
+                    aria-haspopup="listbox"
+                  >
+                    <span className="truncate">{getFilterLabel(filterTab)}</span>
+                    <span className={`text-[10px] text-white/45 transition ${isToolFilterOpen ? 'rotate-180' : ''}`}>▾</span>
+                  </button>
+
+                  {isToolFilterOpen ? (
+                    <div data-role="task-history-tool-filter-menu" className="absolute left-0 top-full z-40 mt-2 w-[190px] overflow-hidden rounded-2xl border border-white/12 bg-[#0d0d12] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.42)]" role="listbox">
+                      {TASK_FILTER_VALUES.map((filter) => {
+                        const selected = filter === filterTab;
+                        return (
+                          <button
+                            key={filter}
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setFilterTab(filter);
+                              setIsToolFilterOpen(false);
+                            }}
+                            className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs transition ${selected ? 'bg-white text-slate-950' : 'text-white/72 hover:bg-white/[0.08] hover:text-white'}`}
+                            role="option"
+                            aria-selected={selected}
+                          >
+                            <span className="flex-1 truncate">{getFilterLabel(filter)}</span>
+                            {selected ? <span className="text-[10px]">✓</span> : null}
+                          </button>
+                        );
+                      })}
                     </div>
+                  ) : null}
+                </div>
               </div>
               <div className="grid grid-cols-4 gap-1 rounded-2xl border border-white/8 bg-white/[0.035] p-1">
                 {([

@@ -241,7 +241,10 @@ function QuickCreateDropdown({
     <div className="relative" data-role="quick-create-dropdown">
       <button
         type="button"
-        onClick={() => onToggle(dropdownId)}
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggle(dropdownId);
+        }}
         aria-expanded={isOpen}
         aria-haspopup="listbox"
         className={`inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.045] px-3 py-2 text-xs text-white/78 shadow-[0_10px_24px_rgba(0,0,0,0.16)] transition hover:bg-white/[0.08] hover:text-white ${buttonClassName}`}
@@ -259,7 +262,10 @@ function QuickCreateDropdown({
               <button
                 key={option.value}
                 type="button"
-                onClick={() => onSelect(option.value)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSelect(option.value);
+                }}
                 className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs transition ${selected ? 'bg-white text-slate-950' : 'text-white/72 hover:bg-white/[0.08] hover:text-white'}`}
               >
                 <span className="flex-1 truncate">{option.label}</span>
@@ -590,6 +596,7 @@ export default function QuickCreatePage() {
   const [isAiReferenceUploading, setIsAiReferenceUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [canHoverCardControls, setCanHoverCardControls] = useState(true);
+  const [isCompactActionBar, setIsCompactActionBar] = useState(false);
   const [columnCount, setColumnCount] = useState(4);
   const [thumbnailSize, setThumbnailSize] = useState(290);
   const [imageAspectRatios, setImageAspectRatios] = useState<Record<string, number>>({});
@@ -1094,6 +1101,23 @@ export default function QuickCreatePage() {
     const mediaQuery = window.matchMedia('(hover: hover) and (pointer: fine)');
     const update = () => {
       setCanHoverCardControls(mediaQuery.matches);
+    };
+
+    update();
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', update);
+      return () => mediaQuery.removeEventListener('change', update);
+    }
+
+    mediaQuery.addListener(update);
+    return () => mediaQuery.removeListener(update);
+  }, []);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 767px)');
+    const update = () => {
+      setIsCompactActionBar(mediaQuery.matches);
     };
 
     update();
@@ -1725,7 +1749,7 @@ export default function QuickCreatePage() {
     dispatchTaskHistoryUpdated();
     void loadOrderResults();
     if (meta?.status === '处理中' || meta?.orderId) {
-      showToast('智能改图已提交到后台处理', 'success');
+      showToast('智能改图已提交生成，可在订单记录查看进度', 'success');
       return;
     }
     handleEditorComplete(resultUrl);
@@ -1844,7 +1868,7 @@ export default function QuickCreatePage() {
   useEffect(() => {
     const updateActionBarPosition = () => {
       const container = gallerySectionRef.current;
-      if (!container || selectedImageList.length === 0) {
+      if (isCompactActionBar || !container || selectedImageList.length === 0) {
         setActionBarPosition(null);
         return;
       }
@@ -1887,10 +1911,10 @@ export default function QuickCreatePage() {
       window.removeEventListener('resize', updateActionBarPosition);
       window.removeEventListener('scroll', updateActionBarPosition, true);
     };
-  }, [selectedImageList]);
+  }, [isCompactActionBar, selectedImageList]);
 
   return (
-    <div className="flex-1 px-6 py-8 overflow-y-auto">
+    <div className={`flex-1 px-6 py-8 overflow-y-auto ${isCompactActionBar && selectedImageList.length > 0 ? 'pb-40' : ''}`}>
       {imageEditor.open && imageEditor.mode === 'crop' && (
         <CropEditorPanel
           imageUrl={imageEditor.imageUrl}
@@ -2035,7 +2059,7 @@ export default function QuickCreatePage() {
           <div className="flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.045] p-1">
             {([
               ['gallery', '图库'],
-                ['orders', '项目'],
+              ['orders', '订单'],
             ] as Array<[LibraryView, string]>).map(([view, label]) => (
               <button
                 key={view}
@@ -2069,7 +2093,7 @@ export default function QuickCreatePage() {
 
         <div className="mb-5 rounded-[1.8rem] border border-white/[0.08] bg-black/28 p-3 shadow-[0_18px_70px_rgba(0,0,0,0.2)] backdrop-blur-2xl ring-1 ring-white/[0.03]">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-1">
+            <div className={`flex min-w-0 flex-1 items-center gap-2 pb-1 ${libraryView === 'gallery' ? 'overflow-x-auto' : 'overflow-visible'}`}>
               {libraryView === 'gallery' ? (
                 <>
                   {([
@@ -2378,8 +2402,11 @@ export default function QuickCreatePage() {
                           const isSelectable = !isOrderCard || image.isResultImage;
                           const canDeleteOrder = isOrderCard && image.statusLabel !== '处理中';
                           const orderStatusClass = isOrderCard ? getOrderStatusClass(image.statusLabel) : '';
-                          const isCompactCard = thumbnailSize <= 190;
-                          const actionControlsVisibilityClass = canHoverCardControls ? 'opacity-0 transition-all group-hover:opacity-100' : 'opacity-100 transition-all';
+                          const actionControlsVisibilityClass = canHoverCardControls
+                            ? 'opacity-0 transition-all group-hover:opacity-100'
+                            : selected
+                              ? 'opacity-100 transition-all'
+                              : 'pointer-events-none opacity-0 transition-all';
                           const idleCardClass = isSelectable
                             ? 'border-white/10 hover:border-white/30 hover:-translate-y-1 hover:shadow-[0_20px_45px_rgba(15,23,42,0.35)]'
                             : 'border-white/10';
@@ -2432,7 +2459,7 @@ export default function QuickCreatePage() {
                               <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/62 via-black/10 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
                               <div className="absolute inset-x-0 bottom-0 h-24 pointer-events-none bg-gradient-to-t from-black/68 to-transparent opacity-75" />
                               {isOrderCard && (
-                                <div className="absolute left-3 top-3 z-10 flex max-w-[calc(100%-4.25rem)] flex-wrap items-center gap-2">
+                                <div className="absolute left-3 top-3 z-10 flex max-w-[calc(100%-11.5rem)] flex-wrap items-center gap-2">
                                   <span className="rounded-full border border-white/16 bg-black/58 px-2.5 py-1 text-[11px] font-medium text-white/86 backdrop-blur-md">
                                     {image.toolLabel}
                                   </span>
@@ -2448,7 +2475,7 @@ export default function QuickCreatePage() {
                                   </svg>
                                 </div>
                               )}
-                              <div className={`absolute z-20 flex gap-2 ${isCompactCard ? 'right-3 bottom-3 flex-row flex-wrap justify-end max-w-[calc(100%-1.5rem)]' : 'right-3 top-3 flex-col'} ${actionControlsVisibilityClass}`}>
+                              <div className={`absolute right-3 top-3 z-20 flex flex-col gap-2 ${actionControlsVisibilityClass}`}>
                                 {isOrderCard && (
                                   <button
                                     type="button"
@@ -2522,8 +2549,8 @@ export default function QuickCreatePage() {
                                     event.stopPropagation();
                                     previewMaterialImage(image.imageUrl);
                                   }}
-                                className={`absolute z-20 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-black/58 text-white/78 shadow-lg backdrop-blur-md hover:-translate-y-0.5 hover:bg-white/18 hover:text-white ${isCompactCard ? 'right-3 top-3' : 'right-3 bottom-3'} ${actionControlsVisibilityClass}`}
-                                title="预览大图"
+                                  className={`absolute right-3 bottom-3 z-20 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-black/58 text-white/78 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-white/18 hover:text-white ${actionControlsVisibilityClass}`}
+                                  title="预览大图"
                                 >
                                   <svg className="h-4.5 w-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 3H3v5m18 0V3h-5M3 16v5h5m8 0h5v-5" />
@@ -2568,17 +2595,20 @@ export default function QuickCreatePage() {
           </div>
         )}
 
-        {selectedImageList.length > 0 && actionBarPosition && (
+        {selectedImageList.length > 0 && (actionBarPosition || isCompactActionBar) && (
           <div
-            className="pointer-events-none absolute z-30 transition-all duration-150"
-            style={{
+            data-role="selection-action-bar"
+            className={`pointer-events-none transition-all duration-150 ${isCompactActionBar ? 'fixed inset-x-3 bottom-4 z-40' : 'absolute z-30'}`}
+            style={isCompactActionBar || !actionBarPosition ? undefined : {
               top: actionBarPosition.top + 6,
               left: actionBarPosition.left,
               transform: 'translateX(-50%)',
             }}
           >
-            <div className="pointer-events-none absolute left-1/2 top-0 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[3px] border-l border-t border-white/12 bg-black/78 backdrop-blur-2xl" />
-            <div className={`pointer-events-auto rounded-[1.7rem] border border-white/12 bg-black/82 px-4 py-4 backdrop-blur-2xl shadow-[0_18px_44px_rgba(0,0,0,0.42),0_6px_20px_rgba(88,28,135,0.2)] ring-1 ring-white/5 max-w-[92vw] transition-all ${showAiPromptPanel ? 'min-w-[760px]' : 'min-w-[500px]'}`}>
+            {!isCompactActionBar && (
+              <div className="pointer-events-none absolute left-1/2 top-0 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[3px] border-l border-t border-white/12 bg-black/78 backdrop-blur-2xl" />
+            )}
+            <div className={`pointer-events-auto rounded-[1.7rem] border border-white/12 bg-black/82 backdrop-blur-2xl shadow-[0_18px_44px_rgba(0,0,0,0.42),0_6px_20px_rgba(88,28,135,0.2)] ring-1 ring-white/5 transition-all ${isCompactActionBar ? 'max-h-[72vh] w-full overflow-y-auto px-3 py-3' : `max-w-[92vw] px-4 py-4 ${showAiPromptPanel ? 'min-w-[760px]' : 'min-w-[500px]'}`}`}>
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <span className="whitespace-nowrap rounded-full border border-white/[0.08] bg-white/[0.045] px-3 py-1.5 text-xs font-medium text-white/62">已选 {selectedImageList.length} 张</span>
                 {processingActionLabel && (

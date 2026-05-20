@@ -31,6 +31,8 @@ type ImageEditFormParams = {
   quality?: string;
   maskImageBase64?: string;
   maskImageBuffer?: Buffer;
+  timeoutMs?: number;
+  allowFallbackOnTimeout?: boolean;
 };
 
 type ImageEditParams = ImageEditFormParams & {
@@ -205,12 +207,13 @@ async function runImageEditWithTarget(
   target: ImageEditTarget,
 ): Promise<Buffer> {
   const startedAt = Date.now();
+  const timeoutMs = params.timeoutMs || IMAGE_EDIT_TIMEOUT_MS;
   let lastRetryableError: Error | null = null;
 
   for (let attempt = 1; attempt <= IMAGE_EDIT_MAX_ATTEMPTS; attempt++) {
-    const remainingTimeoutMs = IMAGE_EDIT_TIMEOUT_MS - (Date.now() - startedAt);
+    const remainingTimeoutMs = timeoutMs - (Date.now() - startedAt);
     if (remainingTimeoutMs <= 0) {
-      throw new ImageEditTimeoutError(`图像编辑超时（${IMAGE_EDIT_TIMEOUT_MS}ms）`);
+      throw new ImageEditTimeoutError(`图像编辑超时（${timeoutMs}ms）`);
     }
 
     const controller = new AbortController();
@@ -232,7 +235,7 @@ async function runImageEditWithTarget(
         const errorText = await response.text();
         const message = `图像编辑失败: ${response.status} ${errorText.substring(0, 200)}`;
         if (isTimeoutLikeMessage(message)) {
-          throw new ImageEditTimeoutError(`图像编辑超时（${IMAGE_EDIT_TIMEOUT_MS}ms）`);
+          throw new ImageEditTimeoutError(`图像编辑超时（${timeoutMs}ms）`);
         }
         throw new Error(message);
       }
@@ -254,7 +257,7 @@ async function runImageEditWithTarget(
       throw new Error('图像编辑返回格式不支持');
     } catch (error) {
       if (controller.signal.aborted) {
-        throw new ImageEditTimeoutError(`图像编辑超时（${IMAGE_EDIT_TIMEOUT_MS}ms）`);
+        throw new ImageEditTimeoutError(`图像编辑超时（${timeoutMs}ms）`);
       }
 
       if (isImageEditTimeoutError(error)) {
@@ -275,7 +278,7 @@ async function runImageEditWithTarget(
 
     if (retryError) {
       console.warn(`[Psydo图像编辑] ${target.name} 第 ${attempt} 次请求失败，准备重试: ${retryError.message}`);
-      await sleep(Math.min(IMAGE_EDIT_RETRY_DELAY_MS, Math.max(0, IMAGE_EDIT_TIMEOUT_MS - (Date.now() - startedAt))));
+      await sleep(Math.min(IMAGE_EDIT_RETRY_DELAY_MS, Math.max(0, timeoutMs - (Date.now() - startedAt))));
     }
   }
 
@@ -294,6 +297,7 @@ export async function runPsydoImageEditWithMetaFromPreparedBuffer(
   normalizedBuffer: Buffer,
 ): Promise<{ buffer: Buffer; meta: ImageEditMeta }> {
   const targets = getImageEditTargets();
+  const timeoutMs = params.timeoutMs || IMAGE_EDIT_TIMEOUT_MS;
 
   let lastTimeoutError: ImageEditTimeoutError | null = null;
   let lastFallbackEligibleError: Error | null = null;
@@ -317,12 +321,14 @@ export async function runPsydoImageEditWithMetaFromPreparedBuffer(
       if (isImageEditTimeoutError(error)) {
         lastTimeoutError = error instanceof ImageEditTimeoutError
           ? error
-          : new ImageEditTimeoutError(`图像编辑超时（${IMAGE_EDIT_TIMEOUT_MS}ms）`);
+          : new ImageEditTimeoutError(`图像编辑超时（${timeoutMs}ms）`);
 
-        if (canUseNextTarget) {
+        if (canUseNextTarget && params.allowFallbackOnTimeout !== false) {
           console.warn(`[Psydo图像编辑] ${target.name} 超时，切换到备用目标`);
           continue;
         }
+
+        throw lastTimeoutError;
       }
 
       if (isFallbackEligibleImageEditError(error)) {
@@ -337,5 +343,5 @@ export async function runPsydoImageEditWithMetaFromPreparedBuffer(
     }
   }
 
-  throw lastFallbackEligibleError || lastTimeoutError || new ImageEditTimeoutError(`图像编辑超时（${IMAGE_EDIT_TIMEOUT_MS}ms）`);
+  throw lastFallbackEligibleError || lastTimeoutError || new ImageEditTimeoutError(`图像编辑超时（${timeoutMs}ms）`);
 }

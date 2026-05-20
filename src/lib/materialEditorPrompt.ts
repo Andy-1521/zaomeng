@@ -29,7 +29,7 @@ function resolveImageUrl(imageUrl: string, origin?: string) {
 }
 
 function buildRegionText(regions: PromptRegion[]) {
-  if (regions.length === 0) return '无明确标记，仅以遮罩区域为准。';
+  if (regions.length === 0) return '无明确标记。';
 
   return regions
     .map((region, index) => {
@@ -105,15 +105,15 @@ export function fallbackComposePrompt(params: {
   const regionText = buildRegionText(regions);
 
   const base = mode === 'brush'
-    ? '请仅修改遮罩区域内的内容，保持其余区域不变。'
-    : `请仅修改以下局部区域：${regionText}，保持其余区域不变。`;
+    ? '请仅修改用户画笔涂抹的修改范围内的内容，保持其余区域不变。'
+    : `请根据标记点识别结果和用户要求精准修改对应目标：${regionText}。不要扩散到未标记对象，保持其余区域不变。`;
 
   const editInstruction = instruction
     ? `${base}${instruction}`
     : `${base}边缘自然融合，风格与光影保持一致。`;
 
   return {
-    summary: mode === 'brush' ? '基于遮罩的智能改图' : '基于标记的智能改图',
+    summary: mode === 'brush' ? '基于画笔修改范围的智能改图' : '基于标记提示词的智能改图',
     prompt: editInstruction,
     negativePrompt: '不要改动未选区域，不要改变整体构图、背景、主体姿态、镜头视角与原有风格，不要生成多余元素。',
     source: 'fallback',
@@ -135,6 +135,18 @@ export async function composePromptFromImage(params: {
   const apiKey = getOpenAICompatApiKey();
   const startedAt = Date.now();
 
+  if (mode === 'brush' && regions.length === 0) {
+    console.info('[MaterialEditorPrompt] skip-agent', {
+      sessionId: sessionId || 'unknown',
+      mode,
+      regionCount: regions.length,
+      durationMs: Date.now() - startedAt,
+      source: fallback.source,
+      reason: 'brush_no_regions',
+    });
+    return fallback;
+  }
+
   if (!apiKey) {
     console.info('[MaterialEditorPrompt] skip-agent', {
       sessionId: sessionId || 'unknown',
@@ -154,15 +166,15 @@ export async function composePromptFromImage(params: {
 先准确理解图片当前内容、局部对象关系和用户真实意图，再整理成适合提交的中文提示词，不要擅自改写用户目标。
 
 要求：
-- 只修改选中的局部区域
+- 画笔模式只修改用户涂抹的修改范围；标记模式不依赖画笔涂抹范围，只根据标记点识别结果和用户文字定位目标
 - 未选中的区域必须保持不变
 - 保持整体构图、光影、色调、风格一致
 - 边缘自然融合，尽量像原图的一部分
 - 如果用户要求不完整，允许补足必要的约束，但不能偏离原意
-- 如果标记与用户自然语言一起出现，要优先结合图片语义整理成更准确的执行提示词
+- 如果标记与用户自然语言一起出现，要优先结合图片语义整理成更准确的执行提示词，并明确“仅修改被标记目标”
 - 不要输出多余解释，不要输出 Markdown
 
-选区模式：${mode === 'brush' ? '画笔遮罩' : '标记点选'}
+控制方式：${mode === 'brush' ? '画笔修改范围' : '标记精准提示词'}
 
 选区信息：
 ${buildRegionText(regions)}
