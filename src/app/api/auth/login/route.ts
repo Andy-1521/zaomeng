@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { userManager } from '@/storage/database';
-import { createPreviewDemoUser, isPreviewDemoAuthEnabled, setPreviewDemoUserCookie } from '@/lib/previewDemoAuth';
 
 /**
  * 用户登录接口（使用本地 MySQL 数据库验证）
@@ -30,23 +29,6 @@ export async function POST(request: NextRequest) {
         { success: false, message: '请输入有效的邮箱地址' },
         { status: 400 }
       );
-    }
-
-    if (isPreviewDemoAuthEnabled()) {
-      const demoUser = createPreviewDemoUser(email);
-      const response = NextResponse.json({
-        success: true,
-        message: '预览环境演示登录成功',
-        data: {
-          id: demoUser.id,
-          username: demoUser.username,
-          email: demoUser.email,
-          points: demoUser.points,
-          isAdmin: demoUser.isAdmin,
-        },
-      });
-      setPreviewDemoUserCookie(response, demoUser);
-      return response;
     }
 
     // 从数据库中验证用户

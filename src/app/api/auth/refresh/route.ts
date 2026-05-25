@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { userManager } from '@/storage/database';
-import { createPreviewDemoUser, isPreviewDemoAuthEnabled, setPreviewDemoUserCookie } from '@/lib/previewDemoAuth';
 
 /**
  * 会话刷新接口
@@ -48,23 +47,6 @@ export async function POST(request: NextRequest) {
         { success: false, message: '无权限刷新其他用户会话' },
         { status: 403 }
       );
-    }
-
-    if (isPreviewDemoAuthEnabled() && userId === 'preview-demo-user') {
-      const demoUser = createPreviewDemoUser();
-      const response = NextResponse.json({
-        success: true,
-        message: '预览环境会话刷新成功',
-        data: {
-          id: demoUser.id,
-          username: demoUser.username,
-          email: demoUser.email,
-          points: demoUser.points,
-          isAdmin: demoUser.isAdmin,
-        },
-      });
-      setPreviewDemoUserCookie(response, demoUser);
-      return response;
     }
 
     // 从数据库查询用户信息
