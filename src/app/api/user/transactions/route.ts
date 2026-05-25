@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { transactionManager, userManager } from '@/storage/database';
 import { reconcileProcessingTransactions } from '@/lib/reconcileProcessingTransactions';
+import { isPreviewDemoAuthEnabled } from '@/lib/previewDemoAuth';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误';
@@ -100,6 +101,14 @@ export async function GET(request: NextRequest) {
         { success: false, message: '无权限访问其他用户的消费记录' },
         { status: 403 }
       );
+    }
+
+    if (isPreviewDemoAuthEnabled() && userId === 'preview-demo-user') {
+      return NextResponse.json({
+        success: true,
+        data: [],
+        nextCursor: null,
+      });
     }
 
     // 获取用户消费记录（支持游标分页）

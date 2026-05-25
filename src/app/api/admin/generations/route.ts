@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { transactionManager } from '@/storage/database';
 import { userManager } from '@/storage/database';
+import { isPreviewDemoAuthEnabled } from '@/lib/previewDemoAuth';
 
 type GenerationFilters = {
   toolPage?: string;
@@ -48,6 +49,23 @@ export async function GET(request: NextRequest) {
         { success: false, message: '未登录' },
         { status: 401 }
       );
+    }
+
+    if (isPreviewDemoAuthEnabled() && currentUser.id === 'preview-demo-user') {
+      return NextResponse.json({
+        success: true,
+        data: {
+          total: 0,
+          records: [],
+          stats: {
+            total: 0,
+            success: 0,
+            processing: 0,
+            failed: 0,
+            refunded: 0,
+          },
+        },
+      });
     }
 
     // 从数据库重新查询用户完整信息

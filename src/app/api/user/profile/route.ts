@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { userManager } from '@/storage/database';
+import { createPreviewDemoUser, isPreviewDemoAuthEnabled } from '@/lib/previewDemoAuth';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误';
@@ -51,6 +52,22 @@ export async function GET(request: NextRequest) {
         { success: false, message: '无权限访问其他用户信息' },
         { status: 403 }
       );
+    }
+
+    if (isPreviewDemoAuthEnabled() && userId === 'preview-demo-user') {
+      const demoUser = createPreviewDemoUser();
+      return NextResponse.json({
+        success: true,
+        data: {
+          id: demoUser.id,
+          username: demoUser.username,
+          email: demoUser.email,
+          avatar: demoUser.avatar,
+          points: demoUser.points,
+          isAdmin: demoUser.isAdmin,
+          createTime: demoUser.createdAt,
+        },
+      });
     }
 
     const user = await userManager.getUserById(userId);
