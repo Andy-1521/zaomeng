@@ -18,7 +18,7 @@ export type ComposePromptResult = {
   summary: string;
   prompt: string;
   negativePrompt: string;
-  source: 'agent' | 'fallback';
+  source: 'agent';
 };
 
 function resolveImageUrl(imageUrl: string, origin?: string) {
@@ -94,32 +94,6 @@ async function callVisionModel(apiKey: string, imageUrl: string, prompt: string)
   }
 }
 
-export function fallbackComposePrompt(params: {
-  imageUrl: string;
-  mode: 'brush' | 'tag';
-  instruction: string;
-  regions: PromptRegion[];
-}): ComposePromptResult {
-  const { imageUrl, mode, instruction, regions } = params;
-  void imageUrl;
-  const regionText = buildRegionText(regions);
-
-  const base = mode === 'brush'
-    ? '请仅修改用户画笔涂抹的修改范围内的内容，保持其余区域不变。'
-    : `请根据标记点识别结果和用户要求精准修改对应目标：${regionText}。不要扩散到未标记对象，保持其余区域不变。`;
-
-  const editInstruction = instruction
-    ? `${base}${instruction}`
-    : `${base}边缘自然融合，风格与光影保持一致。`;
-
-  return {
-    summary: mode === 'brush' ? '基于画笔修改范围的智能改图' : '基于标记提示词的智能改图',
-    prompt: editInstruction,
-    negativePrompt: '不要改动未选区域，不要改变整体构图、背景、主体姿态、镜头视角与原有风格，不要生成多余元素。',
-    source: 'fallback',
-  };
-}
-
 export async function composePromptFromImage(params: {
   request?: NextRequest;
   origin?: string;
@@ -131,32 +105,11 @@ export async function composePromptFromImage(params: {
 }): Promise<ComposePromptResult> {
   const { request, imageUrl, mode, instruction, regions, sessionId } = params;
   const origin = params.origin || request?.nextUrl.origin;
-  const fallback = fallbackComposePrompt({ imageUrl, mode, instruction, regions });
   const apiKey = getOpenAICompatApiKey();
   const startedAt = Date.now();
 
-  if (mode === 'brush' && regions.length === 0) {
-    console.info('[MaterialEditorPrompt] skip-agent', {
-      sessionId: sessionId || 'unknown',
-      mode,
-      regionCount: regions.length,
-      durationMs: Date.now() - startedAt,
-      source: fallback.source,
-      reason: 'brush_no_regions',
-    });
-    return fallback;
-  }
-
   if (!apiKey) {
-    console.info('[MaterialEditorPrompt] skip-agent', {
-      sessionId: sessionId || 'unknown',
-      mode,
-      regionCount: regions.length,
-      durationMs: Date.now() - startedAt,
-      source: fallback.source,
-      reason: 'missing_api_key',
-    });
-    return fallback;
+    throw new Error('缺少环境变量: OPENAI_COMPAT_API_KEY');
   }
 
   const prompt = `你是一个专业的电商图片智能改图 Agent。
@@ -193,32 +146,28 @@ ${instruction || '用户未填写额外要求，请根据图片内容做自然�
     const result = await callVisionModel(apiKey, resolveImageUrl(imageUrl, origin), prompt);
     const cleaned = result.trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
 
-    try {
-      const parsed = JSON.parse(cleaned) as { summary?: string; prompt?: string; negativePrompt?: string };
-      return {
-        summary: (parsed.summary || '').trim() || fallback.summary,
-        prompt: (parsed.prompt || '').trim() || fallback.prompt,
-        negativePrompt: (parsed.negativePrompt || '').trim() || fallback.negativePrompt,
-        source: 'agent',
-      };
-    } catch {
-      console.warn('[MaterialEditorPrompt] parse-fallback', {
-        sessionId: sessionId || 'unknown',
-        mode,
-        regionCount: regions.length,
-        durationMs: Date.now() - startedAt,
-      });
-      return fallback;
+    if (!cleaned) {
+      throw new Error('Agent 未返回提示词');
     }
+
+    const parsed = JSON.parse(cleaned) as { summary?: string; prompt?: string; negativePrompt?: string };
+    const parsedSummary = (parsed.summary || '').trim();
+    const parsedPrompt = (parsed.prompt || '').trim();
+    const parsedNegativePrompt = (parsed.negativePrompt || '').trim();
+
+    if (!parsedSummary || !parsedPrompt || !parsedNegativePrompt) {
+      throw new Error('Agent 返回提示词格式不完整');
+    }
+
+    return {
+      summary: parsedSummary,
+      prompt: parsedPrompt,
+      negativePrompt: parsedNegativePrompt,
+      source: 'agent',
+    };
   } catch (error) {
     console.error('[MaterialEditorAgent] 生成提示词失败:', error);
-    console.warn('[MaterialEditorPrompt] agent-fallback', {
-      sessionId: sessionId || 'unknown',
-      mode,
-      regionCount: regions.length,
-      durationMs: Date.now() - startedAt,
-    });
-    return fallback;
+    throw error;
   } finally {
     console.info('[MaterialEditorPrompt] completed', {
       sessionId: sessionId || 'unknown',

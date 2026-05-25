@@ -1,0 +1,15 @@
+.env
+.env.local
+.coze-logs
+.next
+.turbo
+.vercel
+node_modules
+logs
+*.log
+*.log.*
+tsconfig.tsbuildinfo
+public/ai-generate
+public/material-editor
+public/plugin-capture
+public/uploads

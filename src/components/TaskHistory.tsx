@@ -3,16 +3,19 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Image, { type ImageLoaderProps, type ImageProps } from 'next/image';
 import { createPortal } from 'react-dom';
+import PointsIconLabel from '@/components/PointsIconLabel';
 import { showToast } from '@/lib/toast';
 import { clearCache } from '@/lib/globalRecordManager';
 import { ImageThumbnail } from '@/components/ui/ImageThumbnail';
 import { parseColorExtractionModeMeta, type ColorExtractionMode } from '@/lib/colorExtractionMode';
 import { toUserFacingErrorFromUnknown, toUserFacingErrorMessage } from '@/lib/userFacingError';
+import { formatPointsLabel, getGeneratePsdPoints } from '@/lib/pricing';
 
 export type TabType = 'color-extraction' | 'watermark' | 'custom' | 'ai-generate' | 'smart-edit';
 export type FilterType = 'all' | TabType;
 type TaskCenterFilter = 'all' | 'processing' | 'success' | 'failed';
 export type TaskStatus = '处理中' | '成功' | '失败' | '超时' | '部分成功';
+type PsdGenerationStatus = 'pending' | 'processing' | 'success' | 'failed';
 
 const TASK_FILTER_VALUES: FilterType[] = ['all', 'color-extraction', 'ai-generate', 'smart-edit', 'watermark', 'custom'];
 
@@ -29,12 +32,13 @@ export interface TaskRecord {
   uploadedImage?: string | string[]; // 上传的参考图片（支持单张或多张）
   status?: TaskStatus; // 任务状态
   psdUrl?: string; // PSD文件URL（彩绘提取订单）
+  psdGenerationStatus?: PsdGenerationStatus;
+  psdPoints?: number;
   aspectRatio?: string; // 图像比例
   imageSize?: string; // 分辨率
   generateCount?: number; // 【新增】预期生成数量（用于判断部分成功）
   errorMessage?: string; // 失败原因
   extractionMode?: ColorExtractionMode;
-  degraded?: boolean;
 }
 
 interface TaskHistoryProps {
@@ -63,6 +67,8 @@ type RequestParamsObject = {
   userInstruction?: string;
   summary?: string;
   promptSummary?: string;
+  psdGenerationStatus?: PsdGenerationStatus;
+  psdPoints?: number;
   [key: string]: unknown;
 };
 
@@ -241,7 +247,7 @@ export const addTaskRecord = (
   duration?: number,
   uploadedImage?: string,
   status?: TaskStatus,
-  options?: Partial<Pick<TaskRecord, 'extractionMode' | 'degraded'>>
+  options?: Partial<Pick<TaskRecord, 'extractionMode'>>
 ) => {
   // 创建任务记录
   const record: TaskRecord = {
@@ -413,7 +419,7 @@ export const forceRefreshCache = (userId?: string) => {
 
     // 映射数据库数据到 TaskRecord 格式
     const tasks: TaskRecord[] = data
-      .filter((item) => item.orderNumber && (item.prompt || item.description)) // 过滤没有订单号、提示词或描述的记录
+      .filter((item) => item.orderNumber && (item.prompt || item.description) && item.toolPage !== '积分充值') // 过滤没有订单号、提示词或描述的记录，以及充值记录
       .map((item) => {
       // 【调试】打印订单的原始数据
       console.log('[TaskHistory] 解析订单:', {
@@ -483,11 +489,10 @@ export const forceRefreshCache = (userId?: string) => {
       let imageSize: string | undefined = undefined;
       let generateCount: number | undefined = undefined; // 【新增】预期生成数量
       let extractionMode: ColorExtractionMode = 'full';
-      let degraded = false;
+      let params: RequestParamsObject | undefined;
 
       if (item.requestParams) {
         try {
-          let params: RequestParamsObject | undefined;
           if (typeof item.requestParams === 'object') {
             params = item.requestParams as RequestParamsObject;
           } else if (typeof item.requestParams === 'string') {
@@ -519,7 +524,6 @@ export const forceRefreshCache = (userId?: string) => {
 
           const colorExtractionMeta = parseColorExtractionModeMeta(params || item.requestParams);
           extractionMode = colorExtractionMeta.requestedMode;
-          degraded = colorExtractionMeta.degraded;
         } catch {
           // 解析失败
           uploadedImage = item.uploadedImage || '';
@@ -532,6 +536,9 @@ export const forceRefreshCache = (userId?: string) => {
         psdUrl = item.psdUrl;
       }
 
+      const psdGenerationStatus = params?.psdGenerationStatus;
+      const psdPoints = params?.psdPoints;
+
       const isSmartEditOrder = item.toolPage === '智能改图'
         || item.toolPage === '局部改图'
         || item.description?.includes('智能改图')
@@ -542,9 +549,7 @@ export const forceRefreshCache = (userId?: string) => {
       let description = '未知';
       if (isSmartEditOrder) {
         const smartEditSummary = item.description?.replace(/^智能改图[:：]\s*/, '').replace(/^局部改图[:：]\s*/, '').trim()
-          || (typeof item.requestParams === 'object' && item.requestParams !== null
-            ? ((item.requestParams as RequestParamsObject).summary || (item.requestParams as RequestParamsObject).promptSummary || (item.requestParams as RequestParamsObject).userInstruction)
-            : '')
+          || (params?.summary || params?.promptSummary || params?.userInstruction || '')
           || '智能改图结果';
         description = typeof smartEditSummary === 'string' ? smartEditSummary : '智能改图结果';
       } else if (typeof item.prompt === 'string' && item.prompt.trim() !== '') {
@@ -666,12 +671,13 @@ export const forceRefreshCache = (userId?: string) => {
         uploadedImage,
         status,
         psdUrl,
+        psdGenerationStatus,
+        psdPoints,
         aspectRatio,
         imageSize,
         generateCount, // 【新增】预期生成数量
         errorMessage,
         extractionMode,
-        degraded,
       };
     })
     .sort((a: TaskRecord, b: TaskRecord) => b.time - a.time);
@@ -743,7 +749,6 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null);
   const toolFilterRef = useRef<HTMLDivElement>(null);
   const taskCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
-
   const processingCount = tasks.filter((task) => task.status === '处理中').length;
 
   const historySourceTasks = showAllHistory ? tasks : tasks.slice(0, 20);
@@ -886,9 +891,10 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   useEffect(() => {
     if (isCollapsed) {
       setIsToolFilterOpen(false);
-      return;
     }
+  }, [isCollapsed]);
 
+  useEffect(() => {
     const hasProcessingTask = tasks.some((task) => task.status === '处理中');
     if (!hasProcessingTask) {
       return;
@@ -901,7 +907,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [isCollapsed, loadTasks, tasks, userId]);
+  }, [loadTasks, tasks, userId]);
 
   useEffect(() => {
     if (!isToolFilterOpen) return;
@@ -1024,6 +1030,11 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       return;
     }
 
+    if (task.psdGenerationStatus === 'processing') {
+      showToast('PSD正在生成中，请稍后查看', 'info');
+      return;
+    }
+
     const resultImage = getFirstImage(task.imageUrl);
     if (!isImageValue(resultImage)) {
       showToast('该订单暂无可用于分层的结果图', 'error');
@@ -1039,9 +1050,22 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
         body: JSON.stringify({ orderNumber: task.orderId }),
       });
 
-      const result = await response.json();
+      const result = await response.json() as {
+        success?: boolean;
+        message?: string;
+        error?: string;
+        data?: {
+          remainingPoints?: number;
+        };
+      };
       if (!result.success) {
         throw new Error(toUserFacingErrorMessage(result.error, 'PSD生成失败，请重试'));
+      }
+
+      if (typeof result.data?.remainingPoints === 'number') {
+        window.dispatchEvent(new CustomEvent('userPointsChanged', {
+          detail: { points: result.data.remainingPoints },
+        }));
       }
 
       showToast(result.message || 'PSD生成成功', 'success');
@@ -1501,6 +1525,10 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                         const statusLabel = getTaskStatusLabel(task);
                         const isSuccessTask = task.status === '成功' || task.status === '部分成功' || !task.status;
                         const isFailedTask = task.status === '失败' || task.status === '超时';
+                        const isPsdGenerating = task.orderId
+                          ? generatingPsdOrders.has(task.orderId) || task.psdGenerationStatus === 'processing'
+                          : task.psdGenerationStatus === 'processing';
+                        const psdPoints = task.psdPoints || getGeneratePsdPoints();
 
                         const canDelete = task.status !== '处理中';
 
@@ -1581,11 +1609,17 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                                             void handleGeneratePsd(task);
                                           }
                                         }}
-                                        disabled={task.orderId ? generatingPsdOrders.has(task.orderId) : false}
+                                        disabled={isPsdGenerating}
                                         className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${task.psdUrl ? 'border-[#31a8ff]/20 bg-[#001e36] text-[#31a8ff] hover:bg-[#001e36]/80' : 'border-violet-300/25 bg-violet-500/15 text-violet-200 hover:bg-violet-500/22'}`}
-                                        title={task.orderId && generatingPsdOrders.has(task.orderId) ? 'PSD生成中' : task.psdUrl ? '下载PSD文件' : '点击生成PSD'}
+                                        title={isPsdGenerating ? 'PSD生成中' : task.psdUrl ? '下载PSD文件' : `点击生成PSD（${formatPointsLabel(psdPoints)}）`}
                                       >
-                                        {task.orderId && generatingPsdOrders.has(task.orderId) ? '生成中...' : task.psdUrl ? '下载PSD' : '生成PSD'}
+                                        {isPsdGenerating ? '生成中...' : task.psdUrl ? '下载PSD' : (
+                                          <span className="inline-flex items-center gap-1.5">
+                                            <span>生成PSD</span>
+                                            <span className="text-violet-100/45">·</span>
+                                            <PointsIconLabel points={psdPoints} iconClassName="h-3 w-3" />
+                                          </span>
+                                        )}
                                       </button>
                                     )}
                                   </div>

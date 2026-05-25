@@ -23,19 +23,6 @@ export function getOpenAICompatImageModel() {
   return process.env.OPENAI_COMPAT_IMAGE_MODEL || process.env.PSYDO_IMAGE_MODEL || DEFAULT_OPENAI_COMPAT_IMAGE_MODEL;
 }
 
-export function getOpenAICompatFallbackBaseUrl() {
-  const value = process.env.OPENAI_COMPAT_FALLBACK_BASE_URL || process.env.PSYDO_FALLBACK_BASE_URL || '';
-  return value ? trimTrailingSlash(value) : '';
-}
-
-export function getOpenAICompatFallbackApiKey() {
-  return process.env.OPENAI_COMPAT_FALLBACK_API_KEY || process.env.PSYDO_FALLBACK_API_KEY || '';
-}
-
-export function getOpenAICompatFallbackImageModel(primaryModel = getOpenAICompatImageModel()) {
-  return process.env.OPENAI_COMPAT_FALLBACK_IMAGE_MODEL || process.env.PSYDO_FALLBACK_IMAGE_MODEL || primaryModel;
-}
-
 export function requireOpenAICompatApiKey() {
   const apiKey = getOpenAICompatApiKey();
   if (!apiKey) {

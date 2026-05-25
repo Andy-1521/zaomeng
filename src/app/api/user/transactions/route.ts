@@ -138,9 +138,10 @@ export async function GET(request: NextRequest) {
 
       const isSmartEdit = isSmartEditTransaction(trans.toolPage, trans.description, trans.orderNumber);
 
-      return {
+        return {
         id: trans.id,
         orderNumber: trans.orderNumber,
+        toolPage: trans.toolPage,
         description: trans.description || trans.toolPage || '未知',
         points: trans.points || 0,
         actualPoints: trans.actualPoints ?? 0,

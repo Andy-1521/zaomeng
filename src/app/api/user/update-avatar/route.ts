@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { S3Storage } from 'coze-coding-dev-sdk';
+import { uploadToCozeStorage } from '@/lib/dualStorage';
 import { userManager } from '@/storage/database';
-import { normalizeFileExtension, saveBufferToLocalMaterialFile } from '@/lib/localUploadStorage';
+import { normalizeFileExtension } from '@/lib/localUploadStorage';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误';
@@ -62,31 +62,7 @@ export async function POST(request: NextRequest) {
 
     // 读取文件内容
     const fileBuffer = Buffer.from(await file.arrayBuffer());
-    let avatarUrl: string;
-
-    try {
-      const storage = new S3Storage({
-        endpointUrl: process.env.COZE_BUCKET_ENDPOINT_URL,
-        accessKey: process.env.COZE_ACCESS_KEY,
-        secretKey: process.env.COZE_SECRET_KEY,
-        bucketName: process.env.COZE_BUCKET_NAME,
-        region: 'ap-guangzhou',
-      });
-
-      const fileKey = await storage.uploadFile({
-        fileContent: fileBuffer,
-        fileName: fileName,
-        contentType: file.type,
-      });
-
-      avatarUrl = await storage.generatePresignedUrl({
-        key: fileKey,
-        expireTime: 365 * 24 * 60 * 60, // 1 年
-      });
-    } catch (storageError) {
-      console.warn('[头像上传] Coze对象存储上传失败，回退到本地 public 存储:', storageError);
-      avatarUrl = await saveBufferToLocalMaterialFile(fileBuffer, fileName);
-    }
+    const avatarUrl = await uploadToCozeStorage(fileBuffer, fileName, file.type);
 
     // 更新用户头像
     await userManager.updateAvatar(userId, avatarUrl);

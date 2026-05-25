@@ -1,75 +1,168 @@
 # AGENTS.md
 
 ## Project Overview
-AI-powered image tool application built with Next.js. Currently supports **Color Extraction (彩绘提取)** as the primary feature, with Smart Background Removal, Watermark Removal, and Custom tools as secondary features.
+
+造梦AI is a production Next.js image-workbench application. The current product is centered on `/home`: a material library, selected-image actions, and a right-side task center.
+
+Current active capabilities:
+
+- Material library and browser-extension image capture
+- AI生图 / image-to-image generation
+- 智能改图 / local smart editing
+- 彩绘提取
+- Manual 彩绘 PSD generation
+- 高清+扩图
+- User profile, recharge entry, and admin generation records
+
+Read `docs/project-memory.md` before doing non-trivial work. It is the current handoff baseline.
 
 ## Tech Stack
-- **Framework**: Next.js 16 (App Router)
-- **Core**: React 19, TypeScript 5
-- **Database**: Drizzle ORM over MySQL (`mysql2/promise`)
-- **Cache / Temp State**: Redis
-- **UI**: Tailwind CSS 4, shadcn/ui components
-- **Package Manager**: pnpm (strict - never use npm or yarn)
+
+- Framework: Next.js 16 App Router
+- Core: React 19, TypeScript 5
+- Database: Drizzle ORM over MySQL (`mysql2/promise`)
+- Cache / temp state: Redis
+- UI: Tailwind CSS 4, shadcn/ui components
+- Package manager: pnpm only; never use npm or yarn
+- Storage: Tencent COS as the active object-storage path
+- Model/workflow integrations: Psydo OpenAI-compatible image edits, Coze workflows, RunningHub
 
 ## Build & Run Commands
-- **Dev**: `pnpm dev` (runs on port 5000 via `.coze` config)
-- **Build**: `pnpm build`
-- **Lint**: `pnpm lint`
-- **Start (prod)**: `pnpm start`
+
+- Dev: `pnpm dev`
+- Typecheck: `pnpm exec tsc --noEmit --pretty false`
+- Diff whitespace check: `git diff --check`
+- Combined local check: `pnpm check`
+- Build: `pnpm build`
+- Vercel preview deployment for user acceptance: `pnpm deploy:preview`
+- Vercel production deployment only after acceptance: `pnpm deploy:prod`
+- Start locally: `pnpm start`
+- Restart production: `sudo systemctl restart zaomeng-web.service`
+- Check production status: `systemctl is-active zaomeng-web.service`
+
+Production project path: `/home/ubuntu/Downloads/zaomeng/project/projects`
+
+## Release Workflow
+
+Every change must follow this release order:
+
+1. Make and verify changes locally.
+2. Run `pnpm check` and `pnpm build`.
+3. Commit a GitHub backup snapshot with a `backup: YYYY-MM-DD summary` message and push it.
+4. Deploy a Vercel Preview with `pnpm deploy:preview` and send the preview URL to the user for visual acceptance.
+5. Do not deploy Production until the user confirms the preview result is acceptable.
+6. After acceptance, deploy Production with `pnpm deploy:prod`, then smoke test public pages and core flows.
+
+The user reviews visible results, not code. Keep preview URLs and validation status clear in handoff messages.
 
 ## Project Structure
-```
+
+```text
 src/
 ├── app/
-│   ├── home/           # Main home page (Color Extraction)
-│   ├── admin/          # Admin dashboard (generations management)
-│   ├── api/            # API routes (transaction, user, upload, etc.)
+│   ├── home/           # Main workbench page
+│   ├── admin/          # Admin generation dashboard
+│   ├── api/            # API routes
 │   ├── login/          # Login page
-│   └── profile/        # User profile page
+│   ├── plugin/         # Browser extension download page
+│   └── profile/        # Profile and recharge page
 ├── components/
-│   ├── TaskHistory.tsx  # Task history sidebar with filter/tabs
-│   ├── QuickCreatePage.tsx  # Material library and color extraction workflow
-│   ├── Navbar.tsx       # Navigation bar
-│   └── ui/              # shadcn/ui components
+│   ├── QuickCreatePage.tsx  # Material library and generation actions
+│   ├── LocalEditPanel.tsx   # Smart edit UI
+│   ├── TaskHistory.tsx      # Right-side task center
+│   ├── Navbar.tsx           # Top navigation and points display
+│   └── ui/                  # Shared UI components
 ├── lib/
-│   ├── globalRecordManager.ts  # Record caching & server sync
-│   └── toast.ts                # Toast notification utility
+│   ├── psydoImageEdits.ts        # Primary image edit call
+│   ├── openaiCompatible.ts       # Primary OpenAI-compatible config
+│   ├── dualStorage.ts            # COS upload wrapper; failures are hard failures
+│   ├── safeRemoteImage.ts        # Safe remote image downloader
+│   ├── materialEditorPrompt.ts   # Smart edit prompt agent
+│   └── pricing.ts                # Points pricing
 └── storage/
     └── database/
-        ├── transactionManager.ts  # Transaction CRUD & stats
-        ├── userManager.ts         # User management
-        └── shared/                # Drizzle schema & migrations
+        ├── transactionManager.ts
+        ├── userManager.ts
+        └── shared/
 ```
 
-## Key Types
-- `TabType`: `'color-extraction' | 'watermark' | 'custom' | 'ai-generate' | 'smart-edit'`
-- `FilterType`: `'all' | TabType` (used in TaskHistory filter UI)
-- `TaskCenterFilter`: `'all' | 'processing' | 'success' | 'failed'`
+## Active API Paths
+
+Use these paths for current frontend work:
+
+- `POST /api/image-to-image/run`
+- `POST /api/material-editor`
+- `POST /api/smart-edit/identify`
+- `POST /api/color-extraction/run`
+- `POST /api/color-extraction/generate-psd`
+- `POST /api/outpaint-upsampling/run`
+- `POST /api/plugin/capture-image`
+- `GET /api/plugin/captured-images`
+- `GET /api/task/orders`
+- `GET /api/task/check`
+- `GET /api/user/profile`
+
+Legacy `color-extraction2` routes may still exist as compatibility wrappers only. Do not add new frontend calls to them.
+
+## No-Fallback Policy
+
+The project currently has a strict no-backup/no-degrade/no-fallback policy for generation and persistence paths.
+
+Do not reintroduce:
+
+- Switching image edits to a fallback target
+- Falling back to local `public/` storage after COS upload failure
+- Falling back from Coze file upload to URL input
+- Falling back from hollow color extraction to full extraction
+- Returning template prompts when the prompt agent fails
+- Returning generic selected-area labels when smart identify fails
+- Continuing with default aspect ratio when source size parsing fails
+- Keeping temporary upstream model URLs as final persisted results
+
+Expected behavior:
+
+- Fail clearly when the primary path fails
+- Refund already-precharged points on failed paid work
+- Keep user-facing errors business-friendly and do not expose secrets, gateways, stack traces, or raw model details
+
+## Points Policy
+
+Paid high-cost tasks must use:
+
+- Frontend balance precheck
+- Backend atomic precharge
+- Refund on failed/timeout backend work
+
+Manual 彩绘 PSD generation is a separate paid action and must only happen after the user clicks the PSD action.
 
 ## Code Style
+
 - Use `@/` path aliases for imports
-- Chinese strings in UI, English in code comments
-- All async DB operations use `transactionManager` or `userManager`
-- Never mock API calls - always use real integrations
+- UI copy is Chinese
+- Keep code comments concise and useful
+- Prefer the smallest correct change
+- Do not add compatibility code unless there is persisted data, shipped behavior, an external consumer, or an explicit requirement
+- Never mock real integrations for production behavior
 
-## Important Notes
-- The `ai-image` and `quick-create` tab types have been removed. Historical data with `toolPage='去除水印'` maps to `TabType='watermark'`, `toolPage='高清放大'` maps to `TabType='custom'`
-- The `generate-image` and `optimize-prompt` API routes have been removed (AI image generation feature fully deprecated)
-- The `chat-messages` API has been removed (was only used by AI image feature)
-- Admin dashboard stats no longer track `aiImageCount`
-- Frontend active API paths are `/api/smart-edit/identify`, `/api/color-extraction/run`, and `/api/color-extraction/generate-psd`
-- Legacy `color-extraction2` routes still exist only as compatibility wrappers and should not be used for new frontend code
+## Frontend Design Notes
 
-## Vision Model Integration
+- Preserve the current clean, lightweight, iOS Settings-like style
+- Avoid heavy cards, strong shadows, busy dashboards, or duplicated status text
+- Keep `/profile?tab=recharge` and the existing `RechargePanel`
+- Points display should continue to use `PointsIconLabel` and `points-icon.png`
 
-### 智能改图标记点识别
-- **模型**: `doubao-seed-2-0-mini-260215` (支持多模态理解)
-- **API**: 使用 OpenAI 兼容端点 `https://integration.coze.cn/api/v3/chat/completions`
-- **特点**: 
-  - 支持图片 URL 直接输入
-  - 不需要 Bot ID，直接通过 SDK 的 apiKey 认证
-  - 返回 SSE 流式响应，需要客户端解析
-- **实现文件**: `src/app/api/smart-edit/identify/handler.ts`
+## Operational Notes
 
-### 模型能力说明
-- `doubao-seed-2-0-mini-260215`: 面向低时延、高并发场景，支持 256k 上下文、多模态理解，适合成本和速度优先的轻量级任务
+- Runtime env file: `/home/ubuntu/Downloads/zaomeng/project/projects/.env.local`
+- Do not leak real environment values or keys
+- Main app logs: `.coze-logs/systemd-web.log`
+- Error logs: `.coze-logs/systemd-web-error.log`
+- `journalctl -u zaomeng-web.service` mostly shows systemd start/stop logs
+- Browser smoke tests should use `/snap/bin/chromium` when possible
+
+## Known Risks
+
+- Authentication still relies heavily on a client-writable `user` JSON cookie; future work should migrate to trusted server-side sessions or JWT
+- Some APIs still mix user identity from body/header/cookie and need consolidation
+- Payment merchant parameters for real WeChat/Alipay callback verification are still incomplete
+- Smart-edit masks are still submitted as base64 JSON; multipart or pre-uploaded mask references would be more robust

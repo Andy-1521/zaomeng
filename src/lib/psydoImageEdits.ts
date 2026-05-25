@@ -2,9 +2,6 @@ import sharp from 'sharp';
 import {
   getOpenAICompatApiKey,
   getOpenAICompatBaseUrl,
-  getOpenAICompatFallbackApiKey,
-  getOpenAICompatFallbackBaseUrl,
-  getOpenAICompatFallbackImageModel,
   getOpenAICompatImageModel,
 } from '@/lib/openaiCompatible';
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
@@ -17,11 +14,10 @@ const IMAGE_EDIT_MAX_ATTEMPTS = 2;
 const IMAGE_EDIT_RETRY_DELAY_MS = 1500;
 
 type ImageEditTarget = {
-  name: 'primary' | 'fallback';
+  name: 'primary';
   model: string;
   baseUrl: string;
   apiKey: string;
-  usedFallback: boolean;
 };
 
 type ImageEditFormParams = {
@@ -32,7 +28,6 @@ type ImageEditFormParams = {
   maskImageBase64?: string;
   maskImageBuffer?: Buffer;
   timeoutMs?: number;
-  allowFallbackOnTimeout?: boolean;
 };
 
 type ImageEditParams = ImageEditFormParams & {
@@ -50,7 +45,6 @@ type ImageEditMeta = {
   model: string;
   baseUrl: string;
   targetName: ImageEditTarget['name'];
-  usedFallback: boolean;
 };
 
 export class ImageEditTimeoutError extends Error {
@@ -59,6 +53,13 @@ export class ImageEditTimeoutError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'ImageEditTimeoutError';
+  }
+}
+
+class ImageEditResultDownloadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ImageEditResultDownloadError';
   }
 }
 
@@ -71,55 +72,20 @@ function buildCompatUrl(baseUrl: string, path: string) {
   return `${trimTrailingSlash(baseUrl)}${normalizedPath}`;
 }
 
-function getFallbackImageEditTarget(primaryModel: string): ImageEditTarget | null {
-  const baseUrl = getOpenAICompatFallbackBaseUrl();
-  const apiKey = getOpenAICompatFallbackApiKey();
-  const model = getOpenAICompatFallbackImageModel(primaryModel);
-
-  if (!baseUrl || !apiKey) {
-    return null;
-  }
-
-  const primaryBaseUrl = trimTrailingSlash(getOpenAICompatBaseUrl());
-  const primaryApiKey = getOpenAICompatApiKey();
-  if (baseUrl === primaryBaseUrl && apiKey === primaryApiKey && model === primaryModel) {
-    return null;
-  }
-
-  return {
-    name: 'fallback',
-    model,
-    baseUrl,
-    apiKey,
-    usedFallback: true,
-  };
-}
-
-function getImageEditTargets(): ImageEditTarget[] {
+function getImageEditTarget(): ImageEditTarget {
   const primaryApiKey = getOpenAICompatApiKey();
   const primaryModel = getOpenAICompatImageModel();
-  const targets: ImageEditTarget[] = [];
 
-  if (primaryApiKey) {
-    targets.push({
-      name: 'primary',
-      model: primaryModel,
-      baseUrl: trimTrailingSlash(getOpenAICompatBaseUrl()),
-      apiKey: primaryApiKey,
-      usedFallback: false,
-    });
-  }
-
-  const fallbackTarget = getFallbackImageEditTarget(primaryModel);
-  if (fallbackTarget) {
-    targets.push(fallbackTarget);
-  }
-
-  if (targets.length === 0) {
+  if (!primaryApiKey) {
     throw new Error('缺少环境变量: OPENAI_COMPAT_API_KEY');
   }
 
-  return targets;
+  return {
+    name: 'primary',
+    model: primaryModel,
+    baseUrl: trimTrailingSlash(getOpenAICompatBaseUrl()),
+    apiKey: primaryApiKey,
+  };
 }
 
 function isTimeoutLikeMessage(message: string) {
@@ -181,15 +147,12 @@ function createImageEditForm(params: ImageEditFormParams, normalizedBuffer: Buff
 }
 
 function isRetriableImageEditError(error: Error) {
-  return /upstream_error|Upstream request failed|fetch failed/i.test(error.message);
+  return error instanceof ImageEditResultDownloadError
+    || /upstream_error|Upstream request failed|fetch failed/i.test(error.message);
 }
 
-function isFallbackEligibleImageEditError(error: unknown) {
-  if (isImageEditTimeoutError(error)) {
-    return true;
-  }
-
-  return error instanceof Error && isRetriableImageEditError(error);
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : '未知错误';
 }
 
 function sleep(ms: number) {
@@ -251,7 +214,11 @@ async function runImageEditWithTarget(
       }
 
       if (first.url) {
-        return fetchImageBuffer(first.url, IMAGE_RESULT_DOWNLOAD_MAX_BYTES);
+        try {
+          return await fetchImageBuffer(first.url, IMAGE_RESULT_DOWNLOAD_MAX_BYTES);
+        } catch (error) {
+          throw new ImageEditResultDownloadError(`图像编辑结果下载失败: ${getErrorMessage(error)}`);
+        }
       }
 
       throw new Error('图像编辑返回格式不支持');
@@ -296,52 +263,14 @@ export async function runPsydoImageEditWithMetaFromPreparedBuffer(
   params: PreparedImageEditParams,
   normalizedBuffer: Buffer,
 ): Promise<{ buffer: Buffer; meta: ImageEditMeta }> {
-  const targets = getImageEditTargets();
-  const timeoutMs = params.timeoutMs || IMAGE_EDIT_TIMEOUT_MS;
-
-  let lastTimeoutError: ImageEditTimeoutError | null = null;
-  let lastFallbackEligibleError: Error | null = null;
-
-  for (let index = 0; index < targets.length; index += 1) {
-    const target = targets[index];
-    try {
-      const buffer = await runImageEditWithTarget(params, normalizedBuffer, target);
-      return {
-        buffer,
-        meta: {
-          model: target.model,
-          baseUrl: target.baseUrl,
-          targetName: target.name,
-          usedFallback: target.usedFallback,
-        },
-      };
-    } catch (error) {
-      const canUseNextTarget = index < targets.length - 1;
-
-      if (isImageEditTimeoutError(error)) {
-        lastTimeoutError = error instanceof ImageEditTimeoutError
-          ? error
-          : new ImageEditTimeoutError(`图像编辑超时（${timeoutMs}ms）`);
-
-        if (canUseNextTarget && params.allowFallbackOnTimeout !== false) {
-          console.warn(`[Psydo图像编辑] ${target.name} 超时，切换到备用目标`);
-          continue;
-        }
-
-        throw lastTimeoutError;
-      }
-
-      if (isFallbackEligibleImageEditError(error)) {
-        lastFallbackEligibleError = error instanceof Error ? error : new Error('图像编辑失败');
-        if (canUseNextTarget) {
-          console.warn(`[Psydo图像编辑] ${target.name} 上游异常，切换到备用目标: ${lastFallbackEligibleError.message}`);
-          continue;
-        }
-      }
-
-      throw error;
-    }
-  }
-
-  throw lastFallbackEligibleError || lastTimeoutError || new ImageEditTimeoutError(`图像编辑超时（${timeoutMs}ms）`);
+  const target = getImageEditTarget();
+  const buffer = await runImageEditWithTarget(params, normalizedBuffer, target);
+  return {
+    buffer,
+    meta: {
+      model: target.model,
+      baseUrl: target.baseUrl,
+      targetName: target.name,
+    },
+  };
 }

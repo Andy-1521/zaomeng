@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { normalizeFileExtension, normalizeFolder, saveBufferToLocalMaterialFile } from '@/lib/localUploadStorage';
+import { uploadToCozeStorage } from '@/lib/dualStorage';
+import { normalizeFileExtension, normalizeFolder } from '@/lib/localUploadStorage';
 import { isImageValidationError, validateUploadedImageBuffer } from '@/lib/serverImageValidation';
 
 function getErrorMessage(error: unknown) {
@@ -10,7 +11,7 @@ function getErrorStack(error: unknown) {
   return error instanceof Error ? error.stack : undefined;
 }
 
-console.log('[图片上传] 使用Coze对象存储（1年有效期）');
+console.log('[图片上传] 使用腾讯COS对象存储（1年有效期）');
 
 export async function POST(request: NextRequest) {
   try {
@@ -46,53 +47,17 @@ export async function POST(request: NextRequest) {
     const extension = normalizeFileExtension(imageInfo.extension);
     const fileName = `${normalizedFolder}/${timestamp}_${random}.${extension}`;
 
-    // 使用Coze对象存储上传（1年有效期）
-    try {
-      console.log('[图片上传] 开始上传到Coze对象存储:', fileName);
-      const S3Storage = (await import('coze-coding-dev-sdk')).S3Storage;
-      const cozeStorage = new S3Storage({
-        endpointUrl: process.env.COZE_BUCKET_ENDPOINT_URL,
-        accessKey: process.env.COZE_ACCESS_KEY,
-        secretKey: process.env.COZE_SECRET_KEY,
-        bucketName: process.env.COZE_BUCKET_NAME,
-        region: 'cn-beijing',
-      });
+    console.log('[图片上传] 开始上传到腾讯COS:', fileName);
+    const storageUrl = await uploadToCozeStorage(buffer, fileName, imageInfo.contentType);
+    console.log('[图片上传] 腾讯COS上传成功:', storageUrl.substring(0, 80) + '...');
 
-      const key = await cozeStorage.uploadFile({
-        fileContent: buffer,
-        fileName: fileName,
-        contentType: imageInfo.contentType,
-      });
-
-      console.log('[图片上传] Coze对象存储上传成功，key:', key);
-
-      // 生成1年有效期的签名URL
-      const signedUrl = await cozeStorage.generatePresignedUrl({
-        key: key,
-        expireTime: 365 * 24 * 60 * 60, // 1年
-      });
-
-      console.log('[图片上传] Coze签名URL生成成功（1年有效期）:', signedUrl.substring(0, 80) + '...');
-
-      return NextResponse.json({
-        success: true,
-        data: {
-          key: key,
-          url: signedUrl,
-        },
-      });
-    } catch (cozeError) {
-      console.warn('[图片上传] Coze对象存储上传失败，回退到本地 public 存储:', cozeError);
-      const localUrl = await saveBufferToLocalMaterialFile(buffer, fileName);
-      return NextResponse.json({
-        success: true,
-        data: {
-          key: fileName,
-          url: localUrl,
-          storage: 'local',
-        },
-      });
-    }
+    return NextResponse.json({
+      success: true,
+      data: {
+        key: fileName,
+        url: storageUrl,
+      },
+    });
 
   } catch (error: unknown) {
     if (isImageValidationError(error)) {

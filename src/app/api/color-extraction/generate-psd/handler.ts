@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { transactionManager } from '@/storage/database';
+import { transactionManager, userManager } from '@/storage/database';
 import { decomposeLayersWithRunningHub } from '@/lib/layer-decomposition';
 import { generatePsdFromDecomposition } from '@/lib/psd-generator';
 import { uploadFromUrlToCozeStorage, uploadToCozeStorage } from '@/lib/dualStorage';
+import { getGeneratePsdPoints } from '@/lib/pricing';
 
 type ParsedRecord = Record<string, unknown>;
+
+const PSD_POINTS = getGeneratePsdPoints();
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && /timeout|超时|ETIMEDOUT|AbortError/i.test(error.message)) {
@@ -44,6 +47,11 @@ function parseRecord(value: unknown): ParsedRecord | null {
   }
 
   return typeof value === 'object' && !Array.isArray(value) ? value as ParsedRecord : null;
+}
+
+function getPsdGenerationStatus(record: ParsedRecord | null) {
+  const status = record?.psdGenerationStatus;
+  return status === 'processing' || status === 'success' || status === 'failed' || status === 'pending' ? status : null;
 }
 
 function extractImageUrls(value: unknown): string[] {
@@ -117,6 +125,10 @@ async function processRunningHubLayeringAndPsd(
 }
 
 export async function POST(request: NextRequest) {
+  let chargedUserId = '';
+  let chargedPoints = 0;
+  let chargedByThisRequest = false;
+
   try {
     const body = await request.json();
     const { orderNumber } = body;
@@ -132,14 +144,22 @@ export async function POST(request: NextRequest) {
 
     const requestParams = parseRecord(transaction.requestParams);
     const extractionMode = getString(requestParams?.actualExtractionMode) || getString(requestParams?.extractionMode);
+    const psdGenerationStatus = getPsdGenerationStatus(requestParams);
+    const psdPoints = typeof requestParams?.psdPoints === 'number' && requestParams.psdPoints > 0 ? requestParams.psdPoints : PSD_POINTS;
+    const psdPointsCharged = requestParams?.psdPointsCharged === true;
     const resultImages = extractImageUrls(transaction.resultData);
     const layeringImageUrl = resultImages[0] ? resolveImageUrl(resultImages[0], request) : null;
 
     let additionalImageUrl: string | undefined;
     if (extractionMode === 'hollow') {
-      const uploadedImages = extractImageUrls(transaction.uploadedImage);
-      if (uploadedImages[0]) {
-        additionalImageUrl = resolveImageUrl(uploadedImages[0], request);
+      const storedAdditionalImageUrl = getString(requestParams?.psdAdditionalImageUrl);
+      if (storedAdditionalImageUrl) {
+        additionalImageUrl = resolveImageUrl(storedAdditionalImageUrl, request);
+      } else {
+        const uploadedImages = extractImageUrls(transaction.uploadedImage);
+        if (uploadedImages[0]) {
+          additionalImageUrl = resolveImageUrl(uploadedImages[0], request);
+        }
       }
     }
 
@@ -151,13 +171,84 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, message: 'PSD已存在', data: { psdUrl: transaction.psdUrl } });
     }
 
+    if (psdGenerationStatus === 'processing') {
+      return NextResponse.json({ success: false, error: 'PSD正在生成中，请稍后再试' }, { status: 409 });
+    }
+
+    if (psdGenerationStatus === 'success' && transaction.psdUrl) {
+      return NextResponse.json({ success: true, message: 'PSD已存在', data: { psdUrl: transaction.psdUrl } });
+    }
+
+    let chargedForPsd = psdPointsCharged;
+    let remainingPoints = transaction.remainingPoints;
+
+    if (!psdPointsCharged) {
+      const user = await userManager.getUserById(transaction.userId);
+      if (!user) {
+        return NextResponse.json({ success: false, error: '用户不存在' }, { status: 404 });
+      }
+
+      if ((user.points || 0) < psdPoints) {
+        return NextResponse.json({ success: false, error: `积分不足，当前积分：${user.points}，需要：${psdPoints}` }, { status: 400 });
+      }
+
+      const chargedUser = await userManager.deductPointsAtomically(transaction.userId, psdPoints);
+      if (!chargedUser) {
+        return NextResponse.json({ success: false, error: '积分不足' }, { status: 400 });
+      }
+
+      chargedUserId = transaction.userId;
+      chargedPoints = psdPoints;
+      chargedByThisRequest = true;
+      chargedForPsd = true;
+      remainingPoints = chargedUser.points;
+    }
+
+    await transactionManager.updateTransaction(orderNumber, {
+      remainingPoints,
+      points: chargedForPsd && !psdPointsCharged ? (transaction.points || 0) + psdPoints : (transaction.points || 0),
+      actualPoints: chargedForPsd && !psdPointsCharged ? (transaction.actualPoints || 0) + psdPoints : (transaction.actualPoints || 0),
+      requestParams: JSON.stringify({
+        ...requestParams,
+        psdPoints,
+        psdGenerationStatus: 'processing',
+        psdPointsCharged: chargedForPsd,
+      }),
+    });
+
     const psdResult = await processRunningHubLayeringAndPsd(layeringImageUrl, orderNumber, additionalImageUrl);
     if (!psdResult.psdUrl) {
+      const refundedUser = chargedForPsd && !psdPointsCharged
+        ? await userManager.addPointsAtomically(transaction.userId, psdPoints)
+        : null;
+      chargedByThisRequest = false;
+      await transactionManager.updateTransaction(orderNumber, {
+        remainingPoints: refundedUser?.points ?? remainingPoints,
+        points: transaction.points || 0,
+        actualPoints: transaction.actualPoints || 0,
+        requestParams: JSON.stringify({
+          ...requestParams,
+          psdPoints,
+          psdGenerationStatus: 'failed',
+          psdPointsCharged: false,
+          psdGenerationError: psdResult.error || 'PSD生成失败',
+        }),
+      });
       return NextResponse.json({ success: false, error: psdResult.error || 'PSD生成失败' }, { status: 500 });
     }
 
     await transactionManager.updateTransaction(orderNumber, {
       psdUrl: psdResult.psdUrl,
+      remainingPoints,
+      points: chargedForPsd && !psdPointsCharged ? (transaction.points || 0) + psdPoints : (transaction.points || 0),
+      actualPoints: chargedForPsd && !psdPointsCharged ? (transaction.actualPoints || 0) + psdPoints : (transaction.actualPoints || 0),
+      requestParams: JSON.stringify({
+        ...requestParams,
+        psdPoints,
+        psdGenerationStatus: 'success',
+        psdPointsCharged: true,
+        psdGeneratedAt: new Date().toISOString(),
+      }),
     });
 
     return NextResponse.json({
@@ -165,10 +256,18 @@ export async function POST(request: NextRequest) {
       message: 'PSD生成成功',
       data: {
         psdUrl: psdResult.psdUrl,
+        remainingPoints,
       },
     });
   } catch (error: unknown) {
     console.error('[手动PSD生成] 异常:', error);
+    if (chargedByThisRequest && chargedUserId && chargedPoints > 0) {
+      try {
+        await userManager.addPointsAtomically(chargedUserId, chargedPoints);
+      } catch (refundError) {
+        console.error('[手动PSD生成] 异常退款失败:', refundError);
+      }
+    }
     return NextResponse.json({ success: false, error: getErrorMessage(error) }, { status: 500 });
   }
 }

@@ -18,14 +18,75 @@ function isLikelyDisplayableImage(imageUrl: string) {
   return /\.(jpg|jpeg|png|webp|gif|bmp)$/.test(normalized)
 }
 
+function clampInteger(value: string | null, fallback: number, min: number, max: number) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, Math.floor(parsed)))
+}
+
+function getDateRange(filter: string | null, timezoneOffsetMinutes: number) {
+  if (!filter || filter === 'all') return {}
+
+  const now = new Date()
+  const localNow = new Date(now.getTime() - timezoneOffsetMinutes * 60000)
+  const getLocalStartAsUtc = (dayOffset: number) => new Date(
+    Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), localNow.getUTCDate() + dayOffset) + timezoneOffsetMinutes * 60000
+  )
+  const todayStart = getLocalStartAsUtc(0)
+  const tomorrowStart = getLocalStartAsUtc(1)
+  const yesterdayStart = getLocalStartAsUtc(-1)
+
+  if (filter === 'today') {
+    return { startDate: todayStart, endDate: tomorrowStart }
+  }
+
+  if (filter === 'yesterday') {
+    return { startDate: yesterdayStart, endDate: todayStart }
+  }
+
+  if (filter === 'earlier') {
+    return { endDate: yesterdayStart }
+  }
+
+  return {}
+}
+
 export async function GET(request: NextRequest) {
   const userId = getCookieUserId(request)
   if (!userId) {
     return NextResponse.json({ success: false, error: '未登录' }, { status: 401 })
   }
 
-  const images = (await capturedImageManager.getUserCapturedImages(userId)).filter((image) => isLikelyDisplayableImage(image.imageUrl))
-  return NextResponse.json({ success: true, data: images })
+  const { searchParams } = new URL(request.url)
+  const limit = clampInteger(searchParams.get('limit'), 60, 1, 120)
+  const offset = clampInteger(searchParams.get('offset'), 0, 0, Number.MAX_SAFE_INTEGER)
+  const timezoneOffset = clampInteger(searchParams.get('timezoneOffset'), 0, -840, 840)
+  const scope = searchParams.get('scope') || 'all'
+  const dateFilter = searchParams.get('date') || 'all'
+  const filters = {
+    ...getDateRange(dateFilter, timezoneOffset),
+    displayableOnly: true,
+    ...(scope === 'favorite' ? { isFavorite: true } : {}),
+    ...(scope === 'uncategorized' ? { folderId: null } : {}),
+    ...(scope.startsWith('folder:') ? { folderId: scope.slice('folder:'.length) } : {}),
+  }
+
+  const [images, total] = await Promise.all([
+    capturedImageManager.getUserCapturedImages(userId, { limit, offset, filters }),
+    capturedImageManager.countUserCapturedImages(userId, filters),
+  ])
+
+  return NextResponse.json({
+    success: true,
+    data: images.filter((image) => isLikelyDisplayableImage(image.imageUrl)),
+    pagination: {
+      limit,
+      offset,
+      total,
+      hasMore: offset + images.length < total,
+      nextOffset: offset + images.length,
+    },
+  })
 }
 
 export async function DELETE(request: NextRequest) {

@@ -23,9 +23,9 @@ __pycache__/
 .cache
 coverage
 storybook-static
+*.tsbuildinfo
 
 # Package manager artifacts
-pnpm-lock.yaml
 package-lock.json
 yarn.lock
 .pnp*
@@ -55,3 +55,9 @@ output.log
 *.log
 *.log.*
 logs/
+
+# Runtime-generated user media
+public/ai-generate/
+public/material-editor/
+public/plugin-capture/
+public/uploads/

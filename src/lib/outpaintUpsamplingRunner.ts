@@ -1,10 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { after, NextRequest, NextResponse } from 'next/server';
 import sharp from 'sharp';
 import { transactionManager, userManager } from '@/storage/database';
 import { uploadToCozeStorage } from '@/lib/dualStorage';
 import { runPsydoImageEditWithMetaFromUrl, isImageEditTimeoutError } from '@/lib/psydoImageEdits';
 import { createUpsamplingTask, waitForUpsamplingTaskComplete } from '@/lib/runningHubWatermark';
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
+import { getOutpaintUpsamplingPoints } from '@/lib/pricing';
 
 export type OutpaintUpsamplingRequest = {
   userId?: string;
@@ -47,6 +48,7 @@ type RouteOptions = {
 const FINAL_LONG_EDGE_TARGET = 4096;
 const IMAGE_DOWNLOAD_MAX_BYTES = 30 * 1024 * 1024;
 const UPSAMPLING_RESULT_MAX_BYTES = 80 * 1024 * 1024;
+const OUTPAINT_IMAGE_EDIT_TIMEOUT_MS = 120000;
 const EDIT_CANVAS_SPECS: EditCanvasSpec[] = [
   { width: 1024, height: 1024, size: '1024x1024', aspectRatio: 1 },
   { width: 1024, height: 1536, size: '1024x1536', aspectRatio: 1024 / 1536 },
@@ -226,6 +228,8 @@ async function ensure4kLongEdge(buffer: Buffer, targetSize: { width: number; hei
 
 export async function runOutpaintUpsamplingRoute(request: NextRequest, options: RouteOptions) {
   let orderId = '';
+  let chargedPoints = 0;
+  let chargedUserId = '';
 
   try {
     const body = await request.json() as OutpaintUpsamplingRequest;
@@ -246,6 +250,11 @@ export async function runOutpaintUpsamplingRoute(request: NextRequest, options: 
     }
 
     const currentPoints = user.points || 0;
+    const requiredPoints = getOutpaintUpsamplingPoints();
+    if (currentPoints < requiredPoints) {
+      return NextResponse.json({ success: false, message: `积分不足，当前积分：${currentPoints}，需要：${requiredPoints}` }, { status: 400 });
+    }
+
     orderId = `${options.orderPrefix}-${Date.now()}_${Math.floor(Math.random() * 10000)}`;
 
     await transactionManager.createTransaction({
@@ -253,16 +262,35 @@ export async function runOutpaintUpsamplingRoute(request: NextRequest, options: 
       orderNumber: orderId,
       toolPage: options.toolPage,
       description: options.description,
-      points: 0,
+      points: requiredPoints,
+      actualPoints: 0,
       remainingPoints: currentPoints,
       resultData: '',
       uploadedImage: imageUrl,
       requestParams: JSON.stringify({
         imageUrl,
         workflow: options.workflow,
+        requiredPoints,
         targetLongEdge: FINAL_LONG_EDGE_TARGET,
       }),
       status: '处理中',
+    });
+
+    const chargedUser = await userManager.deductPointsAtomically(userId, requiredPoints);
+    if (!chargedUser) {
+      await transactionManager.updateTransaction(orderId, {
+        status: '失败',
+        resultData: JSON.stringify({ error: '积分不足' }),
+        actualPoints: 0,
+      });
+      return NextResponse.json({ success: false, message: `积分不足，当前积分：${currentPoints}，需要：${requiredPoints}` }, { status: 400 });
+    }
+
+    chargedUserId = userId;
+    chargedPoints = requiredPoints;
+    await transactionManager.updateTransaction(orderId, {
+      actualPoints: requiredPoints,
+      remainingPoints: chargedUser.points,
     });
 
     const response = NextResponse.json({
@@ -270,12 +298,13 @@ export async function runOutpaintUpsamplingRoute(request: NextRequest, options: 
       message: options.queuedMessage,
       data: {
         orderId,
+        remainingPoints: chargedUser.points,
       },
     });
 
     const resolvedInputImageUrl = getResolvedImageUrl(imageUrl, request);
 
-    (async () => {
+    after(async () => {
       try {
         console.log(`[${options.logPrefix}] ========== 后台任务开始 ==========`);
         console.log(`[${options.logPrefix}] 订单号:`, orderId);
@@ -310,9 +339,8 @@ export async function runOutpaintUpsamplingRoute(request: NextRequest, options: 
         let final4kResult: Final4kResult | null = null;
         let imageEditMeta: {
           model: string;
-          targetName: 'primary' | 'fallback';
+          targetName: 'primary';
           baseUrl: string;
-          usedFallback: boolean;
         } | null = null;
         console.log(`[${options.logPrefix}] 步骤2: 调用 gpt-image-2 扩图`);
         const imageEditResult = await runPsydoImageEditWithMetaFromUrl({
@@ -321,6 +349,7 @@ export async function runOutpaintUpsamplingRoute(request: NextRequest, options: 
           size: canvas.size,
           quality: 'high',
           maskImageBase64: toPngDataUrl(maskBuffer),
+          timeoutMs: OUTPAINT_IMAGE_EDIT_TIMEOUT_MS,
           localMaterialOrigin: request.nextUrl.origin,
         });
 
@@ -344,10 +373,14 @@ export async function runOutpaintUpsamplingRoute(request: NextRequest, options: 
 
         await transactionManager.updateTransaction(orderId, {
           status: '成功',
+          points: requiredPoints,
+          actualPoints: requiredPoints,
+          remainingPoints: chargedUser.points,
           resultData: finalResultUrl,
           requestParams: JSON.stringify({
             imageUrl,
             workflow: options.workflow,
+            requiredPoints,
             prompt: promptResolution.prompt,
             promptSummary: promptResolution.summary || '',
             promptSource: promptResolution.source || '',
@@ -371,29 +404,53 @@ export async function runOutpaintUpsamplingRoute(request: NextRequest, options: 
             editModel: imageEditMeta.model,
             editTarget: imageEditMeta.targetName,
             editBaseUrl: imageEditMeta.baseUrl,
-            usedFallback: imageEditMeta.usedFallback,
           }),
         });
 
         console.log(`[${options.logPrefix}] ========== 后台任务完成 ==========`);
       } catch (error: unknown) {
         console.error(`[${options.logPrefix}] ========== 后台任务失败 ==========` , error);
+        let refundedPoints: number | undefined;
+        if (chargedPoints > 0 && chargedUserId) {
+          try {
+            const refundedUser = await userManager.addPointsAtomically(chargedUserId, chargedPoints);
+            refundedPoints = refundedUser?.points;
+            chargedPoints = 0;
+          } catch (refundError) {
+            console.error(`[${options.logPrefix}] 后台任务失败退款异常:`, refundError);
+          }
+        }
         await transactionManager.updateTransaction(orderId, {
           status: isTimeoutLikeError(error) ? '超时' : '失败',
+          actualPoints: 0,
+          remainingPoints: refundedPoints,
           resultData: JSON.stringify({
             error: getUserFacingMessage(error),
           }),
         });
       }
-    })();
+    });
 
     return response;
   } catch (error: unknown) {
     console.error(`[${options.logPrefix}] 创建任务失败:`, error);
 
+    let refundedPoints: number | undefined;
+    if (chargedPoints > 0 && chargedUserId) {
+      try {
+        const refundedUser = await userManager.addPointsAtomically(chargedUserId, chargedPoints);
+        refundedPoints = refundedUser?.points;
+        chargedPoints = 0;
+      } catch (refundError) {
+        console.error(`[${options.logPrefix}] 创建任务失败退款异常:`, refundError);
+      }
+    }
+
     if (orderId) {
       await transactionManager.updateTransaction(orderId, {
         status: isTimeoutLikeError(error) ? '超时' : '失败',
+        actualPoints: 0,
+        remainingPoints: refundedPoints,
         resultData: JSON.stringify({
           error: getUserFacingMessage(error),
         }),

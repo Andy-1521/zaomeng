@@ -8,15 +8,15 @@ import {
   type CozeWorkflowInputImage,
 } from '@/lib/cozeOpenApiFiles';
 import sharp from 'sharp';
-import { decomposeLayersWithRunningHub } from '@/lib/layer-decomposition';
-import { generatePsdFromDecomposition } from '@/lib/psd-generator';
 import { uploadFromUrlToCozeStorage, uploadToCozeStorage } from '@/lib/dualStorage';
 import { readLocalMaterialFileFromUrl } from '@/lib/localUploadStorage';
 import { isImageEditTimeoutError, runPsydoImageEditFromUrl } from '@/lib/psydoImageEdits';
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
+import { getColorExtractionPoints, getGeneratePsdPoints } from '@/lib/pricing';
 
-// 积分配置
-const REQUIRED_POINTS = 30;
+const COLOR_EXTRACTION_POINTS = getColorExtractionPoints();
+const PSD_POINTS = getGeneratePsdPoints();
+const COLOR_EXTRACTION_IMAGE_EDIT_TIMEOUT_MS = 120000;
 
 type ExtractionTaskResult = {
   success: boolean;
@@ -29,7 +29,10 @@ type ExtractionTaskResult = {
 
 type RequestParamsRecord = Record<string, unknown> & {
   actualExtractionMode?: string;
-  degraded?: boolean;
+  psdGenerationStatus?: 'processing' | 'success' | 'failed' | 'pending';
+  psdPoints?: number;
+  psdPointsCharged?: boolean;
+  psdAdditionalImageUrl?: string;
 };
 
 function getErrorMessage(error: unknown) {
@@ -67,6 +70,7 @@ async function submitCozeWorkflowExtractionTask(imageUrl: string, localMaterialO
       prompt: COLOR_EXTRACTION_PROMPT,
       size: '1024x1792',
       quality: 'high',
+      timeoutMs: COLOR_EXTRACTION_IMAGE_EDIT_TIMEOUT_MS,
       localMaterialOrigin,
     });
 
@@ -96,27 +100,19 @@ async function submitCozeWorkflowExtractionTask(imageUrl: string, localMaterialO
 
 async function createCozeWorkflowInputImage(
   imageUrl: string,
-  fallbackFileName: string
+  uploadFileName: string
 ): Promise<CozeWorkflowInputImage> {
-  try {
-    const uploadedFile = await uploadFileUrlToCozeOpenApi(imageUrl, fallbackFileName);
-    console.log('[彩绘提取2工作流] 已上传 Coze OpenAPI 文件:', {
-      fileId: uploadedFile.id,
-      fileName: uploadedFile.fileName,
-      bytes: uploadedFile.bytes,
-    });
+  const uploadedFile = await uploadFileUrlToCozeOpenApi(imageUrl, uploadFileName);
+  console.log('[彩绘提取2工作流] 已上传 Coze OpenAPI 文件:', {
+    fileId: uploadedFile.id,
+    fileName: uploadedFile.fileName,
+    bytes: uploadedFile.bytes,
+  });
 
-    return {
-      file_id: uploadedFile.id,
-      file_type: 'image',
-    };
-  } catch (error) {
-    console.warn('[彩绘提取2工作流] Coze OpenAPI 文件上传失败，回退 URL 输入:', error);
-    return {
-      url: imageUrl,
-      file_type: 'image',
-    };
-  }
+  return {
+    file_id: uploadedFile.id,
+    file_type: 'image',
+  };
 }
 
 /**
@@ -170,7 +166,7 @@ async function submitCozeRemoveBgWorkflowTask(imageUrl: string): Promise<{ succe
  * @param imageUrl 图片URL
  * @returns 提取结果
  */
-async function extractColorExtractionWithFallback(imageUrl: string, localMaterialOrigin?: string): Promise<{ success: boolean; resultUrl?: string; errorMsg?: string; isTimeout?: boolean }> {
+async function extractColorExtraction(imageUrl: string, localMaterialOrigin?: string): Promise<{ success: boolean; resultUrl?: string; errorMsg?: string; isTimeout?: boolean }> {
   console.log(`[彩绘提取] ========== 开始彩绘提取（Coze工作流API） ==========`);
 
   try {
@@ -207,28 +203,6 @@ async function extractColorExtractionWithFallback(imageUrl: string, localMateria
   }
 }
 
-// ========== RunningHub API - 分层 + PSD生成 ==========
-
-/**
- * 下载图片并上传到对象存储
- */
-async function uploadImageToStorage(imageUrl: string, orderId: string): Promise<string> {
-  console.log(`[彩绘提取2工作流] 开始上传图片到对象存储，源URL: ${imageUrl.substring(0, 80)}...`);
-
-  try {
-    const fileName = `color-extraction/layering-inputs/${orderId}.png`;
-    const result = await uploadFromUrlToCozeStorage(imageUrl, fileName, 'image/png');
-
-    console.log(`[彩绘提取2工作流] ========== 图片已上传到对象存储 ==========`);
-    console.log(`[彩绘提取2工作流] cozeUrl: ${result.substring(0, 80)}...`);
-
-    return result;
-  } catch (error: unknown) {
-    console.error('[彩绘提取2工作流] 上传图片到对象存储失败:', error);
-    throw new Error(`上传图片失败: ${getErrorMessage(error)}`);
-  }
-}
-
 async function normalizeWorkflowSourceImage(imageUrl: string, orderId: string, localMaterialOrigin: string): Promise<string> {
   console.log(`[彩绘提取2工作流] 开始标准化工作流输入图片: ${imageUrl.substring(0, 80)}...`);
   let sourceBuffer: Buffer;
@@ -254,14 +228,9 @@ async function normalizeWorkflowSourceImage(imageUrl: string, orderId: string, l
 
     const fileName = `color-extraction/workflow-sources/${orderId}.jpg`;
 
-  try {
-    const uploadedUrl = await uploadToCozeStorage(normalizedBuffer, fileName, 'image/jpeg');
-    console.log(`[彩绘提取2工作流] 工作流输入图片已上传到对象存储: ${uploadedUrl.substring(0, 80)}...`);
-    return uploadedUrl;
-  } catch (error) {
-    console.warn('[彩绘提取2工作流] 工作流输入图上传对象存储失败，继续使用原始图片URL:', error);
-    return imageUrl;
-  }
+  const uploadedUrl = await uploadToCozeStorage(normalizedBuffer, fileName, 'image/jpeg');
+  console.log(`[彩绘提取2工作流] 工作流输入图片已上传到对象存储: ${uploadedUrl.substring(0, 80)}...`);
+  return uploadedUrl;
 }
 
 async function persistExternalResultImage(
@@ -271,96 +240,22 @@ async function persistExternalResultImage(
   return uploadFromUrlToCozeStorage(sourceUrl, relativeFilePath, 'image/png');
 }
 
-async function persistImageBestEffort(
-  sourceUrl: string,
-  relativeFilePath: string
-): Promise<{ url: string; persisted: boolean; error?: string }> {
-  try {
-    const url = await persistExternalResultImage(sourceUrl, relativeFilePath);
-    return { url, persisted: true };
-  } catch (error) {
-    console.error('[彩绘提取2工作流] 持久化图片失败，保留原始结果URL:', error);
-    return {
-      url: sourceUrl,
-      persisted: false,
-      error: error instanceof Error ? error.message : '持久化图片失败',
-    };
-  }
-}
-
-/**
- * 使用分层接口层进行分层，并生成PSD文件
- * @param extractionImageUrl 提取的图片URL（用于分层）
- * @param orderId 订单号
- * @param additionalImageUrl 额外图片URL（可选，将作为额外图层添加到PSD中）
- * @returns PSD文件的URL
- */
-async function processRunningHubLayeringAndPsd(extractionImageUrl: string, orderId: string, additionalImageUrl?: string): Promise<{ psdUrl?: string; error?: string }> {
-  console.log(`[RunningHub分层+PSD] ========== 开始分层与PSD工作流 ==========`);
-  console.log(`[RunningHub分层+PSD] 输入图片URL: ${extractionImageUrl.substring(0, 80)}...`);
-  console.log(`[RunningHub分层+PSD] 订单号: ${orderId}`);
-
-  try {
-    // 步骤1: 下载提取图片并上传到对象存储（与彩绘提取1保持一致）
-    console.log(`[RunningHub分层+PSD] 步骤1: 下载图片并上传到对象存储`);
-    const uploadedImageUrl = await uploadImageToStorage(extractionImageUrl, orderId);
-    console.log(`[RunningHub分层+PSD] 图片已上传: ${uploadedImageUrl.substring(0, 80)}...`);
-
-    // 步骤2: 获取分层结果
-    console.log(`[RunningHub分层+PSD] 步骤2: 调用分层接口层`);
-    const decomposition = await decomposeLayersWithRunningHub(uploadedImageUrl);
-    console.log(`[RunningHub分层+PSD] 分层来源: ${decomposition.source}, 图层数量: ${decomposition.layers.length}`);
-
-    const layers = [...decomposition.layers];
-
-    // 如果有额外图片URL，将其添加到图层列表中
-    if (additionalImageUrl) {
-      console.log(`[RunningHub分层+PSD] 添加额外图层: ${additionalImageUrl.substring(0, 80)}...`);
-      layers.push({
-        name: '背景图（原图）',
-        kind: 'background',
-        imageUrl: additionalImageUrl,
-        zIndex: layers.length,
-      });
-      console.log(`[RunningHub分层+PSD] 图层总数（含额外图层）: ${layers.length}`);
-    }
-
-    // 步骤3: 合并图层为PSD文件
-    console.log(`[RunningHub分层+PSD] 步骤3: 合并图层为PSD文件`);
-    const psdBuffer = await generatePsdFromDecomposition({
-      ...decomposition,
-      layers,
-    });
-    console.log(`[RunningHub分层+PSD] PSD文件生成成功，大小: ${psdBuffer.length} bytes`);
-
-    // 步骤4: 上传PSD文件到对象存储
-    console.log(`[RunningHub分层+PSD] 步骤4: 上传PSD文件到对象存储`);
-    const fileName = `color-extraction/psd/${orderId}.psd`;
-    const psdUrl = await uploadToCozeStorage(psdBuffer, fileName, 'application/octet-stream');
-    console.log(`[RunningHub分层+PSD] PSD上传成功: ${psdUrl.substring(0, 80)}...`);
-    console.log(`[RunningHub分层+PSD] ========== RunningHub分层工作流完成 ==========`);
-
-    return { psdUrl };
-  } catch (error: unknown) {
-    console.error(`[RunningHub分层+PSD] ========== RunningHub分层工作流失败 ==========`);
-    console.error(`[RunningHub分层+PSD] 错误:`, getErrorMessage(error));
-    return { error: getErrorMessage(error) };
-  }
-}
-
 // 主API处理逻辑
 export async function POST(request: NextRequest) {
   const workflowStartTime = Date.now();
   let userId = '';
   let currentPoints = 0;
   let finalOrderId = '';
+  let colorExtractionPointsCharged = false;
+  let chargedRemainingPoints = 0;
 
   console.log('[彩绘提取2工作流] ========== 彩绘提取2工作流开始 ==========');
   console.log('[彩绘提取2工作流] 时间:', new Date(workflowStartTime).toISOString());
 
   try {
     const requestBody = await request.json();
-    const { userId: requestUserId, imageUrl, orderId, extractionMode = 'full' } = requestBody;
+    const { userId: requestUserId, imageUrl, orderId } = requestBody;
+    const extractionMode = requestBody.extractionMode === 'hollow' ? 'hollow' : 'full';
 
     console.log(`[彩绘提取2工作流] ========== 接收到请求 ==========`);
     console.log(`[彩绘提取2工作流] userId: ${requestUserId}`);
@@ -408,14 +303,14 @@ export async function POST(request: NextRequest) {
 
     currentPoints = user.points || 0;
 
-    if (currentPoints < REQUIRED_POINTS) {
+    if (currentPoints < COLOR_EXTRACTION_POINTS) {
       return NextResponse.json(
         {
           success: false,
           message: '积分不足',
           debug: {
             currentPoints,
-            requiredPoints: REQUIRED_POINTS,
+            requiredPoints: COLOR_EXTRACTION_POINTS,
           },
         },
         { status: 400 }
@@ -436,7 +331,7 @@ export async function POST(request: NextRequest) {
       toolPage: '彩绘提取',
       description: '手机壳彩绘提取',
       prompt: finalPrompt,
-      points: REQUIRED_POINTS,
+      points: COLOR_EXTRACTION_POINTS,
       remainingPoints: currentPoints,
       resultData: null,
       uploadedImage: imageUrl,
@@ -444,20 +339,44 @@ export async function POST(request: NextRequest) {
         imageUrl: imageUrl,
         extractionMode: extractionMode,
         actualExtractionMode: 'pending', // 后续更新
+        psdPoints: PSD_POINTS,
+        psdGenerationStatus: 'pending',
+        psdPointsCharged: false,
         workflow: extractionMode === 'hollow'
-          ? '彩绘提取完整工作流（Coze去除背景API + RunningHub API分层）'
-          : '彩绘提取完整工作流（Coze工作流API彩绘提取 + RunningHub API分层）',
+          ? '彩绘提取工作流（Coze去除背景API，PSD需手动生成）'
+          : '彩绘提取工作流（Coze工作流API彩绘提取，PSD需手动生成）',
       }),
       status: '处理中',
     });
 
     console.log(`[彩绘提取2工作流] 订单记录已创建`);
 
+    const chargedUser = await userManager.deductPointsAtomically(userId, COLOR_EXTRACTION_POINTS);
+    if (!chargedUser) {
+      await transactionManager.updateTransaction(finalOrderId, {
+        status: '失败',
+        resultData: JSON.stringify({ error: '积分不足' }),
+        actualPoints: 0,
+      });
+      return NextResponse.json(
+        { success: false, message: `积分不足，当前积分：${currentPoints}，需要：${COLOR_EXTRACTION_POINTS}` },
+        { status: 400 }
+      );
+    }
+
+    colorExtractionPointsCharged = true;
+    chargedRemainingPoints = chargedUser.points;
+    await transactionManager.updateTransaction(finalOrderId, {
+      actualPoints: COLOR_EXTRACTION_POINTS,
+      remainingPoints: chargedRemainingPoints,
+    });
+    console.log(`[彩绘提取2工作流] 用户积分已预扣: ${currentPoints} -> ${chargedRemainingPoints}`);
+
     // ========== 彩绘提取2工作流 ==========
     if (extractionMode === 'hollow') {
-      console.log(`[彩绘提取2工作流] ========== 开始彩绘提取2工作流（Coze去除背景API + RunningHub API分层） ==========`);
+      console.log(`[彩绘提取2工作流] ========== 开始彩绘提取工作流（Coze去除背景API，PSD手动生成） ==========`);
     } else {
-      console.log(`[彩绘提取2工作流] ========== 开始彩绘提取2工作流（Coze工作流API彩绘提取 + RunningHub API分层） ==========`);
+      console.log(`[彩绘提取2工作流] ========== 开始彩绘提取工作流（Coze工作流API彩绘提取，PSD手动生成） ==========`);
     }
 
     // 步骤1: 调用彩绘提取函数（根据模式选择不同的API）
@@ -468,16 +387,9 @@ export async function POST(request: NextRequest) {
       console.log(`[彩绘提取2工作流] 使用镂空图模式（去除背景API）`);
       extractionResult = await submitCozeRemoveBgWorkflowTask(workflowInputImageUrl);
 
-      // 如果镂空图模式失败，自动降级到全屏图模式
-      if (!extractionResult.success) {
-        console.warn(`[彩绘提取2工作流] ========== 镂空图模式失败，自动降级到全屏图模式 ==========`);
-        console.warn(`[彩绘提取2工作流] 失败原因: ${extractionResult.errorMsg}`);
-        actualExtractionMode = 'full';
-        extractionResult = await extractColorExtractionWithFallback(workflowInputImageUrl, request.nextUrl.origin);
-      }
     } else {
       console.log(`[彩绘提取2工作流] 使用全屏图模式（Psydo 图生图彩绘提取API）`);
-      extractionResult = await extractColorExtractionWithFallback(workflowInputImageUrl, request.nextUrl.origin);
+      extractionResult = await extractColorExtraction(workflowInputImageUrl, request.nextUrl.origin);
     }
 
     console.log(`[彩绘提取2工作流] ========== 提取函数返回结果 ==========`);
@@ -505,32 +417,23 @@ export async function POST(request: NextRequest) {
         processingImageUrl = extractionImageUrl; // 全屏图模式使用同一张图
         console.log(`[彩绘提取2工作流] 全屏图模式成功:`);
         console.log(`[彩绘提取2工作流] resultUrl: ${extractionImageUrl.substring(0, 80)}...`);
-        if (extractionMode === 'hollow' && actualExtractionMode === 'full') {
-          console.warn(`[彩绘提取2工作流] 注意：镂空图模式失败，已降级到全屏图模式`);
-        }
       }
 
-      // 步骤1.5: 尽力持久化结果图片，但不能影响主结果成功
-      console.log('[彩绘提取2工作流] 步骤1.5: 持久化生成的图片（失败则保留原始结果URL）');
+      if (!extractionImageUrl || (actualExtractionMode === 'hollow' && !processingImageUrl)) {
+        throw new Error('彩绘提取未返回完整结果图');
+      }
+
+      // 步骤1.5: 持久化结果图片；失败直接进入失败退款流程
+      console.log('[彩绘提取2工作流] 步骤1.5: 持久化生成的图片');
       const fileName = `color-extraction/${finalOrderId}-result.png`;
-      const persistedResult = await persistImageBestEffort(extractionImageUrl, fileName);
-      extractionImageUrl = persistedResult.url;
-      if (persistedResult.persisted) {
-        console.log(`[彩绘提取2工作流] 提取图片已持久化: ${extractionImageUrl.substring(0, 80)}...`);
-      } else {
-        console.warn(`[彩绘提取2工作流] 提取图片持久化失败，继续使用原始结果URL: ${persistedResult.error}`);
-      }
+      extractionImageUrl = await persistExternalResultImage(extractionImageUrl, fileName);
+      console.log(`[彩绘提取2工作流] 提取图片已持久化: ${extractionImageUrl.substring(0, 80)}...`);
 
-      // 如果是镂空图模式，也尽力持久化额外图层，但不能影响主流程成功
+      // 如果是镂空图模式，也必须持久化额外图层
       if (actualExtractionMode === 'hollow' && processingImageUrl) {
         const additionalFileName = `color-extraction/${finalOrderId}-additional.png`;
-        const persistedAdditional = await persistImageBestEffort(processingImageUrl, additionalFileName);
-        processingImageUrl = persistedAdditional.url;
-        if (persistedAdditional.persisted) {
-          console.log(`[彩绘提取2工作流] 额外图层已持久化: ${processingImageUrl.substring(0, 80)}...`);
-        } else {
-          console.warn(`[彩绘提取2工作流] 额外图层持久化失败，继续使用原始结果URL: ${persistedAdditional.error}`);
-        }
+        processingImageUrl = await persistExternalResultImage(processingImageUrl, additionalFileName);
+        console.log(`[彩绘提取2工作流] 额外图层已持久化: ${processingImageUrl.substring(0, 80)}...`);
       }
     } else {
       errorMsg = extractionResult.errorMsg || '暂时未能完成处理，请稍后重试';
@@ -546,16 +449,8 @@ export async function POST(request: NextRequest) {
       console.log(`[彩绘提取2工作流] ========== 彩绘提取API成功 ==========`);
       console.log(`[彩绘提取2工作流] 提取图片URL: ${extractionImageUrl.substring(0, 80)}...`);
 
-      // 步骤2: 原子扣除积分（防止并发超扣）
-      const updatedUser = await userManager.deductPointsAtomically(userId, REQUIRED_POINTS);
-
-      if (!updatedUser) {
-        console.error('[彩绘提取2工作流] 扣除积分失败：积分不足');
-        throw new Error('积分不足');
-      }
-
-      const newPoints = updatedUser.points;
-      console.log(`[彩绘提取2工作流] 用户积分已更新: ${currentPoints} -> ${newPoints}`);
+      const newPoints = chargedRemainingPoints;
+      console.log(`[彩绘提取2工作流] 使用已预扣积分: ${currentPoints} -> ${newPoints}`);
 
       // 步骤3: 更新订单状态为"成功"，并保存提取图片URL
       console.log('[彩绘提取2工作流] ========== 更新订单状态为成功（提取完成） ==========');
@@ -570,8 +465,11 @@ export async function POST(request: NextRequest) {
           console.warn('[彩绘提取2工作流] 解析requestParams失败，使用空对象');
         }
         requestParams.actualExtractionMode = actualExtractionMode;
-        if (extractionMode === 'hollow' && actualExtractionMode === 'full') {
-          requestParams.degraded = true;
+        requestParams.psdPoints = PSD_POINTS;
+        requestParams.psdGenerationStatus = 'pending';
+        requestParams.psdPointsCharged = false;
+        if (actualExtractionMode === 'hollow' && processingImageUrl) {
+          requestParams.psdAdditionalImageUrl = processingImageUrl;
         }
 
         await transactionManager.updateTransaction(finalOrderId, {
@@ -580,7 +478,8 @@ export async function POST(request: NextRequest) {
           uploadedImage: imageUrl, // 保存用户上传的原图URL
           requestParams: JSON.stringify(requestParams),
           remainingPoints: newPoints,
-          actualPoints: 30, // 彩绘提取成功，扣除30积分
+          points: COLOR_EXTRACTION_POINTS,
+          actualPoints: COLOR_EXTRACTION_POINTS, // 彩绘提取成功，扣除30积分
         });
       } else {
         await transactionManager.updateTransaction(finalOrderId, {
@@ -588,84 +487,24 @@ export async function POST(request: NextRequest) {
           resultData: extractionImageUrl, // 保存双存储的URL
           uploadedImage: imageUrl, // 保存用户上传的原图URL
           remainingPoints: newPoints,
-          actualPoints: 30, // 彩绘提取成功，扣除30积分
+          points: COLOR_EXTRACTION_POINTS,
+          actualPoints: COLOR_EXTRACTION_POINTS, // 彩绘提取成功，扣除30积分
         });
       }
 
-      console.log(`[彩绘提取2工作流] ========== 订单 ${finalOrderId} 提取完成（PSD后台生成中） ==========`);
+      console.log(`[彩绘提取2工作流] ========== 订单 ${finalOrderId} 提取完成（PSD待手动生成） ==========`);
       console.log(`[彩绘提取2工作流] 已用时间: ${((Date.now() - workflowStartTime) / 1000 / 60).toFixed(1)}分钟`);
 
-      // 步骤4: 立即返回响应给前端（不等待分层和PSD生成）
-      const response = NextResponse.json({
+      return NextResponse.json({
         success: true,
         message: '彩绘提取成功',
         data: {
           imageUrl: extractionImageUrl,
-          psdUrl: '', // PSD尚未生成
+          psdUrl: '',
           orderId: finalOrderId,
           remainingPoints: newPoints,
         },
       });
-
-      // 步骤5: 后台异步处理分层和PSD生成（不阻塞响应）
-      // 使用立即执行的异步函数（IIFE）启动后台任务
-      (async () => {
-        try {
-          console.log(`[后台任务] ========== 开始后台任务 ==========`);
-          console.log(`[后台任务] 订单号: ${finalOrderId}`);
-          console.log(`[后台任务] extractionMode: ${extractionMode}`);
-
-          let layeringImageUrl = '';
-          let additionalImageUrl: string | undefined = undefined;
-
-          if (actualExtractionMode === 'hollow') {
-            // 镂空图模式：使用removedBgUrl进行分层，processedImageUrl作为额外图层
-            layeringImageUrl = extractionImageUrl; // removedBgUrl
-            additionalImageUrl = processingImageUrl; // processedImageUrl
-            console.log(`[后台任务] 镂空图模式：`);
-            console.log(`[后台任务]   分层图片URL: ${layeringImageUrl.substring(0, 80)}...`);
-            console.log(`[后台任务]   额外图层URL: ${additionalImageUrl.substring(0, 80)}...`);
-          } else {
-            // 全屏图模式：使用extractionImageUrl进行分层
-            layeringImageUrl = extractionImageUrl;
-            console.log(`[后台任务] 全屏图模式（含降级）：`);
-            console.log(`[后台任务]   分层图片URL: ${layeringImageUrl.substring(0, 80)}...`);
-          }
-
-          console.log(`[后台任务] ========== 开始RunningHub分层 + PSD生成 ==========`);
-
-          const psdResult = await processRunningHubLayeringAndPsd(layeringImageUrl, finalOrderId, additionalImageUrl);
-
-          if (psdResult.psdUrl) {
-            console.log(`[后台任务] ========== 分层 + PSD生成成功 ==========`);
-            console.log(`[后台任务] PSD文件URL: ${psdResult.psdUrl.substring(0, 80)}...`);
-
-            await transactionManager.updateTransaction(finalOrderId, {
-              psdUrl: psdResult.psdUrl,
-              // resultData保持为提取图片URL（用户可见的结果图），不修改
-            });
-
-            console.log(`[后台任务] ========== 订单 ${finalOrderId} PSD已更新 ==========`);
-
-            // 触发前端刷新事件，通知用户PSD已生成
-            console.log(`[后台任务] 触发 taskHistoryUpdated 事件`);
-            // 注意：这里不能直接使用window，因为这是在服务器端执行的
-            // 前端会通过定时检查机制自动刷新
-          } else {
-            console.error(`[后台任务] ========== 分层失败 ==========`);
-            console.error(`[后台任务] 错误:`, psdResult.error);
-
-            // 分层失败不影响提取结果，不修改resultData
-            console.warn(`[后台任务] 分层失败但提取成功，保持订单状态不变`);
-          }
-        } catch (error: unknown) {
-          console.error(`[后台任务] ========== 后台任务异常 ==========`);
-          console.error(`[后台任务] 异常:`, getErrorMessage(error));
-        }
-      })();
-
-      // 立即返回响应
-      return response;
 
     } else {
       // 彩绘提取失败或超时
@@ -673,11 +512,23 @@ export async function POST(request: NextRequest) {
       console.error(`[彩绘提取2工作流] ========== 彩绘提取API${status} ==========`);
       console.error(`[彩绘提取2工作流] 错误:`, errorMsg);
 
+      let refundedPoints: number | undefined;
+      if (colorExtractionPointsCharged) {
+        try {
+          const refundedUser = await userManager.addPointsAtomically(userId, COLOR_EXTRACTION_POINTS);
+          refundedPoints = refundedUser?.points;
+          colorExtractionPointsCharged = false;
+        } catch (refundError) {
+          console.error('[彩绘提取2工作流] 失败退款异常:', refundError);
+        }
+      }
+
       await transactionManager.updateTransaction(finalOrderId, {
         status: status,
         resultData: JSON.stringify({
           error: errorMsg,
         }),
+        remainingPoints: refundedPoints,
         actualPoints: 0, // 失败时不扣积分
       });
 
@@ -694,12 +545,24 @@ export async function POST(request: NextRequest) {
     console.error('[彩绘提取2工作流] ========== 工作流异常 ==========');
     console.error('[彩绘提取2工作流] 异常:', error);
 
+    let refundedPoints: number | undefined;
+    if (finalOrderId && colorExtractionPointsCharged) {
+      try {
+        const refundedUser = await userManager.addPointsAtomically(userId, COLOR_EXTRACTION_POINTS);
+        refundedPoints = refundedUser?.points;
+        colorExtractionPointsCharged = false;
+      } catch (refundError) {
+        console.error('[彩绘提取2工作流] 异常退款失败:', refundError);
+      }
+    }
+
     if (finalOrderId) {
       await transactionManager.updateTransaction(finalOrderId, {
         status: '失败',
         resultData: JSON.stringify({
           error: getUserFacingExtractionMessage(error),
         }),
+        remainingPoints: refundedPoints,
         actualPoints: 0, // 异常失败时不扣积分
       });
     }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { uploadToCozeStorage } from '@/lib/dualStorage';
 import { capturedImageManager, materialFolderManager } from '@/storage/database';
-import { normalizeFileExtension, normalizeFolder, saveBufferToLocalMaterialFile } from '@/lib/localUploadStorage';
+import { normalizeFileExtension, normalizeFolder } from '@/lib/localUploadStorage';
 import { isImageValidationError, validateUploadedImageBuffer } from '@/lib/serverImageValidation';
 
 function getCookieUserId(request: NextRequest): string | null {
@@ -23,11 +24,7 @@ function getErrorStack(error: unknown) {
   return error instanceof Error ? error.stack : undefined;
 }
 
-// Coze对象存储配置
-const bucketName = process.env.COZE_BUCKET_NAME || '';
-const endpointUrl = process.env.COZE_BUCKET_ENDPOINT_URL || '';
-
-console.log('[文件上传] 使用Coze对象存储（1年有效期）');
+console.log('[文件上传] 使用腾讯COS对象存储（1年有效期）');
 
 export async function POST(request: NextRequest) {
   try {
@@ -57,98 +54,40 @@ export async function POST(request: NextRequest) {
     const extension = normalizeFileExtension(imageInfo.extension);
     const fileName = `${folder}/${timestamp}_${random}.${extension}`;
 
-    // 使用Coze对象存储上传（1年有效期）
-    try {
-      console.log('[文件上传] 开始上传到Coze对象存储:', fileName);
-      const S3Storage = (await import('coze-coding-dev-sdk')).S3Storage;
-      const cozeStorage = new S3Storage({
-        endpointUrl: endpointUrl,
-        accessKey: process.env.COZE_ACCESS_KEY || '',
-        secretKey: process.env.COZE_SECRET_KEY || '',
-        bucketName: bucketName,
-        region: 'cn-beijing',
-      });
+    console.log('[文件上传] 开始上传到腾讯COS:', fileName);
+    const storageUrl = await uploadToCozeStorage(buffer, fileName, imageInfo.contentType);
+    console.log('[文件上传] 腾讯COS上传成功:', storageUrl.substring(0, 80) + '...');
 
-      const key = await cozeStorage.uploadFile({
-        fileContent: buffer,
-        fileName: fileName,
-        contentType: imageInfo.contentType,
-      });
-
-      console.log('[文件上传] Coze对象存储上传成功，key:', key);
-
-      // 生成1年有效期的签名URL
-      const signedUrl = await cozeStorage.generatePresignedUrl({
-        key: key,
-        expireTime: 365 * 24 * 60 * 60, // 1年
-      });
-
-      console.log('[文件上传] Coze签名URL生成成功（1年有效期）:', signedUrl.substring(0, 80) + '...');
-
-      let materialRecord = null;
-      if (createMaterial) {
-        const userId = getCookieUserId(request);
-        let targetFolderId: string | null = null;
-        if (userId && materialFolderId) {
-          const targetFolder = await materialFolderManager.getFolderById(materialFolderId, userId);
-          targetFolderId = targetFolder ? targetFolder.id : null;
-        }
-        if (userId) {
-          materialRecord = await capturedImageManager.createCapturedImage({
-            userId,
-            imageUrl: signedUrl,
-            originalUrl: null,
-            pageUrl: null,
-            pageTitle: file.name,
-            sourceHost: 'local-upload',
-            imageType: 'main',
-            folderId: targetFolderId,
-          });
-        }
+    let materialRecord = null;
+    if (createMaterial) {
+      const userId = getCookieUserId(request);
+      let targetFolderId: string | null = null;
+      if (userId && materialFolderId) {
+        const targetFolder = await materialFolderManager.getFolderById(materialFolderId, userId);
+        targetFolderId = targetFolder ? targetFolder.id : null;
       }
-
-      return NextResponse.json({
-        success: true,
-        data: {
-          key: key,
-          url: signedUrl,
-          material: materialRecord,
-        },
-      });
-    } catch (cozeError) {
-      console.warn('[文件上传] Coze对象存储上传失败，回退到本地 public 存储:', cozeError);
-      const localUrl = await saveBufferToLocalMaterialFile(buffer, fileName);
-
-      if (createMaterial) {
-        const userId = getCookieUserId(request);
-        let targetFolderId: string | null = null;
-        if (userId && materialFolderId) {
-          const targetFolder = await materialFolderManager.getFolderById(materialFolderId, userId);
-          targetFolderId = targetFolder ? targetFolder.id : null;
-        }
-        if (userId) {
-          await capturedImageManager.createCapturedImage({
-            userId,
-            imageUrl: localUrl,
-            originalUrl: null,
-            pageUrl: null,
-            pageTitle: file.name,
-            sourceHost: 'local-upload',
-            imageType: 'main',
-            folderId: targetFolderId,
-          });
-        }
+      if (userId) {
+        materialRecord = await capturedImageManager.createCapturedImage({
+          userId,
+          imageUrl: storageUrl,
+          originalUrl: null,
+          pageUrl: null,
+          pageTitle: file.name,
+          sourceHost: 'local-upload',
+          imageType: 'main',
+          folderId: targetFolderId,
+        });
       }
-
-      return NextResponse.json({
-        success: true,
-        data: {
-          key: fileName,
-          url: localUrl,
-          storage: 'local',
-        },
-      });
     }
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        key: fileName,
+        url: storageUrl,
+        material: materialRecord,
+      },
+    });
 
   } catch (error: unknown) {
     if (isImageValidationError(error)) {

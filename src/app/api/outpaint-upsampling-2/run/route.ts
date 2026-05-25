@@ -2,6 +2,9 @@ import { NextRequest } from 'next/server';
 import { runOutpaintUpsamplingRoute } from '@/lib/outpaintUpsamplingRunner';
 import { generateDynamicOutpaintPrompt } from '@/lib/outpaintVisionPrompt';
 
+export const runtime = 'nodejs';
+export const maxDuration = 300;
+
 export async function POST(request: NextRequest) {
   return runOutpaintUpsamplingRoute(request, {
     orderPrefix: 'HDO2',

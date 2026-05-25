@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { capturedImageManager, userManager } from '@/storage/database';
 import { uploadToCozeStorage } from '@/lib/dualStorage';
-import { saveBufferToLocalMaterialFile } from '@/lib/localUploadStorage';
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 
 const IMAGE_DOWNLOAD_TIMEOUT_MS = 30000;
@@ -49,13 +48,6 @@ async function downloadImageBuffer(imageUrl: string, pageUrl: string): Promise<{
   });
 }
 
-function normalizeLocalMaterialUrl(url: string) {
-  if (url.startsWith('/plugin-capture/') || url.startsWith('/material-editor/')) {
-    return `/api/material-file${url}`;
-  }
-  return url;
-}
-
 export async function POST(request: NextRequest) {
   try {
     const userId = getCookieUserId(request);
@@ -97,15 +89,7 @@ export async function POST(request: NextRequest) {
     const downloadedImage = await downloadImageBuffer(imageUrl, pageUrl);
     const { buffer: imageBuffer, contentType, extension } = downloadedImage;
     const fileName = `plugin-capture/${userId}/${Date.now()}-${Math.floor(Math.random() * 10000)}-${imageType}.${extension}`;
-    let uploadedUrl = ''
-
-    try {
-      uploadedUrl = await uploadToCozeStorage(imageBuffer, fileName, contentType)
-    } catch (error) {
-      console.warn('[插件采集] 对象存储上传失败，回退到本地 public 存储:', error)
-      const localFileName = `plugin-capture/${userId}/${Date.now()}-${Math.floor(Math.random() * 10000)}-${imageType}.${extension}`
-      uploadedUrl = normalizeLocalMaterialUrl(await saveBufferToLocalMaterialFile(imageBuffer, localFileName))
-    }
+    const uploadedUrl = await uploadToCozeStorage(imageBuffer, fileName, contentType)
 
     console.log('[插件采集] 采集成功:', {
       userId,

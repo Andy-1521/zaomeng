@@ -53,16 +53,11 @@ type SmartEditAgentInfo = {
   editModel: string;
   editTarget: string;
   editBaseUrl: string;
-  usedFallback: boolean;
   requestedAspectRatio: string;
   resolvedAspectRatio: string;
   mode: string;
   regionCount: number | null;
 };
-
-function getBooleanParam(params: RequestParamsValue, key: string): boolean {
-  return params?.[key] === true;
-}
 
 type ResultDataObject = {
   result_image_url?: string | string[];
@@ -257,7 +252,6 @@ function getSmartEditAgentInfo(record: GenerationRecord | null): SmartEditAgentI
     editModel: getStringParam(params, 'editModel'),
     editTarget: getStringParam(params, 'editTarget'),
     editBaseUrl: getStringParam(params, 'editBaseUrl'),
-    usedFallback: getBooleanParam(params, 'usedFallback'),
     requestedAspectRatio: getStringParam(params, 'requestedAspectRatio') || getStringParam(params, 'requestedSize'),
     resolvedAspectRatio: getStringParam(params, 'resolvedAspectRatio') || getStringParam(params, 'resolvedSize'),
     mode: getStringParam(params, 'mode'),
@@ -2141,7 +2135,7 @@ export default function AdminGenerationsPage() {
                                 <span className="rounded-full border border-sky-200/18 bg-black/20 px-2.5 py-1">模式 {detailSmartEditAgent.mode === 'tag' ? '标记' : detailSmartEditAgent.mode === 'brush' ? '画笔' : detailSmartEditAgent.mode || '-'}</span>
                                 <span className="rounded-full border border-sky-200/18 bg-black/20 px-2.5 py-1">标记 {detailSmartEditAgent.regionCount ?? 0} 个</span>
                                 <span className="rounded-full border border-sky-200/18 bg-black/20 px-2.5 py-1">比例 {detailSmartEditAgent.requestedAspectRatio || 'auto'} {'->'} {detailSmartEditAgent.resolvedAspectRatio || '-'}</span>
-                                <span className="rounded-full border border-sky-200/18 bg-black/20 px-2.5 py-1">目标 {detailSmartEditAgent.editTarget || 'primary'}{detailSmartEditAgent.usedFallback ? ' / fallback' : ''}</span>
+                                <span className="rounded-full border border-sky-200/18 bg-black/20 px-2.5 py-1">目标 {detailSmartEditAgent.editTarget || 'primary'}</span>
                               </div>
                             </div>
                             <div className="text-right text-[11px] leading-5 text-sky-100/45">

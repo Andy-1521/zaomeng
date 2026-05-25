@@ -1,10 +1,9 @@
 /**
  * 对象存储上传工具
- * 优先上传到Coze对象存储，失败时降级到腾讯云COS
+ * 只上传到腾讯云COS；上传失败直接抛错。
  */
 
 import { compressImageFromUrl } from './imageCompression';
-import { getCozeStorage } from './cozeStorage';
 import {
   getTencentCOSUrl,
   uploadFromUrlToTencentCOS,
@@ -15,15 +14,7 @@ import {
  * 存储上传结果
  */
 export interface DualStorageResult {
-  cozeUrl: string; // 统一返回最终可访问URL
-}
-
-function shouldFallbackToTencentCOS(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  return error.message.includes('Coze对象存储未配置完整') || error.message.includes('S3Storage');
+  storageUrl: string; // 统一返回最终可访问URL
 }
 
 /**
@@ -38,34 +29,11 @@ export async function uploadToCozeStorage(
   fileName: string,
   contentType: string
 ): Promise<string> {
-  console.log(`[对象存储] 开始上传: ${fileName}, 大小: ${buffer.length} bytes`);
-  try {
-    const cozeStorage = getCozeStorage();
-
-    const cozeKey = await cozeStorage.uploadFile({
-      fileContent: buffer,
-      fileName: fileName,
-      contentType: contentType,
-    });
-
-    const cozeUrl = await cozeStorage.generatePresignedUrl({
-      key: cozeKey,
-      expireTime: 365 * 24 * 60 * 60,
-    });
-
-    console.log(`[对象存储] 上传成功: ${cozeUrl.substring(0, 80)}...`);
-    return cozeUrl;
-  } catch (error) {
-    if (!shouldFallbackToTencentCOS(error)) {
-      throw error;
-    }
-
-    console.warn('[对象存储] Coze上传不可用，降级到腾讯COS:', error);
-    const cosKey = await uploadToTencentCOS(buffer, fileName, contentType);
-    const cosUrl = await getTencentCOSUrl(cosKey);
-    console.log(`[对象存储] 腾讯COS上传成功: ${cosUrl.substring(0, 80)}...`);
-    return cosUrl;
-  }
+  console.log(`[对象存储] 开始上传到腾讯COS: ${fileName}, 大小: ${buffer.length} bytes`);
+  const cosKey = await uploadToTencentCOS(buffer, fileName, contentType);
+  const cosUrl = await getTencentCOSUrl(cosKey);
+  console.log(`[对象存储] 腾讯COS上传成功: ${cosUrl.substring(0, 80)}...`);
+  return cosUrl;
 }
 
 /**
@@ -80,7 +48,7 @@ export async function uploadFromUrlToCozeStorage(
   fileName: string,
   contentType?: string
 ): Promise<string> {
-  console.log(`[对象存储] 开始从URL上传: ${url.substring(0, 80)}...`);
+  console.log(`[对象存储] 开始从URL上传到腾讯COS: ${url.substring(0, 80)}...`);
 
   // 判断是否需要压缩（仅对图片进行压缩）
   const isImage = contentType?.startsWith('image/') ||
@@ -90,18 +58,13 @@ export async function uploadFromUrlToCozeStorage(
 
   if (isImage) {
     console.log(`[对象存储] 检测到图片，开始压缩`);
-    try {
-      // 下载并压缩图片（最大5MB）
-      imageBuffer = await compressImageFromUrl(url, {
-        maxWidthSize: 5 * 1024 * 1024, // 5MB
-        initialQuality: 95,
-        minQuality: 70,
-      });
-      console.log(`[对象存储] 图片压缩完成，大小: ${imageBuffer.length} bytes`);
-    } catch (compressError) {
-      console.warn('[对象存储] 图片压缩失败，将使用原始图片:', compressError);
-      // 压缩失败不影响主流程，继续使用原始URL
-    }
+    // 下载并压缩图片（最大5MB）
+    imageBuffer = await compressImageFromUrl(url, {
+      maxWidthSize: 5 * 1024 * 1024, // 5MB
+      initialQuality: 95,
+      minQuality: 70,
+    });
+    console.log(`[对象存储] 图片压缩完成，大小: ${imageBuffer.length} bytes`);
   }
 
   // 如果压缩成功，使用压缩后的Buffer上传
@@ -109,33 +72,10 @@ export async function uploadFromUrlToCozeStorage(
     console.log(`[对象存储] 使用压缩后的图片上传`);
     return uploadToCozeStorage(imageBuffer, fileName, contentType || 'image/jpeg');
   } else {
-    // 压缩失败或不是图片，使用原始URL上传
-    console.log(`[对象存储] 使用原始URL上传（未压缩）`);
-    try {
-      const cozeStorage = getCozeStorage();
-
-      const cozeKey = await cozeStorage.uploadFromUrl({
-        url: url,
-        timeout: 60000,
-      });
-
-      const cozeUrl = await cozeStorage.generatePresignedUrl({
-        key: cozeKey,
-        expireTime: 365 * 24 * 60 * 60,
-      });
-
-      console.log(`[对象存储] 上传成功: ${cozeUrl.substring(0, 80)}...`);
-      return cozeUrl;
-    } catch (error) {
-      if (!shouldFallbackToTencentCOS(error)) {
-        throw error;
-      }
-
-      console.warn('[对象存储] Coze从URL上传不可用，降级到腾讯COS:', error);
-      const cosKey = await uploadFromUrlToTencentCOS(url, fileName, contentType);
-      const cosUrl = await getTencentCOSUrl(cosKey);
-      console.log(`[对象存储] 腾讯COS上传成功: ${cosUrl.substring(0, 80)}...`);
-      return cosUrl;
-    }
+    console.log(`[对象存储] 使用原始URL上传到腾讯COS`);
+    const cosKey = await uploadFromUrlToTencentCOS(url, fileName, contentType);
+    const cosUrl = await getTencentCOSUrl(cosKey);
+    console.log(`[对象存储] 腾讯COS上传成功: ${cosUrl.substring(0, 80)}...`);
+    return cosUrl;
   }
 }

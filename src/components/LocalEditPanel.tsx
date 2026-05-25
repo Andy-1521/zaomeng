@@ -2,6 +2,9 @@
 
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import Image, { type ImageLoaderProps } from 'next/image';
+import PointsIconLabel from '@/components/PointsIconLabel';
+import { useUser } from '@/contexts/UserContext';
+import { getSmartEditPoints } from '@/lib/pricing';
 import { showToast } from '@/lib/toast';
 import { DEFAULT_SMART_EDIT_SIZE_OPTION, SMART_EDIT_SIZE_OPTIONS, formatSmartEditSizeLabel, getSmartEditOutputSize, type SmartEditAspectRatioOption, type SmartEditResolution } from '@/lib/smartEditSize';
 import { toUserFacingErrorFromUnknown, toUserFacingErrorMessage } from '@/lib/userFacingError';
@@ -72,10 +75,10 @@ const BRUSH_COLOR_OPTIONS = [
   { label: '青色', value: '#14b8a6' },
   { label: '橙色', value: '#f97316' },
 ];
-const SMART_EDIT_RESOLUTION_OPTIONS: Array<{ value: SmartEditResolution; label: string; description: string }> = [
-  { value: '1k', label: '1k', description: '快速预览' },
-  { value: '2k', label: '2k', description: '推荐' },
-  { value: '4k', label: '4k', description: '更慢，适合最终出图' },
+const SMART_EDIT_RESOLUTION_OPTIONS: Array<{ value: SmartEditResolution; label: string; description: string; points: number }> = [
+  { value: '1k', label: '1k', description: '快速预览', points: getSmartEditPoints('1k') },
+  { value: '2k', label: '2k', description: '推荐', points: getSmartEditPoints('2k') },
+  { value: '4k', label: '4k', description: '最终出图', points: getSmartEditPoints('4k') },
 ];
 
 const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
@@ -116,6 +119,7 @@ async function parseJsonApiResponse<T extends ApiJsonObject>(response: Response,
 }
 
 export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props) {
+  const { user, setPoints } = useUser();
   const sessionToken = useId().replace(/:/g, '');
   const panelRef = useRef<HTMLDivElement>(null);
   const imageViewportRef = useRef<HTMLDivElement>(null);
@@ -220,12 +224,28 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
     savedSelectionRef.current = range.cloneRange();
   }, []);
 
+  const forEachSessionTagTokenMenu = useCallback((callback: (menu: HTMLElement) => void) => {
+    if (typeof document === 'undefined') return;
+
+    document.querySelectorAll<HTMLElement>('[data-role="tag-token-menu"]').forEach((menu) => {
+      if (menu.dataset.smartEditSessionId !== sessionIdRef.current) return;
+      callback(menu);
+    });
+  }, []);
+
   const closeAllTagTokenMenus = useCallback(() => {
-    promptEditorRef.current?.querySelectorAll<HTMLElement>('[data-role="tag-token-menu"]').forEach((menu) => {
+    forEachSessionTagTokenMenu((menu) => {
       menu.dataset.open = 'false';
       menu.classList.add('hidden');
     });
-  }, []);
+  }, [forEachSessionTagTokenMenu]);
+
+  const removeTagTokenMenus = useCallback((regionId?: string) => {
+    forEachSessionTagTokenMenu((menu) => {
+      if (regionId && menu.dataset.regionId !== regionId) return;
+      menu.remove();
+    });
+  }, [forEachSessionTagTokenMenu]);
 
   const closeBrushColorMenu = useCallback(() => {
     setIsBrushColorMenuOpen(false);
@@ -246,6 +266,63 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
   const selectedResolutionOption = useMemo(() => {
     return SMART_EDIT_RESOLUTION_OPTIONS.find((option) => option.value === outputResolution) || SMART_EDIT_RESOLUTION_OPTIONS[1];
   }, [outputResolution]);
+
+  const submitPoints = useMemo(() => {
+    return getSmartEditPoints(outputResolution);
+  }, [outputResolution]);
+
+  const syncPoints = useCallback((points: number) => {
+    setPoints(points);
+    window.dispatchEvent(new CustomEvent('userPointsChanged', { detail: { points } }));
+  }, [setPoints]);
+
+  const ensureEnoughSubmitPoints = useCallback(async () => {
+    if (!user?.id) {
+      const message = '请先登录后再生成编辑素材';
+      setSubmitError(message);
+      showToast(message, 'error');
+      return false;
+    }
+
+    try {
+      const response = await fetch('/api/user/profile', {
+        method: 'GET',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        if ((user.points || 0) < submitPoints) {
+          const message = `积分不足，当前 ${user.points || 0}，需要 ${submitPoints}`;
+          setSubmitError(message);
+          showToast(message, 'error');
+          return false;
+        }
+        return true;
+      }
+
+      const data = await response.json() as { success?: boolean; data?: { points?: number } };
+      const currentPoints = data.success ? (data.data?.points || 0) : (user.points || 0);
+      syncPoints(currentPoints);
+
+      if (currentPoints < submitPoints) {
+        const message = `积分不足，当前 ${currentPoints}，需要 ${submitPoints}`;
+        setSubmitError(message);
+        showToast(message, 'error');
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('[LocalEditPanel] 校验积分失败:', error);
+      if ((user.points || 0) < submitPoints) {
+        const message = `积分不足，当前 ${user.points || 0}，需要 ${submitPoints}`;
+        setSubmitError(message);
+        showToast(message, 'error');
+        return false;
+      }
+      return true;
+    }
+  }, [submitPoints, syncPoints, user?.id, user?.points]);
 
   const promptPlaceholder = activeTool === 'tag'
     ? '例如：把标记目标改成米老鼠，保持动作、背景和光影不变；多个标记可以分别说明。'
@@ -289,8 +366,10 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
       token.parentNode?.removeChild(token);
     });
 
+    removeTagTokenMenus(regionId);
+
     syncPromptFromEditor();
-  }, [syncPromptFromEditor]);
+  }, [removeTagTokenMenus, syncPromptFromEditor]);
 
   const placeEditorSelection = useCallback((range: Range | null) => {
     const editor = promptEditorRef.current;
@@ -328,6 +407,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
 
   const createTagTokenElement = useCallback((region: TagRegion, index: number, label: string) => {
     const safeIndex = index >= 0 ? index : 0;
+    removeTagTokenMenus(region.id);
 
     const token = document.createElement('span');
     token.dataset.role = 'tag-token';
@@ -377,7 +457,11 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
     const menu = document.createElement('div');
     menu.dataset.role = 'tag-token-menu';
     menu.dataset.open = 'false';
-    menu.className = 'absolute left-0 top-full z-[9999] mt-2 hidden min-w-[180px] overflow-hidden rounded-2xl border border-white/14 bg-[#0b0b12] p-1 shadow-[0_24px_60px_rgba(0,0,0,0.5)]';
+    menu.dataset.regionId = region.id;
+    menu.dataset.smartEditSessionId = sessionIdRef.current;
+    menu.className = 'fixed z-[10000] hidden min-w-[180px] max-w-[calc(100vw-24px)] overflow-hidden rounded-2xl border border-white/14 bg-[#0b0b12] p-1 shadow-[0_24px_60px_rgba(0,0,0,0.5)]';
+    menu.addEventListener('pointerdown', (event) => event.stopPropagation());
+    menu.addEventListener('click', (event) => event.stopPropagation());
 
     const options = Array.from(new Set([
       ...region.candidates.map((candidate) => candidate.trim()).filter(Boolean),
@@ -463,6 +547,29 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
     customSection.append(customLabel, customRow);
     menu.appendChild(customSection);
 
+    const placeMenu = () => {
+      const tokenRect = token.getBoundingClientRect();
+      const menuRect = menu.getBoundingClientRect();
+      const margin = 8;
+      const viewportPadding = 12;
+      const left = Math.min(
+        Math.max(viewportPadding, tokenRect.left),
+        Math.max(viewportPadding, window.innerWidth - menuRect.width - viewportPadding)
+      );
+      const openAbove = window.innerHeight - tokenRect.bottom < menuRect.height + margin + viewportPadding
+        && tokenRect.top > window.innerHeight - tokenRect.bottom;
+      const nextTop = openAbove
+        ? tokenRect.top - menuRect.height - margin
+        : tokenRect.bottom + margin;
+      const top = Math.min(
+        Math.max(viewportPadding, nextTop),
+        Math.max(viewportPadding, window.innerHeight - menuRect.height - viewportPadding)
+      );
+
+      menu.style.left = `${left}px`;
+      menu.style.top = `${top}px`;
+    };
+
     const toggleMenu = (event: MouseEvent) => {
       event.preventDefault();
       event.stopPropagation();
@@ -470,7 +577,10 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
       closeAllTagTokenMenus();
       if (!isOpen) {
         menu.dataset.open = 'true';
+        menu.style.visibility = 'hidden';
         menu.classList.remove('hidden');
+        placeMenu();
+        menu.style.visibility = '';
       }
     };
 
@@ -482,9 +592,10 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
       handleRegionRemoveRef.current(region.id);
     });
 
-    token.append(thumb, badge, labelButton, deleteButton, menu);
+    document.body.appendChild(menu);
+    token.append(thumb, badge, labelButton, deleteButton);
     return token;
-  }, [closeAllTagTokenMenus, imageUrl, naturalSize.height, naturalSize.width]);
+  }, [closeAllTagTokenMenus, imageUrl, naturalSize.height, naturalSize.width, removeTagTokenMenus]);
 
   const insertTagTokenIntoEditor = useCallback((region: TagRegion, label: string, options?: { tokenIndex?: number; append?: boolean }) => {
     const editor = promptEditorRef.current;
@@ -558,7 +669,8 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
       const panel = panelRef.current;
       const editor = promptEditorRef.current;
       if (!target) return;
-      if (editor && !editor.contains(target)) {
+      const isTagTokenMenuTarget = target instanceof Element && Boolean(target.closest('[data-role="tag-token-menu"]'));
+      if (editor && !editor.contains(target) && !isTagTokenMenuTarget) {
         closeAllTagTokenMenus();
       }
       if (!(target instanceof Element) || !target.closest('[data-role="brush-color-menu"]')) {
@@ -570,7 +682,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
       if (!(target instanceof Element) || !target.closest('[data-role="resolution-menu"]')) {
         closeResolutionMenu();
       }
-      if (panel && !panel.contains(target)) {
+      if (panel && !panel.contains(target) && !isTagTokenMenuTarget) {
         onClose();
       }
     };
@@ -673,10 +785,11 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
 
   useEffect(() => {
     return () => {
+      removeTagTokenMenus();
       Object.values(identifyControllersRef.current).forEach((controller) => controller.abort());
       identifyControllersRef.current = {};
     };
-  }, []);
+  }, [removeTagTokenMenus]);
 
   useEffect(() => {
     if (!imageUrl) return;
@@ -1192,6 +1305,9 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
       return;
     }
 
+    const hasEnoughPoints = await ensureEnoughSubmitPoints();
+    if (!hasEnoughPoints) return;
+
     submitInFlightRef.current = true;
     setIsSubmitting(true);
     setIsResolvingPrompt(true);
@@ -1251,7 +1367,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
         });
       onClose();
     }
-  }, [activeTool, brushMaskSegments, imageUrl, instruction, isResolvingPrompt, isSubmitting, naturalSize, onClose, onComplete, outputResolution, outputSize, resolvedOutputSize, tagRegions]);
+  }, [activeTool, brushMaskSegments, ensureEnoughSubmitPoints, imageUrl, instruction, isResolvingPrompt, isSubmitting, naturalSize, onClose, onComplete, outputResolution, outputSize, resolvedOutputSize, tagRegions]);
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/72 px-4 py-4 backdrop-blur-[2px]">
@@ -1580,7 +1696,11 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                           className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white/78 transition hover:bg-white/[0.08]"
                         >
                           <span>{outputResolution}</span>
-                          <span className="hidden text-white/48 sm:inline">{selectedResolutionOption.description}</span>
+                          <span className="hidden items-center gap-1.5 text-white/48 sm:inline-flex">
+                            <span>{selectedResolutionOption.description}</span>
+                            <span className="text-white/30">·</span>
+                            <PointsIconLabel points={selectedResolutionOption.points} iconClassName="h-3 w-3" />
+                          </span>
                           <span className={`text-[10px] text-white/45 transition ${isResolutionMenuOpen ? 'rotate-180' : ''}`}>▾</span>
                         </button>
 
@@ -1600,6 +1720,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                                 >
                                   <span className="w-8 shrink-0 font-medium">{option.label}</span>
                                   <span className="flex-1 opacity-70">{option.description}</span>
+                                  <PointsIconLabel points={option.points} className="shrink-0 opacity-70" iconClassName="h-3 w-3" />
                                   {selected ? <span className="text-[10px]">✓</span> : null}
                                 </button>
                               );
@@ -1608,7 +1729,13 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                         ) : null}
                       </div>
                     </div>
-                    <button type="button" onClick={() => void handleSubmit()} disabled={isSubmitting || isResolvingPrompt} className="rounded-xl bg-gradient-to-r from-fuchsia-600 to-violet-600 px-4 py-2 text-sm font-medium text-white shadow-[0_10px_24px_rgba(168,85,247,0.24)] transition hover:from-fuchsia-500 hover:to-violet-500 disabled:cursor-not-allowed disabled:opacity-50">{isSubmitting ? '提交中...' : '提交生成'}</button>
+                    <button type="button" onClick={() => void handleSubmit()} disabled={isSubmitting || isResolvingPrompt} className="rounded-xl bg-gradient-to-r from-fuchsia-600 to-violet-600 px-4 py-2 text-sm font-medium text-white shadow-[0_10px_24px_rgba(168,85,247,0.24)] transition hover:from-fuchsia-500 hover:to-violet-500 disabled:cursor-not-allowed disabled:opacity-50">{isSubmitting ? '提交中...' : (
+                      <span className="inline-flex items-center gap-1.5">
+                        <span>提交生成</span>
+                        <span className="text-white/50">·</span>
+                        <PointsIconLabel points={submitPoints} iconClassName="h-3.5 w-3.5" />
+                      </span>
+                    )}</button>
                   </div>
                 </div>
 

@@ -7,8 +7,9 @@
   let lastHoveredImagePayload = null
   let hideTimer = null
 
+  const logoUrl = chrome.runtime.getURL('icons/zaomeng-logo.jpg')
   const button = document.createElement('button')
-  button.innerHTML = `<span class="zaomeng-capture-logo" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.9 6.2L21 11l-6.1 2.1L12 19l-2.9-5.9L3 11l6.1-2.8L12 2z"/></svg></span><span class="zaomeng-capture-text">采集</span>`
+  button.innerHTML = `<span class="zaomeng-capture-logo" aria-hidden="true"><img src="${logoUrl}" alt="" /></span><span class="zaomeng-capture-text">采集</span>`
   button.style.position = 'fixed'
   button.style.zIndex = '2147483647'
   button.style.display = 'none'
@@ -38,11 +39,13 @@
   logo.style.alignItems = 'center'
   logo.style.justifyContent = 'center'
   logo.style.overflow = 'hidden'
-  logo.style.background = 'linear-gradient(135deg, #a855f7, #2563eb)'
-  logo.style.color = '#fff'
+  logo.style.background = '#fff'
 
-  const logoSvg = logo.querySelector('svg')
-  logoSvg.style.display = 'block'
+  const logoImage = logo.querySelector('img')
+  logoImage.style.display = 'block'
+  logoImage.style.width = '100%'
+  logoImage.style.height = '100%'
+  logoImage.style.objectFit = 'cover'
 
   const text = button.querySelector('.zaomeng-capture-text')
   text.style.letterSpacing = '0.02em'

@@ -39,5 +39,11 @@
       "js": ["site-bridge.js"],
       "run_at": "document_idle"
     }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/zaomeng-logo.jpg"],
+      "matches": ["<all_urls>"]
+    }
   ]
 }

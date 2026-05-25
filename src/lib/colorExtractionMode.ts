@@ -3,13 +3,11 @@ export type ColorExtractionMode = 'full' | 'hollow';
 type ColorExtractionModePayload = {
   extractionMode?: unknown;
   actualExtractionMode?: unknown;
-  degraded?: unknown;
 };
 
 export type ColorExtractionModeMeta = {
   requestedMode: ColorExtractionMode;
   actualMode: ColorExtractionMode;
-  degraded: boolean;
 };
 
 function normalizeColorExtractionMode(value: unknown): ColorExtractionMode | null {
@@ -35,11 +33,9 @@ export function parseColorExtractionModeMeta(value: unknown): ColorExtractionMod
 
   const requestedMode = normalizeColorExtractionMode(payload?.extractionMode) ?? 'full';
   const actualMode = normalizeColorExtractionMode(payload?.actualExtractionMode) ?? requestedMode;
-  const degraded = payload?.degraded === true || (requestedMode === 'hollow' && actualMode === 'full');
 
   return {
     requestedMode,
     actualMode,
-    degraded,
   };
 }

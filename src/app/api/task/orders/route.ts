@@ -80,7 +80,9 @@ export async function GET(request: NextRequest) {
       .where(and(...conditions))
       .orderBy(desc(transactions.createdAt));
 
-    const reconciledOrders = await reconcileProcessingTransactions(orders, {
+    const visibleOrders = orders.filter((order) => order.toolPage !== '积分充值');
+
+    const reconciledOrders = await reconcileProcessingTransactions(visibleOrders, {
       logPrefix: '订单查询',
     });
 

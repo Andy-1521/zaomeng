@@ -53,29 +53,29 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
   }, []);
 
   return (
-    <nav className="sticky top-0 z-40 border-b border-white/[0.08] bg-black/72 px-6 py-3 backdrop-blur-2xl shadow-[0_12px_32px_rgba(0,0,0,0.22)]">
-      <div className="max-w-[92vw] 2xl:max-w-[1780px] mx-auto flex items-center justify-between">
+    <nav className="sticky top-0 z-40 border-b border-white/[0.08] bg-black/72 px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.22)] backdrop-blur-2xl sm:px-6 sm:py-3">
+      <div className="mx-auto flex max-w-[92vw] items-center justify-between gap-2 2xl:max-w-[1780px]">
         {/* Logo - 点击回到首页 */}
         <button
           onClick={handleLogoClick}
-          className="flex items-center gap-2.5 group rounded-full px-2 py-1 transition-colors hover:bg-white/[0.04]"
+          className="group flex shrink-0 items-center gap-2 rounded-full px-1.5 py-1 transition-colors hover:bg-white/[0.04] sm:gap-2.5 sm:px-2"
         >
           <Image
             src="/assets/32.png"
             alt="Logo"
             width={32}
             height={32}
-            className="w-8 h-8 rounded-lg object-cover border border-purple-500/30"
+            className="h-7 w-7 rounded-lg border border-purple-500/30 object-cover sm:h-8 sm:w-8"
           />
-          <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent group-hover:from-purple-300 group-hover:to-blue-300 transition-all">
+          <h1 className="whitespace-nowrap bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-lg font-bold text-transparent transition-all group-hover:from-purple-300 group-hover:to-blue-300 sm:text-2xl">
             造梦AI
           </h1>
         </button>
 
         {/* 右侧用户菜单 */}
         {showUserMenu && user && (
-          <div className="flex items-center gap-3">
-            <div className="relative group">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
+            <div className="group relative hidden sm:block">
               <button
                 type="button"
                 onClick={handlePluginClick}
@@ -107,35 +107,36 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
             {/* 用户头像和用户名 */}
             <button
               onClick={() => router.push('/profile')}
-              className="flex items-center gap-3 rounded-full border border-white/10 bg-white/[0.06] py-1 pl-1 pr-4 backdrop-blur-md transition-all hover:border-white/18 hover:bg-white/[0.12]"
+              className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] p-1 backdrop-blur-md transition-all hover:border-white/18 hover:bg-white/[0.12] sm:gap-3 sm:py-1 sm:pl-1 sm:pr-4"
             >
               <SafeImage
                 src={user.avatar || '/images/avatar.png'}
                 alt="用户头像"
                 width={36}
                 height={36}
-                className="w-9 h-9 rounded-full object-cover border-2 border-purple-500/30"
+                className="h-8 w-8 rounded-full border-2 border-purple-500/30 object-cover sm:h-9 sm:w-9"
               />
-              <span className="text-white font-medium">{user.username}</span>
+              <span className="hidden max-w-[180px] truncate font-medium text-white sm:inline">{user.username}</span>
             </button>
 
             {/* 积分显示 */}
             <button
               type="button"
-              onClick={() => router.push('/profile')}
-              className="flex items-center gap-1.5 rounded-full border border-yellow-500/25 bg-yellow-500/12 px-3 py-1.5 transition-colors hover:bg-yellow-500/18"
-              title="查看积分明细"
+              onClick={() => router.push('/profile?tab=recharge')}
+              className="flex items-center gap-1.5 rounded-full border border-yellow-500/25 bg-yellow-500/12 px-2.5 py-1.5 transition-colors hover:bg-yellow-500/18 sm:px-3"
+              title="前往充值中心"
             >
-              <Image src="/points-icon.png" alt="积分" width={16} height={16} className="w-4 h-4" />
-              <span className="text-yellow-300 text-sm">{user.points}</span>
+              <Image src="/points-icon.png" alt="积分" width={16} height={16} className="h-4 w-4" />
+              <span className="text-sm text-yellow-300">{user.points}</span>
             </button>
 
             {/* 退出登录按钮 */}
             <button
               onClick={handleLogout}
-              className="rounded-full px-3 py-1.5 text-sm text-white/48 transition-colors hover:bg-white/[0.06] hover:text-white"
+              className="whitespace-nowrap rounded-full px-2 py-1.5 text-xs text-white/48 transition-colors hover:bg-white/[0.06] hover:text-white sm:px-3 sm:text-sm"
             >
-              退出登录
+              <span className="sm:hidden">退出</span>
+              <span className="hidden sm:inline">退出登录</span>
             </button>
           </div>
         )}

@@ -1,12 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import Image, { type ImageLoaderProps, type ImageProps } from 'next/image';
 import { addTaskRecord, updateTaskRecordStatus } from '@/components/TaskHistory';
 import CropEditorPanel from '@/components/CropEditorPanel';
 import LocalEditPanel from '@/components/LocalEditPanel';
+import PointsIconLabel from '@/components/PointsIconLabel';
 import { useUser } from '@/contexts/UserContext';
+import { formatPointsLabel, getAiGeneratePoints, getColorExtractionPoints, getOutpaintUpsamplingPoints, getSmartEditPoints } from '@/lib/pricing';
 import { isSmartEditAspectRatioOption, isSmartEditResolution, type SmartEditAspectRatioOption, type SmartEditResolution } from '@/lib/smartEditSize';
 import { showToast } from '@/lib/toast';
 import { toUserFacingErrorFromUnknown, toUserFacingErrorMessage } from '@/lib/userFacingError';
@@ -74,10 +76,27 @@ type MaterialFolder = {
   createdAt: string;
 };
 
+type CapturedImagesPagination = {
+  limit: number;
+  offset: number;
+  total: number;
+  hasMore: boolean;
+  nextOffset: number;
+};
+
+type CapturedImagesResponse = {
+  success?: boolean;
+  data?: CapturedImageRecord[];
+  error?: string;
+  message?: string;
+  pagination?: Partial<CapturedImagesPagination>;
+};
+
 type GalleryAction = {
   id: GalleryActionId;
   label: string;
   description: string;
+  points?: number;
   className: string;
   tag: string;
   preview: React.ReactNode;
@@ -86,6 +105,7 @@ type GalleryAction = {
 type EditorAction = {
   id: 'edit-image' | 'local-edit';
   label: string;
+  points?: number;
 };
 
 type ImageEditorState = {
@@ -101,6 +121,7 @@ type ImageEditorState = {
 type DropdownOption = {
   value: string;
   label: string;
+  description?: ReactNode;
 };
 
 type ImageSourceSize = {
@@ -116,7 +137,14 @@ type DuplicateReviewState = {
   selectedIds: Set<string>;
 };
 
-type JsonObject = Record<string, unknown>;
+const MATERIAL_PAGE_SIZE = 60;
+const EMPTY_CAPTURED_IMAGES_PAGINATION: CapturedImagesPagination = {
+  limit: MATERIAL_PAGE_SIZE,
+  offset: 0,
+  total: 0,
+  hasMore: false,
+  nextOffset: 0,
+};
 
 const galleryActions: GalleryAction[] = [
   {
@@ -135,6 +163,7 @@ const galleryActions: GalleryAction[] = [
     id: 'color-extraction',
     label: '彩绘提取',
     description: '手机壳彩绘提取',
+    points: getColorExtractionPoints(),
     className: 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500',
     tag: '核心功能',
     preview: (
@@ -147,6 +176,7 @@ const galleryActions: GalleryAction[] = [
     id: 'outpaint-upsampling',
     label: '高清+扩图',
     description: '先扩图，再做高清放大',
+    points: getOutpaintUpsamplingPoints(),
     className: 'bg-gradient-to-r from-cyan-600 to-sky-600 hover:from-cyan-500 hover:to-sky-500',
     tag: '对比实验',
     preview: (
@@ -159,7 +189,7 @@ const galleryActions: GalleryAction[] = [
 
 const editorActions: EditorAction[] = [
   { id: 'edit-image', label: '裁切工具' },
-  { id: 'local-edit', label: '智能改图' },
+  { id: 'local-edit', label: '智能改图', points: getSmartEditPoints('2k') },
 ];
 
 const MATERIAL_FILTER_OPTIONS: DropdownOption[] = [
@@ -183,13 +213,14 @@ const AI_ASPECT_RATIO_OPTIONS: Array<{ value: SmartEditAspectRatioOption; label:
   { value: '21:9', label: '21:9' },
 ];
 
-const AI_RESOLUTION_OPTIONS: Array<{ value: SmartEditResolution; label: string }> = [
-  { value: '1k', label: '1k' },
-  { value: '2k', label: '2k' },
-  { value: '4k', label: '4k' },
+const AI_RESOLUTION_OPTIONS: Array<{ value: SmartEditResolution; label: string; description: ReactNode }> = [
+  { value: '1k', label: '1k', description: <PointsIconLabel points={getAiGeneratePoints('1k')} iconClassName="h-3 w-3" /> },
+  { value: '2k', label: '2k', description: <PointsIconLabel points={getAiGeneratePoints('2k')} iconClassName="h-3 w-3" /> },
+  { value: '4k', label: '4k', description: <PointsIconLabel points={getAiGeneratePoints('4k')} iconClassName="h-3 w-3" /> },
 ];
 
 const UNCATEGORIZED_FOLDER_VALUE = '__uncategorized__';
+const PROCESSING_ORDER_POLL_TTL_MS = 20 * 60 * 1000;
 
 const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
 
@@ -197,8 +228,10 @@ function SafeImage({ alt, ...props }: Omit<ImageProps, 'loader'>) {
   return <Image {...props} alt={alt} loader={passthroughImageLoader} unoptimized />;
 }
 
-function getDropdownOptionLabel(options: DropdownOption[], value: string) {
-  return options.find((option) => option.value === value)?.label || value;
+function getActionTotalPoints(action: GalleryAction, aiResolution: SmartEditResolution, imageCount: number) {
+  const points = action.id === 'ai-generate' ? getAiGeneratePoints(aiResolution) : action.points;
+  if (typeof points !== 'number') return null;
+  return points * Math.max(1, imageCount);
 }
 
 type QuickCreateDropdownProps = {
@@ -232,13 +265,14 @@ function QuickCreateDropdown({
   menuWidthClassName = 'min-w-[160px]',
   showSelectedCheck = true,
 }: QuickCreateDropdownProps) {
-  const selectedLabel = value ? getDropdownOptionLabel(options, value) : (placeholder || '请选择');
+  const selectedOption = options.find((option) => option.value === value);
+  const selectedLabel = value ? (selectedOption?.label || value) : (placeholder || '请选择');
   const positionClassName = direction === 'up'
     ? `${align === 'right' ? 'right-0' : 'left-0'} bottom-full mb-2`
     : `${align === 'right' ? 'right-0' : 'left-0'} top-full mt-2`;
 
   return (
-    <div className="relative" data-role="quick-create-dropdown">
+    <div className={`relative ${isOpen ? 'z-[120]' : 'z-20'}`} data-role="quick-create-dropdown">
       <button
         type="button"
         onClick={(event) => {
@@ -251,11 +285,12 @@ function QuickCreateDropdown({
       >
         {label ? <span className="text-white/36">{label}</span> : null}
         <span className={`truncate ${value ? 'text-white/82' : 'text-white/54'}`}>{selectedLabel}</span>
+        {selectedOption?.description ? <span className="hidden text-white/42 sm:inline">{selectedOption.description}</span> : null}
         <span className={`text-[10px] text-white/42 transition ${isOpen ? 'rotate-180' : ''}`}>▾</span>
       </button>
 
       {isOpen ? (
-        <div className={`absolute z-30 ${positionClassName} ${menuWidthClassName} overflow-hidden rounded-2xl border border-white/12 bg-[#0d0d12] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.4)]`}>
+        <div className={`absolute z-[130] ${positionClassName} ${menuWidthClassName} overflow-hidden rounded-2xl border border-white/12 bg-[#0d0d12] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.4)]`}>
           {options.map((option) => {
             const selected = option.value === value;
             return (
@@ -268,7 +303,8 @@ function QuickCreateDropdown({
                 }}
                 className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs transition ${selected ? 'bg-white text-slate-950' : 'text-white/72 hover:bg-white/[0.08] hover:text-white'}`}
               >
-                <span className="flex-1 truncate">{option.label}</span>
+                <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                {option.description ? <span className="shrink-0 text-[11px] opacity-60">{option.description}</span> : null}
                 {selected && showSelectedCheck ? <span className="text-[10px]">✓</span> : null}
               </button>
             );
@@ -564,21 +600,6 @@ function getMaterialDateGroup(value: string | number | Date): 'today' | 'yesterd
   return 'earlier';
 }
 
-async function parseErrorResponse(response: Response, fallbackMessage: string): Promise<string> {
-  try {
-    const text = await response.text();
-    if (!text) return fallbackMessage;
-    try {
-      const parsed = JSON.parse(text) as JsonObject;
-      return getString(parsed.message) || fallbackMessage;
-    } catch {
-      return text.length < 200 ? text : fallbackMessage;
-    }
-  } catch {
-    return fallbackMessage;
-  }
-}
-
 export default function QuickCreatePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const aiReferenceInputRef = useRef<HTMLInputElement>(null);
@@ -586,12 +607,17 @@ export default function QuickCreatePage() {
   const gallerySectionRef = useRef<HTMLDivElement>(null);
   const imageButtonRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const dragDepthRef = useRef(0);
+  const trackedProcessingOrdersRef = useRef<Record<string, number>>({});
+  const materialRequestIdRef = useRef(0);
   const [capturedImages, setCapturedImages] = useState<CapturedImageRecord[]>([]);
   const [materialFolders, setMaterialFolders] = useState<MaterialFolder[]>([]);
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [libraryView, setLibraryView] = useState<LibraryView>('gallery');
   const [orderResults, setOrderResults] = useState<OrderResultCard[]>([]);
   const [hasProcessingOrders, setHasProcessingOrders] = useState(false);
+  const [isLoadingMaterials, setIsLoadingMaterials] = useState(false);
+  const [isLoadingMoreMaterials, setIsLoadingMoreMaterials] = useState(false);
+  const [materialsPagination, setMaterialsPagination] = useState<CapturedImagesPagination>(EMPTY_CAPTURED_IMAGES_PAGINATION);
   const [isUploading, setIsUploading] = useState(false);
   const [isAiReferenceUploading, setIsAiReferenceUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -652,6 +678,11 @@ export default function QuickCreatePage() {
     [processingAction]
   );
 
+  const aiGenerateTotalPoints = useMemo(
+    () => getAiGeneratePoints(aiResolution) * Math.max(1, selectedImageList.length),
+    [aiResolution, selectedImageList.length]
+  );
+
   const availableOrderTools = useMemo(() => {
     return Array.from(new Set(orderResults.map((item) => item.toolLabel))).sort((a, b) => a.localeCompare(b, 'zh-CN'));
   }, [orderResults]);
@@ -668,14 +699,8 @@ export default function QuickCreatePage() {
   }, [materialFolders]);
 
   const filteredCapturedImages = useMemo(() => {
-    return capturedImages.filter((image) => {
-      if (materialScope === 'favorite' && !image.isFavorite) return false;
-      if (materialScope === 'uncategorized' && image.folderId) return false;
-      if (materialScope.startsWith('folder:') && image.folderId !== materialScope.slice('folder:'.length)) return false;
-      if (materialFilter === 'all') return true;
-      return getMaterialDateGroup(image.createdAt) === materialFilter;
-    });
-  }, [capturedImages, materialFilter, materialScope]);
+    return capturedImages;
+  }, [capturedImages]);
 
   const groupedMaterials = useMemo(() => {
     const groupMap = new Map<'today' | 'yesterday' | 'earlier', CapturedImageRecord[]>();
@@ -717,6 +742,13 @@ export default function QuickCreatePage() {
     ].filter((group) => group.items.length > 0);
   }, [filteredOrderResults]);
 
+  const galleryLoadedCount = filteredCapturedImages.length;
+  const galleryTotalCount = materialsPagination.total;
+  const isGalleryEmpty = galleryLoadedCount === 0;
+  const isLibraryEmpty = libraryView === 'gallery'
+    ? isGalleryEmpty && !isLoadingMaterials
+    : filteredOrderResults.length === 0;
+
   const dispatchTaskHistoryUpdated = useCallback((delay = 0) => {
     const dispatch = () => window.dispatchEvent(new Event('taskHistoryUpdated'));
     if (delay > 0) {
@@ -754,21 +786,88 @@ export default function QuickCreatePage() {
     });
   }, []);
 
-  const loadCapturedImages = useCallback(async () => {
+  const loadCapturedImages = useCallback(async (options?: { offset?: number; append?: boolean }) => {
+    const offset = options?.offset ?? 0;
+    const append = options?.append === true;
+    const requestId = materialRequestIdRef.current + 1;
+    materialRequestIdRef.current = requestId;
+
+    if (!user?.id) {
+      setCapturedImages([]);
+      setMaterialsPagination(EMPTY_CAPTURED_IMAGES_PAGINATION);
+      setIsLoadingMaterials(false);
+      setIsLoadingMoreMaterials(false);
+      return;
+    }
+
+    if (append) {
+      setIsLoadingMoreMaterials(true);
+    } else {
+      setIsLoadingMaterials(true);
+      setCapturedImages([]);
+      setMaterialsPagination(EMPTY_CAPTURED_IMAGES_PAGINATION);
+    }
+
     try {
-      const response = await fetch('/api/plugin/captured-images', { credentials: 'include' });
-      const data = await response.json();
-      if (!response.ok || !data.success || !Array.isArray(data.data)) return;
-      setCapturedImages(data.data);
+      const params = new URLSearchParams({
+        limit: String(MATERIAL_PAGE_SIZE),
+        offset: String(offset),
+        scope: materialScope,
+        date: materialFilter,
+        timezoneOffset: String(new Date().getTimezoneOffset()),
+      });
+      const response = await fetch(`/api/plugin/captured-images?${params.toString()}`, { credentials: 'include' });
+      const data = await response.json() as CapturedImagesResponse;
+      if (!response.ok || !data.success || !Array.isArray(data.data)) {
+        throw new Error(toUserFacingErrorMessage(data.error || data.message, '素材库加载失败'));
+      }
+
+      if (requestId !== materialRequestIdRef.current) return;
+
+      const pagination = data.pagination;
+      const nextPagination: CapturedImagesPagination = {
+        limit: Number(pagination?.limit ?? MATERIAL_PAGE_SIZE),
+        offset: Number(pagination?.offset ?? offset),
+        total: Number(pagination?.total ?? data.data.length),
+        hasMore: Boolean(pagination?.hasMore),
+        nextOffset: Number(pagination?.nextOffset ?? offset + data.data.length),
+      };
+
+      setMaterialsPagination(nextPagination);
+      setCapturedImages((prev) => {
+        if (!append) return data.data || [];
+        const existingIds = new Set(prev.map((image) => image.id));
+        return [...prev, ...(data.data || []).filter((image) => !existingIds.has(image.id))];
+      });
     } catch (error) {
       console.error('[素材库] 加载失败:', error);
+    } finally {
+      if (requestId === materialRequestIdRef.current) {
+        setIsLoadingMaterials(false);
+        setIsLoadingMoreMaterials(false);
+      }
     }
+  }, [materialFilter, materialScope, user?.id]);
+
+  const loadMoreCapturedImages = useCallback(async () => {
+    if (isLoadingMaterials || isLoadingMoreMaterials || !materialsPagination.hasMore) return;
+    await loadCapturedImages({ offset: materialsPagination.nextOffset, append: true });
+  }, [isLoadingMaterials, isLoadingMoreMaterials, loadCapturedImages, materialsPagination.hasMore, materialsPagination.nextOffset]);
+
+  const reduceMaterialsPagination = useCallback((deletedCount: number) => {
+    if (deletedCount <= 0) return;
+    setMaterialsPagination((prev) => {
+      const total = Math.max(0, prev.total - deletedCount);
+      const nextOffset = Math.max(0, prev.nextOffset - deletedCount);
+      return { ...prev, total, nextOffset, hasMore: nextOffset < total };
+    });
   }, []);
 
   const loadOrderResults = useCallback(async (options?: { silent?: boolean }) => {
     if (!user?.id) {
       setOrderResults([]);
       setHasProcessingOrders(false);
+      trackedProcessingOrdersRef.current = {};
       return;
     }
 
@@ -779,8 +878,18 @@ export default function QuickCreatePage() {
         throw new Error(toUserFacingErrorMessage(data.message, '刷新订单记录失败，请重试'));
       }
 
+      const now = Date.now();
+      const orderByNumber = new Map(data.data.map((item) => [item.orderNumber || item.id, item]));
+      const nextTrackedProcessingOrders = Object.fromEntries(Object.entries(trackedProcessingOrdersRef.current).filter(([orderNumber, startedAt]) => {
+        if (now - startedAt > PROCESSING_ORDER_POLL_TTL_MS) return false;
+        const matchedOrder = orderByNumber.get(orderNumber);
+        return !matchedOrder || getOrderStatusLabel(matchedOrder.status) === '处理中';
+      }));
+      const hasTrackedProcessingOrders = Object.keys(nextTrackedProcessingOrders).length > 0;
+      trackedProcessingOrdersRef.current = nextTrackedProcessingOrders;
+
       const hasProcessingOrdersNow = data.data.some((item) => getOrderStatusLabel(item.status) === '处理中');
-      setHasProcessingOrders(hasProcessingOrdersNow);
+      setHasProcessingOrders(hasProcessingOrdersNow || hasTrackedProcessingOrders);
       const latestSettledOrder = hasProcessingOrdersNow
         ? null
         : data.data.find((item) => getOrderStatusLabel(item.status) !== '处理中' && typeof item.remainingPoints === 'number');
@@ -804,23 +913,7 @@ export default function QuickCreatePage() {
         }
 
         if (resultImages.length === 0) {
-          const description = statusLabel === '成功'
-            ? `${toolLabel}暂无结果`
-            : `${toolLabel}${statusLabel}`;
-
-          return [{
-            id: `${item.id}-placeholder`,
-            orderId: orderNumber,
-            imageUrl: createOrderPlaceholderImage(orderNumber, statusLabel),
-            createdAt,
-            toolLabel,
-            statusLabel,
-            description,
-            orderNumber,
-            sourceImageUrl: sourceImages[0] || null,
-            isResultImage: false,
-            downloadFileName: '',
-          }];
+          return [];
         }
 
         const description = `${toolLabel}${statusLabel === '处理中' ? '处理中' : '结果'}`;
@@ -935,12 +1028,19 @@ export default function QuickCreatePage() {
       if (!response.ok || !data.success) throw new Error(toUserFacingErrorMessage(data.error, '删除文件夹失败，请重试'));
       setMaterialScope('uncategorized');
       await loadMaterialFolders();
-      await loadCapturedImages();
       showToast('文件夹已删除，素材已移到未分类', 'success');
     } catch (error) {
       showToast(toUserFacingErrorFromUnknown(error, '删除文件夹失败，请重试'), 'error');
     }
-  }, [activeFolder, loadCapturedImages, loadMaterialFolders]);
+  }, [activeFolder, loadMaterialFolders]);
+
+  const clearSelectionState = useCallback(() => {
+    setSelectedImages(new Set());
+    setShowAiPromptPanel(false);
+    setAiPrompt('');
+    setAiAspectRatio('auto');
+    setAiResolution('2k');
+  }, []);
 
   const updateMaterials = useCallback(async (ids: string[], updates: { folderId?: string | null; isFavorite?: boolean }) => {
     if (ids.length === 0) return false;
@@ -974,17 +1074,10 @@ export default function QuickCreatePage() {
     const folderId = targetValue === UNCATEGORIZED_FOLDER_VALUE ? null : targetValue;
     const success = await updateMaterials(ids, { folderId });
     if (success) {
+      clearSelectionState();
       showToast(folderId ? '已移动到文件夹' : '已移动到未分类', 'success');
     }
-  }, [selectedCapturedImages, updateMaterials]);
-
-  const clearSelectionState = useCallback(() => {
-    setSelectedImages(new Set());
-    setShowAiPromptPanel(false);
-    setAiPrompt('');
-    setAiAspectRatio('auto');
-    setAiResolution('2k');
-  }, []);
+  }, [clearSelectionState, selectedCapturedImages, updateMaterials]);
 
   const validateImageFiles = useCallback((files: File[]) => {
     const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
@@ -1185,6 +1278,7 @@ export default function QuickCreatePage() {
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(toUserFacingErrorMessage(data.error, '删除失败，请重试'));
       setCapturedImages((prev) => prev.filter((item) => item.id !== image.id));
+      reduceMaterialsPagination(1);
     } catch (error) {
       showToast(toUserFacingErrorFromUnknown(error, '删除失败，请重试'), 'error');
       return;
@@ -1321,6 +1415,8 @@ export default function QuickCreatePage() {
       return;
     }
 
+    const deletedImageUrls: string[] = [];
+
     try {
       for (const imageUrl of selectedImageList) {
         const target = capturedImages.find((image) => image.imageUrl === imageUrl);
@@ -1334,9 +1430,12 @@ export default function QuickCreatePage() {
         });
         const data = await response.json().catch(() => ({} as { success?: boolean; error?: string; message?: string }));
         if (!response.ok || !data.success) throw new Error(toUserFacingErrorMessage(data.error || data.message, '删除失败，请重试'));
+        deletedImageUrls.push(imageUrl);
       }
 
-      setCapturedImages((prev) => prev.filter((image) => !selectedImages.has(image.imageUrl)));
+      const deletedImageUrlSet = new Set(deletedImageUrls);
+      setCapturedImages((prev) => prev.filter((image) => !deletedImageUrlSet.has(image.imageUrl)));
+      reduceMaterialsPagination(deletedImageUrls.length);
       clearSelectionState();
     } catch (error) {
       showToast(toUserFacingErrorFromUnknown(error, '删除失败，请重试'), 'error');
@@ -1394,6 +1493,7 @@ export default function QuickCreatePage() {
 
       const duplicateIdSet = new Set(imagesToDelete.map((image) => image.id));
       setCapturedImages((prev) => prev.filter((image) => !duplicateIdSet.has(image.id)));
+      reduceMaterialsPagination(imagesToDelete.length);
       setSelectedImages((prev) => {
         const next = new Set(prev);
         imagesToDelete.forEach((image) => next.delete(image.imageUrl));
@@ -1458,9 +1558,8 @@ export default function QuickCreatePage() {
     return true;
   }, [user?.id]);
 
-  const ensureEnoughColorExtractionPoints = useCallback(async (imageCount: number) => {
+  const ensureEnoughPoints = useCallback(async (requiredPoints: number) => {
     if (!user?.id) return false;
-    const requiredPoints = 30 * imageCount;
     try {
       const response = await fetch(`/api/user/profile?userId=${encodeURIComponent(user.id)}`, {
         method: 'GET',
@@ -1486,7 +1585,7 @@ export default function QuickCreatePage() {
 
       return true;
     } catch (error) {
-      console.error('[素材库] 校验彩绘提取积分失败:', error);
+      console.error('[素材库] 校验积分失败:', error);
       if ((user.points || 0) < requiredPoints) {
         showToast(`积分不足，当前 ${user.points || 0}，需要 ${requiredPoints}`, 'error');
         return false;
@@ -1494,6 +1593,10 @@ export default function QuickCreatePage() {
       return true;
     }
   }, [syncPoints, user?.id, user?.points]);
+
+  const ensureEnoughColorExtractionPoints = useCallback((imageCount: number) => {
+    return ensureEnoughPoints(getColorExtractionPoints() * imageCount);
+  }, [ensureEnoughPoints]);
 
   const startColorExtraction = useCallback((imageUrl: string) => {
     if (!user?.id) return;
@@ -1541,29 +1644,43 @@ export default function QuickCreatePage() {
     })();
   }, [dispatchTaskHistoryUpdated, syncPoints, user?.id]);
 
-  const startOutpaintUpsampling = useCallback((imageUrl: string) => {
-    if (!user?.id) return;
-    void (async () => {
-      try {
-        const response = await fetch('/api/outpaint-upsampling/run', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: user.id, imageUrl }),
-        });
-        if (!response.ok) {
-          const errorMessage = toUserFacingErrorMessage(await parseErrorResponse(response, '暂时未能完成处理，请稍后重试'), '暂时未能完成处理，请稍后重试');
-          throw new Error(errorMessage);
-        }
-        dispatchTaskHistoryUpdated();
-      } catch (error) {
-        console.error('[素材库] 高清+扩图执行失败:', error);
-        dispatchTaskHistoryUpdated();
-        showToast(toUserFacingErrorFromUnknown(error, '暂时未能完成处理，请稍后重试'), 'error');
+  const startOutpaintUpsampling = useCallback(async (imageUrl: string) => {
+    if (!user?.id) return false;
+    try {
+      const response = await fetch('/api/outpaint-upsampling/run', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, imageUrl }),
+      });
+      const data = await response.json().catch(() => ({} as {
+        success?: boolean;
+        message?: string;
+        data?: { orderId?: string; remainingPoints?: number };
+      }));
+      if (!response.ok) {
+        const errorMessage = toUserFacingErrorMessage(data.message || '暂时未能完成处理，请稍后重试', '暂时未能完成处理，请稍后重试');
+        throw new Error(errorMessage);
       }
-    })();
-    dispatchTaskHistoryUpdated(500);
-  }, [dispatchTaskHistoryUpdated, user?.id]);
+
+      if (typeof data.data?.remainingPoints === 'number') {
+        syncPoints(data.data.remainingPoints);
+      }
+      const orderId = data.data?.orderId?.trim();
+      if (orderId) {
+        trackedProcessingOrdersRef.current = { ...trackedProcessingOrdersRef.current, [orderId]: Date.now() };
+        setHasProcessingOrders(true);
+      }
+      dispatchTaskHistoryUpdated();
+      dispatchTaskHistoryUpdated(500);
+      return true;
+    } catch (error) {
+      console.error('[素材库] 高清+扩图执行失败:', error);
+      dispatchTaskHistoryUpdated();
+      showToast(toUserFacingErrorFromUnknown(error, '暂时未能完成处理，请稍后重试'), 'error');
+      return false;
+    }
+  }, [dispatchTaskHistoryUpdated, syncPoints, user?.id]);
 
   const startAiGenerate = useCallback((imageUrl: string, prompt: string, options: {
     aspectRatio: SmartEditAspectRatioOption;
@@ -1651,22 +1768,32 @@ export default function QuickCreatePage() {
       }
 
       if (actionId === 'outpaint-upsampling') {
-        selectedImageList.forEach((imageUrl) => startOutpaintUpsampling(imageUrl));
-        showToast(`已提交 ${selectedImageList.length} 张图片到高清+扩图`, 'info');
+        const hasEnoughPoints = await ensureEnoughPoints(getOutpaintUpsamplingPoints() * selectedImageList.length);
+        if (!hasEnoughPoints) return;
+        let submittedCount = 0;
+        for (const imageUrl of selectedImageList) {
+          if (await startOutpaintUpsampling(imageUrl)) {
+            submittedCount += 1;
+          }
+        }
+        showToast(`已提交 ${submittedCount} 张图片到高清+扩图`, 'info');
       }
 
       clearSelectionState();
     } finally {
       setProcessingAction(null);
     }
-  }, [clearSelectionState, ensureEnoughColorExtractionPoints, ensureUserReady, selectedImageList, startColorExtraction, startOutpaintUpsampling]);
+  }, [clearSelectionState, ensureEnoughColorExtractionPoints, ensureEnoughPoints, ensureUserReady, selectedImageList, startColorExtraction, startOutpaintUpsampling]);
 
-  const submitAiGenerate = useCallback(() => {
+  const submitAiGenerate = useCallback(async () => {
     const prompt = aiPrompt.trim();
     if (!prompt) {
       showToast('请输入AI生图提示词', 'error');
       return;
     }
+
+    const hasEnoughPoints = await ensureEnoughPoints(aiGenerateTotalPoints);
+    if (!hasEnoughPoints) return;
 
     setShowAiPromptPanel(false);
     setProcessingAction('ai-generate');
@@ -1683,7 +1810,7 @@ export default function QuickCreatePage() {
     } finally {
       setProcessingAction(null);
     }
-  }, [aiAspectRatio, aiPrompt, aiResolution, clearSelectionState, imageSourceSizes, selectedImageList, startAiGenerate]);
+  }, [aiAspectRatio, aiGenerateTotalPoints, aiPrompt, aiResolution, clearSelectionState, ensureEnoughPoints, imageSourceSizes, selectedImageList, startAiGenerate]);
 
   const handleEditorAction = useCallback((action: EditorAction['id']) => {
     if (selectedImageList.length !== 1) {
@@ -1742,18 +1869,27 @@ export default function QuickCreatePage() {
   }, [imageEditor.destination, loadCapturedImages, loadOrderResults]);
 
   const handleLocalEditComplete = useCallback((resultUrl: string, meta?: { orderId?: string; status?: string; remainingPoints?: number }) => {
+    const orderId = meta?.orderId?.trim();
     clearSelectionState();
     if (typeof meta?.remainingPoints === 'number') {
       syncPoints(meta.remainingPoints);
     }
+    if (orderId) {
+      addTaskRecord('smart-edit', '智能改图', '智能改图处理中', undefined, orderId, undefined, localEditImageUrl, '处理中');
+      trackedProcessingOrdersRef.current = { ...trackedProcessingOrdersRef.current, [orderId]: Date.now() };
+      setHasProcessingOrders(true);
+    }
     dispatchTaskHistoryUpdated();
     void loadOrderResults();
-    if (meta?.status === '处理中' || meta?.orderId) {
-      showToast('智能改图已提交生成，可在订单记录查看进度', 'success');
+    window.setTimeout(() => {
+      void loadOrderResults({ silent: true });
+    }, 1500);
+    if (meta?.status === '处理中' || orderId) {
+      showToast('智能改图已提交生成，可在历史侧栏查看进度', 'success');
       return;
     }
     handleEditorComplete(resultUrl);
-  }, [clearSelectionState, dispatchTaskHistoryUpdated, handleEditorComplete, loadOrderResults, syncPoints]);
+  }, [clearSelectionState, dispatchTaskHistoryUpdated, handleEditorComplete, loadOrderResults, localEditImageUrl, syncPoints]);
 
   const handleMasonryBlankClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (selectedImageList.length === 0) return;
@@ -1805,13 +1941,17 @@ export default function QuickCreatePage() {
   useEffect(() => {
     window.postMessage({ source: 'zaomeng-web', type: 'ZAOMENG_EXTENSION_PING' }, window.location.origin);
     queueMicrotask(() => {
-      void loadCapturedImages();
       void loadMaterialFolders();
       if (user?.id) {
         void loadOrderResults();
       }
     });
-  }, [loadCapturedImages, loadMaterialFolders, loadOrderResults, user?.id]);
+  }, [loadMaterialFolders, loadOrderResults, user?.id]);
+
+  useEffect(() => {
+    clearSelectionState();
+    void loadCapturedImages();
+  }, [clearSelectionState, loadCapturedImages]);
 
   useEffect(() => {
     const handleTaskUpdate = () => {
@@ -2091,35 +2231,34 @@ export default function QuickCreatePage() {
           </button>
         </div>
 
-        <div className="mb-5 rounded-[1.8rem] border border-white/[0.08] bg-black/28 p-3 shadow-[0_18px_70px_rgba(0,0,0,0.2)] backdrop-blur-2xl ring-1 ring-white/[0.03]">
+        <div className="relative z-[90] mb-5 rounded-[1.8rem] border border-white/[0.08] bg-black/28 p-3 shadow-[0_18px_70px_rgba(0,0,0,0.2)] backdrop-blur-2xl ring-1 ring-white/[0.03]">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className={`flex min-w-0 flex-1 items-center gap-2 pb-1 ${libraryView === 'gallery' ? 'overflow-x-auto' : 'overflow-visible'}`}>
               {libraryView === 'gallery' ? (
                 <>
                   {([
-                    ['all', '全部', capturedImages.length],
-                    ['favorite', '收藏', capturedImages.filter((image) => image.isFavorite).length],
-                    ['uncategorized', '未分类', capturedImages.filter((image) => !image.folderId).length],
-                  ] as Array<[MaterialScope, string, number]>).map(([scope, label, count]) => (
+                    ['all', '全部'],
+                    ['favorite', '收藏'],
+                    ['uncategorized', '未分类'],
+                  ] as Array<[MaterialScope, string]>).map(([scope, label]) => (
                     <button
                       key={scope}
                       onClick={() => setMaterialScope(scope)}
                       className={`shrink-0 rounded-full border px-3.5 py-2 text-xs transition-all ${materialScope === scope ? 'border-white/18 bg-white/16 text-white shadow-[0_8px_22px_rgba(255,255,255,0.06)]' : 'border-white/[0.07] bg-white/[0.045] text-white/48 hover:bg-white/[0.08] hover:text-white/78'}`}
                     >
-                      {label} <span className="ml-1 text-white/32">{count}</span>
+                      {label}{materialScope === scope && galleryTotalCount > 0 ? <span className="ml-1 text-white/32">{galleryTotalCount}</span> : null}
                     </button>
                   ))}
                   <div className="mx-1 h-5 w-px shrink-0 bg-white/10" />
                   {materialFolders.map((folder) => {
                     const scope = `folder:${folder.id}` as MaterialScope;
-                    const count = capturedImages.filter((image) => image.folderId === folder.id).length;
                     return (
                       <button
                         key={folder.id}
                         onClick={() => setMaterialScope(scope)}
                         className={`shrink-0 rounded-full border px-3.5 py-2 text-xs transition-all ${materialScope === scope ? 'border-blue-300/28 bg-blue-400/18 text-blue-50 shadow-[0_10px_26px_rgba(59,130,246,0.12)]' : 'border-white/[0.07] bg-white/[0.045] text-white/48 hover:bg-white/[0.08] hover:text-white/78'}`}
                       >
-                        {folder.name} <span className="ml-1 text-white/32">{count}</span>
+                        {folder.name}{materialScope === scope && galleryTotalCount > 0 ? <span className="ml-1 text-white/32">{galleryTotalCount}</span> : null}
                       </button>
                     );
                   })}
@@ -2246,7 +2385,9 @@ export default function QuickCreatePage() {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2 text-sm text-white/42">
             <span className="h-1.5 w-1.5 rounded-full bg-purple-300/70" />
-            当前显示 {libraryView === 'gallery' ? `${filteredCapturedImages.length} 张` : `${filteredOrderResults.length} 条`}
+            {libraryView === 'gallery'
+              ? `当前显示 ${galleryLoadedCount}${galleryTotalCount > galleryLoadedCount ? ` / ${galleryTotalCount}` : ''} 张`
+              : `当前显示 ${filteredOrderResults.length} 条`}
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -2270,7 +2411,7 @@ export default function QuickCreatePage() {
                 disabled={processingAction !== null}
                 className="rounded-full border border-white/[0.08] bg-white/[0.045] px-3 py-2 text-xs text-white/42 transition-colors hover:border-red-300/25 hover:bg-red-500/16 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                删除重复
+                删除已加载重复
               </button>
             )}
 
@@ -2323,7 +2464,13 @@ export default function QuickCreatePage() {
           </div>
         )}
 
-        {(libraryView === 'gallery' ? filteredCapturedImages.length === 0 : filteredOrderResults.length === 0) ? (
+        {libraryView === 'gallery' && isLoadingMaterials ? (
+          <div className="rounded-[2rem] border border-white/[0.08] bg-white/[0.025] p-14 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+            <div className="mx-auto mb-5 h-10 w-10 animate-spin rounded-full border-2 border-white/10 border-t-purple-300/80" />
+            <p className="text-base font-medium text-white/70">素材加载中...</p>
+            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-white/40">正在按当前文件夹和日期筛选加载第一页素材。</p>
+          </div>
+        ) : isLibraryEmpty ? (
           <div className="rounded-[2rem] border border-white/[0.08] bg-white/[0.025] p-14 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
             <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.045] text-white/36">
               <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2332,12 +2479,12 @@ export default function QuickCreatePage() {
             </div>
             <p className="text-base font-medium text-white/70">
               {libraryView === 'gallery'
-                ? (capturedImages.length === 0 ? '素材库还是空的' : '当前视图没有素材')
+                ? (galleryTotalCount === 0 && materialScope === 'all' && materialFilter === 'all' ? '素材库还是空的' : '当前视图没有素材')
                 : '当前筛选下没有订单记录'}
             </p>
             <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-white/40">
               {libraryView === 'gallery'
-                ? (capturedImages.length === 0
+                ? (galleryTotalCount === 0 && materialScope === 'all' && materialFilter === 'all'
                   ? '可以通过浏览器插件采集图片，也可以上传本地图片开始整理。'
                   : '试试切换文件夹、收藏或日期筛选，或者清空当前筛选条件。')
                 : '可以切换筛选条件，或点击右上角刷新订单记录。'}
@@ -2402,6 +2549,13 @@ export default function QuickCreatePage() {
                           const isSelectable = !isOrderCard || image.isResultImage;
                           const canDeleteOrder = isOrderCard && image.statusLabel !== '处理中';
                           const orderStatusClass = isOrderCard ? getOrderStatusClass(image.statusLabel) : '';
+                          const imageRatio = imageAspectRatios[image.imageUrl] ?? 1;
+                          const compactCardControls = thumbnailSize < 240 || thumbnailSize * imageRatio < 180;
+                          const cardControlSizeClass = compactCardControls ? 'h-7 w-7' : 'h-8 w-8';
+                          const cardControlIconClass = compactCardControls ? 'h-3.5 w-3.5' : 'h-4 w-4';
+                          const cardControlWrapClass = compactCardControls
+                            ? 'right-2 top-2 max-w-[calc(100%-1rem)] flex-row flex-wrap justify-end gap-1.5'
+                            : 'right-3 top-3 flex-col gap-2';
                           const actionControlsVisibilityClass = canHoverCardControls
                             ? 'opacity-0 transition-all group-hover:opacity-100'
                             : selected
@@ -2438,7 +2592,7 @@ export default function QuickCreatePage() {
                                 ) : (
                                   <div
                                     className="relative w-full overflow-hidden"
-                                    style={{ aspectRatio: `${1 / (imageAspectRatios[image.imageUrl] ?? 1)}` }}
+                                    style={{ aspectRatio: `${1 / imageRatio}` }}
                                   >
                                     <SafeImage
                                       src={displayImageUrl}
@@ -2475,7 +2629,7 @@ export default function QuickCreatePage() {
                                   </svg>
                                 </div>
                               )}
-                              <div className={`absolute right-3 top-3 z-20 flex flex-col gap-2 ${actionControlsVisibilityClass}`}>
+                               <div className={`absolute z-20 flex ${cardControlWrapClass} ${actionControlsVisibilityClass}`}>
                                 {isOrderCard && (
                                   <button
                                     type="button"
@@ -2484,10 +2638,10 @@ export default function QuickCreatePage() {
                                       void deleteOrderRecord(image);
                                     }}
                                     disabled={!canDeleteOrder || deletingOrderNumber === image.orderNumber}
-                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-red-300/20 bg-red-500/18 text-red-50/80 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-red-500/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                                    className={`inline-flex ${cardControlSizeClass} items-center justify-center rounded-full border border-red-300/20 bg-red-500/18 text-red-50/80 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-red-500/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-40`}
                                     title={canDeleteOrder ? '删除订单记录' : '处理中订单不能删除'}
                                   >
-                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg className={cardControlIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                                     </svg>
                                   </button>
@@ -2500,10 +2654,10 @@ export default function QuickCreatePage() {
                                         event.stopPropagation();
                                         void removeUploadedImage(image);
                                       }}
-                                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-red-300/20 bg-red-500/18 text-red-50/80 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-red-500/40 hover:text-white"
-                                      title="移除图片"
+                                      className={`inline-flex ${cardControlSizeClass} items-center justify-center rounded-full border border-red-300/20 bg-red-500/18 text-red-50/80 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-red-500/40 hover:text-white`}
+                                      title="删除图片"
                                     >
-                                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <svg className={cardControlIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                                       </svg>
                                     </button>
@@ -2513,10 +2667,10 @@ export default function QuickCreatePage() {
                                         event.stopPropagation();
                                         void toggleMaterialFavorite(image);
                                       }}
-                                      className={`inline-flex h-8 w-8 items-center justify-center rounded-full border shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 ${image.isFavorite ? 'border-amber-200/60 bg-amber-400 text-black opacity-100' : 'border-white/15 bg-black/55 text-white/75 hover:bg-white/18 hover:text-white'}`}
+                                      className={`inline-flex ${cardControlSizeClass} items-center justify-center rounded-full border shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 ${image.isFavorite ? 'border-amber-200/60 bg-amber-400 text-black opacity-100' : 'border-white/15 bg-black/55 text-white/75 hover:bg-white/18 hover:text-white'}`}
                                       title={image.isFavorite ? '取消收藏' : '加入收藏'}
                                     >
-                                      <svg className="h-4 w-4" fill={image.isFavorite ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                                      <svg className={cardControlIconClass} fill={image.isFavorite ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.48 3.499a.6.6 0 011.04 0l2.2 4.459a.6.6 0 00.452.328l4.92.715a.6.6 0 01.333 1.024l-3.56 3.47a.6.6 0 00-.173.531l.84 4.9a.6.6 0 01-.87.632l-4.4-2.313a.6.6 0 00-.558 0l-4.4 2.313a.6.6 0 01-.87-.632l.84-4.9a.6.6 0 00-.173-.53l-3.56-3.471A.6.6 0 013.9 9.001l4.92-.715a.6.6 0 00.452-.328l2.208-4.459z" />
                                       </svg>
                                     </button>
@@ -2533,31 +2687,31 @@ export default function QuickCreatePage() {
                                       }
                                       void downloadMaterialImage(image);
                                     }}
-                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/75 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-white/18 hover:text-white"
+                                    className={`inline-flex ${cardControlSizeClass} items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/75 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-white/18 hover:text-white`}
                                     title="下载图片"
                                   >
-                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg className={cardControlIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
                                     </svg>
                                   </button>
                                 )}
+                                {(!isOrderCard || image.isResultImage) && (
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      previewMaterialImage(image.imageUrl);
+                                    }}
+                                    className={`inline-flex ${cardControlSizeClass} items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/75 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-white/18 hover:text-white`}
+                                    title="查看大图"
+                                  >
+                                    <svg className={cardControlIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 3H3v5m18 0V3h-5M3 16v5h5m8 0h5v-5" />
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9l-6-6m12 6l6-6M9 15l-6 6m12-6l6 6" />
+                                    </svg>
+                                  </button>
+                                )}
                               </div>
-                              {(!isOrderCard || image.isResultImage) && (
-                                <button
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    previewMaterialImage(image.imageUrl);
-                                  }}
-                                  className={`absolute right-3 bottom-3 z-20 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-black/58 text-white/78 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-white/18 hover:text-white ${actionControlsVisibilityClass}`}
-                                  title="预览大图"
-                                >
-                                  <svg className="h-4.5 w-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 3H3v5m18 0V3h-5M3 16v5h5m8 0h5v-5" />
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9l-6-6m12 6l6-6M9 15l-6 6m12-6l6 6" />
-                                  </svg>
-                                </button>
-                              )}
                               <div className="absolute left-3 bottom-3 text-left opacity-0 group-hover:opacity-100 transition-opacity">
                                 <p className="text-[11px] tracking-[0.18em] uppercase text-white/55">{isOrderCard ? 'Order' : 'Material'}</p>
                                 <p className="text-sm text-white/85 mt-1">{isOrderCard ? image.description : `素材 ${cardIndex + 1}`}</p>
@@ -2592,6 +2746,19 @@ export default function QuickCreatePage() {
                 </section>
               );
             })}
+          </div>
+        )}
+
+        {libraryView === 'gallery' && !isLoadingMaterials && !isLibraryEmpty && materialsPagination.hasMore && (
+          <div className="mb-10 flex justify-center">
+            <button
+              type="button"
+              onClick={() => void loadMoreCapturedImages()}
+              disabled={isLoadingMoreMaterials}
+              className="rounded-full border border-white/[0.1] bg-white/[0.06] px-5 py-2.5 text-sm font-medium text-white/66 transition-all hover:-translate-y-0.5 hover:border-purple-300/25 hover:bg-white/[0.12] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isLoadingMoreMaterials ? '加载中...' : `加载更多（${galleryLoadedCount}/${galleryTotalCount}）`}
+            </button>
           </div>
         )}
 
@@ -2632,8 +2799,16 @@ export default function QuickCreatePage() {
                       onClick={() => handleEditorAction(action.id)}
                       disabled={disabled}
                       className={`px-3.5 py-2 rounded-full text-sm font-medium transition-all ${disabled ? 'bg-white/6 text-white/30 cursor-not-allowed' : 'bg-white/9 text-white/78 hover:-translate-y-0.5 hover:bg-white/16 hover:text-white'}`}
+                      title={action.points ? `默认 2k 预计扣除 ${formatPointsLabel(action.points)}` : undefined}
                     >
-                      {action.label}
+                      <span className="inline-flex items-center gap-1.5">
+                        <span>{action.label}</span>
+                        {action.points ? (
+                          <span className="rounded-full border border-white/10 bg-white/10 px-1.5 py-0.5 text-[10px] text-white/70">
+                            <PointsIconLabel points={action.points} iconClassName="h-3 w-3" />
+                          </span>
+                        ) : null}
+                      </span>
                     </button>
                   );
                 })}
@@ -2717,7 +2892,7 @@ export default function QuickCreatePage() {
                           }}
                           direction="up"
                           buttonClassName="rounded-xl bg-black/35 px-3 py-2 text-sm shadow-none"
-                          menuWidthClassName="min-w-[128px]"
+                          menuWidthClassName="min-w-[160px]"
                         />
                       </div>
 
@@ -2726,7 +2901,13 @@ export default function QuickCreatePage() {
                         disabled={processingAction !== null}
                         className="px-4 py-2 rounded-xl text-sm font-medium bg-gradient-to-r from-fuchsia-600 to-violet-600 hover:from-fuchsia-500 hover:to-violet-500 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        开始AI生图
+                        {processingAction === 'ai-generate' ? '提交中...' : (
+                          <span className="inline-flex items-center gap-1.5">
+                            <span>开始AI生图</span>
+                            <span className="text-white/50">·</span>
+                            <PointsIconLabel points={aiGenerateTotalPoints} iconClassName="h-3.5 w-3.5" />
+                          </span>
+                        )}
                       </button>
                     </div>
                   </div>
@@ -2738,23 +2919,36 @@ export default function QuickCreatePage() {
                   <span className="text-[11px] text-white/32">多选编辑</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {galleryActions.map((action) => (
-                    <button
-                      key={action.id}
-                      onClick={() => {
-                        if (action.id === 'ai-generate') {
-                          closeDropdowns();
-                          setShowAiPromptPanel((current) => !current);
-                          return;
-                        }
-                        void handleRunAction(action.id);
-                      }}
-                      disabled={processingAction !== null}
-                      className={`min-w-[88px] px-3.5 py-2 rounded-full text-sm font-medium transition-all bg-white/9 text-white/82 hover:-translate-y-0.5 hover:bg-gradient-to-r hover:from-purple-600 hover:to-blue-600 hover:text-white hover:shadow-[0_10px_24px_rgba(109,40,217,0.28)] disabled:cursor-not-allowed ${processingAction !== null && processingAction !== action.id ? 'opacity-35' : 'disabled:opacity-50'} ${showAiPromptPanel && action.id === 'ai-generate' ? 'ring-2 ring-fuchsia-400/60 bg-fuchsia-500/16 text-white' : ''}`}
-                    >
-                      {processingAction === action.id ? '提交中...' : action.label}
-                    </button>
-                  ))}
+                  {galleryActions.map((action) => {
+                    const totalPoints = getActionTotalPoints(action, aiResolution, selectedImageList.length);
+                    return (
+                      <button
+                        key={action.id}
+                        onClick={() => {
+                          if (action.id === 'ai-generate') {
+                            closeDropdowns();
+                            setShowAiPromptPanel((current) => !current);
+                            return;
+                          }
+                          void handleRunAction(action.id);
+                        }}
+                        disabled={processingAction !== null}
+                        className={`min-w-[88px] px-3.5 py-2 rounded-full text-sm font-medium transition-all bg-white/9 text-white/82 hover:-translate-y-0.5 hover:bg-gradient-to-r hover:from-purple-600 hover:to-blue-600 hover:text-white hover:shadow-[0_10px_24px_rgba(109,40,217,0.28)] disabled:cursor-not-allowed ${processingAction !== null && processingAction !== action.id ? 'opacity-35' : 'disabled:opacity-50'} ${showAiPromptPanel && action.id === 'ai-generate' ? 'ring-2 ring-fuchsia-400/60 bg-fuchsia-500/16 text-white' : ''}`}
+                        title={totalPoints ? `本次预计扣除 ${formatPointsLabel(totalPoints)}` : undefined}
+                      >
+                        {processingAction === action.id ? '提交中...' : (
+                          <span className="inline-flex items-center gap-1.5">
+                            <span>{action.label}</span>
+                            {totalPoints ? (
+                              <span className="rounded-full border border-white/10 bg-white/10 px-1.5 py-0.5 text-[10px] text-white/70">
+                                <PointsIconLabel points={totalPoints} iconClassName="h-3 w-3" />
+                              </span>
+                            ) : null}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>

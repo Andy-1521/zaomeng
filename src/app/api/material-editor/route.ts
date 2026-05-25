@@ -1,20 +1,20 @@
-import { mkdir, writeFile } from 'fs/promises';
-import path from 'path';
-import { NextRequest, NextResponse } from 'next/server';
+import { after, NextRequest, NextResponse } from 'next/server';
 import sharp from 'sharp';
 import { uploadToCozeStorage } from '@/lib/dualStorage';
 import { composePromptFromImage } from '@/lib/materialEditorPrompt';
 import { capturedImageManager } from '@/storage/database';
 import { transactionManager, userManager } from '@/storage/database';
 import { isImageEditTimeoutError, runPsydoImageEditWithMetaFromPreparedBuffer } from '@/lib/psydoImageEdits';
-import { saveBufferToLocalMaterialFile } from '@/lib/localUploadStorage';
+import { getSmartEditPoints } from '@/lib/pricing';
 import { DEFAULT_SMART_EDIT_SIZE_OPTION, resolveSmartEditAspectRatio } from '@/lib/smartEditSize';
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 
 const MAX_MASK_IMAGE_BYTES = 10 * 1024 * 1024;
 const SMART_EDIT_SOURCE_MAX_EDGE = 1536;
-const SMART_EDIT_REQUIRED_POINTS = 30;
-const SMART_EDIT_IMAGE_EDIT_TIMEOUT_MS = 120000;
+const SMART_EDIT_IMAGE_EDIT_TIMEOUT_MS = 300000;
+
+export const runtime = 'nodejs';
+export const maxDuration = 300;
 
 type CropPayload = {
   action?: 'crop';
@@ -149,6 +149,14 @@ function parseFormJsonValue<T>(formData: FormData, name: string): T | undefined 
 
 function normalizeRedrawResolution(value: string | undefined): RedrawPayload['resolution'] {
   return value === '1k' || value === '2k' || value === '4k' ? value : undefined;
+}
+
+function getRedrawResolution(body: RedrawPayload) {
+  return body.resolution || '2k';
+}
+
+function getRedrawRequiredPoints(body: RedrawPayload) {
+  return getSmartEditPoints(getRedrawResolution(body));
 }
 
 function normalizeRedrawMode(value: string | undefined): RedrawPayload['mode'] {
@@ -465,24 +473,12 @@ async function resolveRedrawMaskImageBuffer(body: RedrawPayload, width: number, 
   return createMaskImageBufferFromSelection(body, width, height);
 }
 
-async function saveToLocalPublic(buffer: Buffer, fileName: string) {
-  const filePath = path.join(process.cwd(), 'public', fileName);
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, buffer);
-  return `/api/material-file/${fileName.replace(/\\/g, '/')}`;
-}
-
 async function persistEditedImage(buffer: Buffer, userId: string, action: 'crop' | 'annotate') {
   const extension = action === 'crop' ? 'jpg' : 'png';
   const contentType = action === 'crop' ? 'image/jpeg' : 'image/png';
   const fileName = `material-editor/${userId}/${Date.now()}-${Math.floor(Math.random() * 10000)}-${action}.${extension}`;
 
-  try {
-    return await uploadToCozeStorage(buffer, fileName, contentType);
-  } catch (error) {
-    console.warn('[素材编辑] 对象存储上传失败，回退到本地 public 存储:', error);
-    return saveToLocalPublic(buffer, fileName);
-  }
+  return uploadToCozeStorage(buffer, fileName, contentType);
 }
 
 async function createMaterialRecord(userId: string, imageUrl: string, action: 'crop' | 'annotate' | 'redraw') {
@@ -612,7 +608,8 @@ function buildSmartEditRequestParams(params: {
     promptSource,
     requestedAspectRatio: body.aspectRatio || DEFAULT_SMART_EDIT_SIZE_OPTION,
     resolvedAspectRatio,
-    requestedResolution: body.resolution || '2k',
+    requestedResolution: getRedrawResolution(body),
+    requiredPoints: getRedrawRequiredPoints(body),
     requestedOutputSize: outputWidth && outputHeight ? { width: outputWidth, height: outputHeight } : null,
     sourceSize: body.sourceSize,
     tagMaskRadius: body.tagMaskRadius,
@@ -621,7 +618,7 @@ function buildSmartEditRequestParams(params: {
     originalSourceSize: preparedSource ? { width: preparedSource.sourceWidth, height: preparedSource.sourceHeight } : null,
     sourceWasResized: preparedSource?.wasResized ?? null,
     requestedImageEditTimeoutMs: SMART_EDIT_IMAGE_EDIT_TIMEOUT_MS,
-    imageEditQuality: getSmartEditImageQuality(body.resolution),
+    imageEditQuality: getSmartEditImageQuality(getRedrawResolution(body)),
     imageEditAspectRatio: imageEditRequest.aspectRatio || null,
     imageEditSize: imageEditRequest.size || null,
     agentName: 'material-editor-prompt-agent',
@@ -629,7 +626,6 @@ function buildSmartEditRequestParams(params: {
     editModel: imageEditMeta?.model,
     editTarget: imageEditMeta?.targetName,
     editBaseUrl: imageEditMeta?.baseUrl,
-    usedFallback: imageEditMeta?.usedFallback,
     regionCount: Array.isArray(body.regions) ? body.regions.length : 0,
     regions: sanitizeRegionsForRequest(body.regions),
     hasMask: mode === 'brush',
@@ -676,13 +672,14 @@ async function createSmartEditPendingOrder(params: {
   const resolvedAspectRatio = resolveSmartEditAspectRatio(body.aspectRatio, body.sourceSize);
   const outputWidth = normalizeOutputDimension(body.outputSize?.width);
   const outputHeight = normalizeOutputDimension(body.outputSize?.height);
+  const requiredPoints = getRedrawRequiredPoints(body);
 
   await transactionManager.createTransaction({
     userId,
     orderNumber,
     toolPage: '智能改图',
     description: `智能改图: ${body.prompt?.trim().substring(0, 50) || '处理中'}`,
-    points: SMART_EDIT_REQUIRED_POINTS,
+    points: requiredPoints,
     actualPoints: 0,
     remainingPoints: currentPoints,
     status: '处理中',
@@ -697,15 +694,44 @@ async function createSmartEditPendingOrder(params: {
     uploadedImage: body.imageUrl,
   });
 
-  void completeSmartEditRedrawInBackground({
+  const chargedUser = await userManager.deductPointsAtomically(userId, requiredPoints);
+  if (!chargedUser) {
+    await transactionManager.updateTransaction(orderNumber, {
+      status: '失败',
+      resultData: JSON.stringify({ error: '积分不足' }),
+      actualPoints: 0,
+    });
+    throw new MaterialEditorBadRequestError('积分不足');
+  }
+
+  try {
+    await transactionManager.updateTransaction(orderNumber, {
+      actualPoints: requiredPoints,
+      remainingPoints: chargedUser.points,
+    });
+  } catch (error) {
+    try {
+      await userManager.addPointsAtomically(userId, requiredPoints);
+    } catch (refundError) {
+      console.error('[MaterialEditor] smart-edit-create-refund-failed', { orderNumber, refundError });
+    }
+    throw error;
+  }
+
+  after(async () => completeSmartEditRedrawInBackground({
     userId,
     orderNumber,
     origin,
     body,
     maskImageBuffer,
-  });
+    chargedPoints: requiredPoints,
+    chargedRemainingPoints: chargedUser.points,
+  }));
 
-  return orderNumber;
+  return {
+    orderNumber,
+    remainingPoints: chargedUser.points,
+  };
 }
 
 async function completeSmartEditRedrawInBackground(params: {
@@ -714,8 +740,11 @@ async function completeSmartEditRedrawInBackground(params: {
   origin: string;
   body: RedrawPayload;
   maskImageBuffer?: Buffer;
+  chargedPoints: number;
+  chargedRemainingPoints: number;
 }) {
-  const { userId, orderNumber, origin, body, maskImageBuffer } = params;
+  const { userId, orderNumber, origin, body, maskImageBuffer, chargedPoints, chargedRemainingPoints } = params;
+  const requiredPoints = getRedrawRequiredPoints(body);
   const resolvedAspectRatio = resolveSmartEditAspectRatio(body.aspectRatio, body.sourceSize);
   const outputWidth = normalizeOutputDimension(body.outputSize?.width);
   const outputHeight = normalizeOutputDimension(body.outputSize?.height);
@@ -770,7 +799,7 @@ async function completeSmartEditRedrawInBackground(params: {
     logStep(mode === 'brush' ? 'prepare-range' : 'skip-range', { hasMask: Boolean(resolvedMaskImageBuffer) });
 
     const imageEditRequest = getSmartEditImageEditRequest(resolvedAspectRatio);
-    const imageEditQuality = getSmartEditImageQuality(body.resolution);
+    const imageEditQuality = getSmartEditImageQuality(getRedrawResolution(body));
     logStep('image-edit-request', {
       imageEditAspectRatio: imageEditRequest.aspectRatio || null,
       imageEditSize: imageEditRequest.size || null,
@@ -784,12 +813,10 @@ async function completeSmartEditRedrawInBackground(params: {
       quality: imageEditQuality,
       ...(resolvedMaskImageBuffer ? { maskImageBuffer: resolvedMaskImageBuffer } : {}),
       timeoutMs: SMART_EDIT_IMAGE_EDIT_TIMEOUT_MS,
-      allowFallbackOnTimeout: false,
     }, preparedSource.buffer);
     logStep('image-edit', {
       editModel: imageEditResult.meta.model,
       editTarget: imageEditResult.meta.targetName,
-      usedFallback: imageEditResult.meta.usedFallback,
     });
     const resultBuffer = outputWidth && outputHeight
       ? await sharp(imageEditResult.buffer)
@@ -802,27 +829,16 @@ async function completeSmartEditRedrawInBackground(params: {
       outputHeight,
     });
 
-    let editedUrl = '';
-    try {
-      editedUrl = await uploadToCozeStorage(resultBuffer, `material-editor/${userId}/${orderNumber}-redraw.png`, 'image/png');
-    } catch (error) {
-      console.warn('[素材编辑] redraw 对象存储失败，回退本地:', error);
-      const localUrl = await saveBufferToLocalMaterialFile(resultBuffer, `material-editor/${userId}/${orderNumber}-redraw.png`);
-      editedUrl = new URL(localUrl, origin).toString();
-    }
+    const editedUrl = await uploadToCozeStorage(resultBuffer, `material-editor/${userId}/${orderNumber}-redraw.png`, 'image/png');
     logStep('upload-result');
 
-    const updatedUser = await userManager.deductPointsAtomically(userId, SMART_EDIT_REQUIRED_POINTS);
-    if (!updatedUser) {
-      throw new MaterialEditorBadRequestError('积分不足');
-    }
-    logStep('deduct-points', { remainingPoints: updatedUser.points });
+    logStep('deduct-points', { remainingPoints: chargedRemainingPoints, prepaid: true });
 
     await transactionManager.updateTransaction(orderNumber, {
       status: '成功',
-      points: SMART_EDIT_REQUIRED_POINTS,
-      actualPoints: SMART_EDIT_REQUIRED_POINTS,
-      remainingPoints: updatedUser.points,
+      points: requiredPoints,
+      actualPoints: requiredPoints,
+      remainingPoints: chargedRemainingPoints,
       description: `智能改图: ${promptResult.summary.substring(0, 50)}`,
       prompt: finalPrompt,
       requestParams: JSON.stringify(buildSmartEditRequestParams({
@@ -851,9 +867,19 @@ async function completeSmartEditRedrawInBackground(params: {
     }
   } catch (error) {
     console.error('[MaterialEditor] smart-edit-background-failed', { orderNumber, totalMs: Date.now() - startedAt, error });
+    let refundedPoints: number | undefined;
+    if (chargedPoints > 0) {
+      try {
+        const refundedUser = await userManager.addPointsAtomically(userId, chargedPoints);
+        refundedPoints = refundedUser?.points;
+      } catch (refundError) {
+        console.error('[MaterialEditor] smart-edit-refund-failed', { orderNumber, refundError });
+      }
+    }
     try {
       await transactionManager.updateTransaction(orderNumber, {
         status: isImageEditTimeoutError(error) ? '超时' : '失败',
+        remainingPoints: refundedPoints,
         actualPoints: 0,
         resultData: JSON.stringify({ error: getErrorMessage(error) }),
         requestParams: JSON.stringify(buildSmartEditRequestParams({
@@ -905,11 +931,12 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, message: '用户不存在' }, { status: 404 });
       }
 
-      if ((user.points || 0) < SMART_EDIT_REQUIRED_POINTS) {
-        return NextResponse.json({ success: false, message: `积分不足，当前积分：${user.points}，需要：${SMART_EDIT_REQUIRED_POINTS}` }, { status: 400 });
+      const requiredPoints = getRedrawRequiredPoints(restoredBody);
+      if ((user.points || 0) < requiredPoints) {
+        return NextResponse.json({ success: false, message: `积分不足，当前积分：${user.points}，需要：${requiredPoints}` }, { status: 400 });
       }
 
-      const orderNumber = await createSmartEditPendingOrder({
+      const order = await createSmartEditPendingOrder({
         userId,
         currentPoints: user.points || 0,
         origin,
@@ -919,9 +946,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: true,
         data: {
-          orderId: orderNumber,
+          orderId: order.orderNumber,
           status: '处理中',
-          remainingPoints: user.points || 0,
+          remainingPoints: order.remainingPoints,
         },
       });
     }
@@ -945,11 +972,12 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, message: '用户不存在' }, { status: 404 });
       }
 
-      if ((user.points || 0) < SMART_EDIT_REQUIRED_POINTS) {
-        return NextResponse.json({ success: false, message: `积分不足，当前积分：${user.points}，需要：${SMART_EDIT_REQUIRED_POINTS}` }, { status: 400 });
+      const requiredPoints = getRedrawRequiredPoints(body);
+      if ((user.points || 0) < requiredPoints) {
+        return NextResponse.json({ success: false, message: `积分不足，当前积分：${user.points}，需要：${requiredPoints}` }, { status: 400 });
       }
 
-      const orderNumber = await createSmartEditPendingOrder({
+      const order = await createSmartEditPendingOrder({
         userId,
         currentPoints: user.points || 0,
         origin,
@@ -960,9 +988,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: true,
         data: {
-          orderId: orderNumber,
+          orderId: order.orderNumber,
           status: '处理中',
-          remainingPoints: user.points || 0,
+          remainingPoints: order.remainingPoints,
         },
       });
     }

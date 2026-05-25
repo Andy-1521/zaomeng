@@ -4,9 +4,7 @@ import { buildOpenAICompatUrl, getOpenAICompatApiKey } from '@/lib/openaiCompati
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 
 const FAST_VISION_MODEL = 'gpt-5.4-mini';
-const FALLBACK_VISION_MODELS = ['gpt-5.4'];
 const MAX_CANDIDATES = 4;
-const GENERIC_LABELS = new Set(['所选区域', '区域', '位置', '点击位置', '目标', '内容', '物体', '图案', '元素']);
 const IDENTIFY_CACHE_TTL_MS = 10 * 60 * 1000;
 const IDENTIFY_CACHE_DISTANCE = 0.015;
 const IMAGE_ASSET_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -218,11 +216,11 @@ function cleanLabel(value: string): string {
     .substring(0, 30);
 }
 
-function normalizeCandidates(values: string[], fallback: string): string[] {
+function normalizeCandidates(values: string[], primary: string): string[] {
   const result: string[] = [];
   const seen = new Set<string>();
 
-  for (const value of [...values, fallback]) {
+  for (const value of [...values, primary]) {
     const cleaned = cleanLabel(value);
     if (!cleaned) continue;
 
@@ -237,7 +235,7 @@ function normalizeCandidates(values: string[], fallback: string): string[] {
     }
   }
 
-  return result.length > 0 ? result : ['所选区域'];
+  return result;
 }
 
 function isLikelyNoiseLabel(value: string) {
@@ -250,69 +248,22 @@ function isLikelyNoiseLabel(value: string) {
   return false;
 }
 
-function isTooGenericLabel(value: string) {
-  const trimmed = cleanLabel(value);
-  if (!trimmed) return true;
-  return GENERIC_LABELS.has(trimmed);
-}
-
 function parseIdentifyResult(raw: string): IdentifyResult {
   const cleanedRaw = raw.trim().replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+  const parsed = JSON.parse(cleanedRaw) as { description?: string; primary?: string; label?: string; candidates?: unknown[] };
+  const description = cleanLabel(parsed.description || parsed.primary || parsed.label || '');
+  const candidates = Array.isArray(parsed.candidates) ? parsed.candidates.map(String) : [];
+  const filteredCandidates = candidates.filter((item: string) => !isLikelyNoiseLabel(item));
+  const primary = description || cleanLabel(filteredCandidates[0] || '');
+  const normalizedCandidates = normalizeCandidates(filteredCandidates, primary);
 
-  try {
-    const parsed = JSON.parse(cleanedRaw);
-    const description = cleanLabel(parsed.description || parsed.primary || parsed.label || '');
-    const candidates = Array.isArray(parsed.candidates) ? parsed.candidates.map(String) : [];
-    const filteredCandidates = candidates.filter((item: string) => !isLikelyNoiseLabel(item));
-    const fallback = description || cleanLabel(filteredCandidates[0] || '所选区域');
-
-    if (fallback) {
-      return {
-        description: fallback,
-        candidates: normalizeCandidates(filteredCandidates, fallback),
-      };
-    }
-  } catch {
-    // 模型未严格返回 JSON 时走下面的兜底逻辑
-  }
-
-  const fallback = cleanLabel(cleanedRaw.split(/\r?\n/)[0] || '所选区域');
-
-  return {
-    description: fallback || '所选区域',
-    candidates: normalizeCandidates([fallback], fallback || '所选区域'),
-  };
-}
-
-function pickBestIdentifyResult(results: IdentifyResult[]): IdentifyResult {
-  const validResults = results.filter((result) => !isTooGenericLabel(result.description));
-  const source = validResults.length ? validResults : results;
-
-  const scored = source
-    .map((result) => {
-      const uniqueCandidates = normalizeCandidates(result.candidates, result.description).filter((candidate) => !isLikelyNoiseLabel(candidate));
-      const description = cleanLabel(result.description || uniqueCandidates[0] || '所选区域');
-      const score =
-        (isTooGenericLabel(description) ? 0 : 4)
-        + Math.min(uniqueCandidates.length, 4)
-        + (/^[\u4e00-\u9fa5A-Za-z0-9]{2,12}$/.test(description) ? 1 : 0);
-
-      return {
-        description,
-        candidates: uniqueCandidates,
-        score,
-      };
-    })
-    .sort((a, b) => b.score - a.score);
-
-  const best = scored[0];
-  if (!best) {
-    return { description: '所选区域', candidates: ['所选区域'] };
+  if (!primary || normalizedCandidates.length === 0) {
+    throw new Error('识别模型返回格式不完整');
   }
 
   return {
-    description: best.description || '所选区域',
-    candidates: normalizeCandidates(best.candidates, best.description || '所选区域'),
+    description: primary,
+    candidates: normalizedCandidates,
   };
 }
 
@@ -462,62 +413,22 @@ export async function POST(request: NextRequest) {
 - 不要返回“所选区域”“点击位置”“图案”“内容”“元素”这类泛化词，除非实在无法识别
 - 如果中心点落在局部小物件上，优先说该小物件，不要说整张图的大类`;
 
-    let identifyResult: IdentifyResult = {
-      description: '所选区域',
-      candidates: ['所选区域'],
-    };
+    const focusCropUrl = await buildFocusCrop(prepared.assets.normalizedBuffer, prepared.assets.width, prepared.assets.height, assetClickX, assetClickY, 0.32, 512);
+    const detailCropUrl = await buildFocusCrop(prepared.assets.normalizedBuffer, prepared.assets.width, prepared.assets.height, assetClickX, assetClickY, 0.16, 576);
+    const fullImageUrl = prepared.assets.overviewUrl;
+    const modelResult = await callVisionModel(
+      apiKey,
+      FAST_VISION_MODEL,
+      [focusCropUrl, detailCropUrl, fullImageUrl],
+      betterPrompt.replace('请只返回一个 JSON 对象，不要输出 Markdown，不要解释：', `模型：${FAST_VISION_MODEL}\n\n请只返回一个 JSON 对象，不要输出 Markdown，不要解释：`)
+    );
 
-    try {
-      const focusCropUrl = await buildFocusCrop(prepared.assets.normalizedBuffer, prepared.assets.width, prepared.assets.height, assetClickX, assetClickY, 0.32, 512);
-      const detailCropUrl = await buildFocusCrop(prepared.assets.normalizedBuffer, prepared.assets.width, prepared.assets.height, assetClickX, assetClickY, 0.16, 576);
-      const fullImageUrl = prepared.assets.overviewUrl;
-
-      const attempts: IdentifyResult[] = [];
-
-      try {
-        const fastResult = await callVisionModel(
-          apiKey,
-          FAST_VISION_MODEL,
-          [focusCropUrl, detailCropUrl, fullImageUrl],
-          betterPrompt.replace('请只返回一个 JSON 对象，不要输出 Markdown，不要解释：', `模型：${FAST_VISION_MODEL}\n\n请只返回一个 JSON 对象，不要输出 Markdown，不要解释：`)
-        );
-
-        if (fastResult) {
-          const parsed = parseIdentifyResult(fastResult);
-          attempts.push(parsed);
-        }
-      } catch (error) {
-        console.error('[识别区域] 快速模型调用失败:', FAST_VISION_MODEL, error);
-      }
-
-      const bestFastAttempt = attempts[0] || null;
-      if (!bestFastAttempt || isTooGenericLabel(bestFastAttempt.description)) {
-        const fallbackPrompt = `${betterPrompt}
-- 如果仍然不确定，请结合总览图判断点击点最具体的小目标，不要只返回大类`;
-
-        for (const model of FALLBACK_VISION_MODELS) {
-          try {
-            const result = await callVisionModel(apiKey, model, [focusCropUrl, detailCropUrl, fullImageUrl], fallbackPrompt.replace('请只返回一个 JSON 对象，不要输出 Markdown，不要解释：', `模型：${model}\n\n请只返回一个 JSON 对象，不要输出 Markdown，不要解释：`));
-            if (result) {
-              const parsed = parseIdentifyResult(result);
-              attempts.push(parsed);
-              if (!isTooGenericLabel(parsed.description)) {
-                break;
-              }
-            }
-          } catch (error) {
-            console.error('[识别区域] 模型调用失败:', model, error);
-          }
-        }
-      }
-
-      if (attempts.length > 0) {
-        identifyResult = pickBestIdentifyResult(attempts);
-        setCachedIdentifyResult(resolvedImageUrl, ratioX, ratioY, identifyResult);
-      }
-    } catch (error) {
-      console.error('[识别区域] 模型调用失败:', error);
+    if (!modelResult) {
+      throw new Error('识别模型未返回结果');
     }
+
+    const identifyResult = parseIdentifyResult(modelResult);
+    setCachedIdentifyResult(resolvedImageUrl, ratioX, ratioY, identifyResult);
 
     console.info('[Identify] identify-complete', {
       sessionId: sessionId || 'unknown',

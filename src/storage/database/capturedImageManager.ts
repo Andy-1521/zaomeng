@@ -1,8 +1,57 @@
 import { randomUUID } from 'crypto'
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm'
 import { getDb } from './client'
 import { capturedImages, insertCapturedImageSchema } from './shared/schema'
 import type { CapturedImage, InsertCapturedImage } from './shared/schema'
+
+export type CapturedImageFilters = {
+  folderId?: string | null
+  isFavorite?: boolean
+  startDate?: Date
+  endDate?: Date
+  displayableOnly?: boolean
+}
+
+export type CapturedImageListOptions = {
+  limit?: number
+  offset?: number
+  filters?: CapturedImageFilters
+}
+
+function formatMysqlDateTime(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+function buildCapturedImageConditions(userId: string, filters?: CapturedImageFilters) {
+  const conditions: SQL<unknown>[] = [eq(capturedImages.userId, userId)]
+
+  if (filters?.displayableOnly) {
+    conditions.push(sql`lower(substring_index(${capturedImages.imageUrl}, '?', 1)) regexp ${'\\.(jpg|jpeg|png|webp|gif|bmp)$'}`)
+  }
+
+  if (filters && 'folderId' in filters) {
+    if (filters.folderId === null) {
+      conditions.push(isNull(capturedImages.folderId))
+    } else if (filters.folderId) {
+      conditions.push(eq(capturedImages.folderId, filters.folderId))
+    }
+  }
+
+  if (typeof filters?.isFavorite === 'boolean') {
+    conditions.push(eq(capturedImages.isFavorite, filters.isFavorite))
+  }
+
+  if (filters?.startDate) {
+    conditions.push(sql`${capturedImages.createdAt} >= ${formatMysqlDateTime(filters.startDate)}`)
+  }
+
+  if (filters?.endDate) {
+    conditions.push(sql`${capturedImages.createdAt} < ${formatMysqlDateTime(filters.endDate)}`)
+  }
+
+  return conditions
+}
 
 export class CapturedImageManager {
   async createCapturedImage(data: InsertCapturedImage): Promise<CapturedImage> {
@@ -31,13 +80,30 @@ export class CapturedImageManager {
     return record
   }
 
-  async getUserCapturedImages(userId: string): Promise<CapturedImage[]> {
+  async getUserCapturedImages(userId: string, options?: CapturedImageListOptions): Promise<CapturedImage[]> {
     const db = await getDb()
+    const limit = Math.max(1, Math.min(options?.limit ?? 60, 120))
+    const offset = Math.max(0, options?.offset ?? 0)
+    const conditions = buildCapturedImageConditions(userId, options?.filters)
+
     return db
       .select()
       .from(capturedImages)
-      .where(eq(capturedImages.userId, userId))
+      .where(and(...conditions))
       .orderBy(desc(capturedImages.createdAt))
+      .limit(limit)
+      .offset(offset)
+  }
+
+  async countUserCapturedImages(userId: string, filters?: CapturedImageFilters): Promise<number> {
+    const db = await getDb()
+    const conditions = buildCapturedImageConditions(userId, filters)
+    const [result] = await db
+      .select({ total: sql<number>`count(*)` })
+      .from(capturedImages)
+      .where(and(...conditions))
+
+    return Number(result?.total ?? 0)
   }
 
   async deleteCapturedImage(id: string, userId: string): Promise<boolean> {

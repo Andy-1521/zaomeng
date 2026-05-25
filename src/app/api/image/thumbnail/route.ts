@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { S3Storage } from 'coze-coding-dev-sdk';
 import sharp from 'sharp';
+import { uploadToCozeStorage } from '@/lib/dualStorage';
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 
 function getErrorMessage(error: unknown) {
@@ -25,15 +25,6 @@ function getErrorStack(error: unknown) {
  * - thumbnailUrl: 缩略图URL
  * - thumbnailKey: 缩略图对象Key
  */
-
-// 初始化对象存储
-const storage = new S3Storage({
-  endpointUrl: process.env.COZE_BUCKET_ENDPOINT_URL,
-  accessKey: '',
-  secretKey: '',
-  bucketName: process.env.COZE_BUCKET_NAME,
-  region: 'cn-beijing',
-});
 
 export async function POST(request: NextRequest) {
   try {
@@ -108,44 +99,21 @@ export async function POST(request: NextRequest) {
     // 上传缩略图到对象存储
     console.log('[缩略图API] 开始上传缩略图...');
     let thumbnailKey: string;
+    let thumbnailUrl: string;
     try {
       // 生成缩略图文件名：thumbnail_{原文件名}
       const originalFileName = imageUrl.split('/').pop() || 'image.jpg';
       const thumbnailFileName = `thumbnails/thumbnail_${Date.now()}_${originalFileName}`;
 
-      thumbnailKey = await storage.uploadFile({
-        fileContent: thumbnailBuffer,
-        fileName: thumbnailFileName,
-        contentType: 'image/jpeg',
-      });
-      console.log('[缩略图API] 缩略图上传成功，key:', thumbnailKey);
+      thumbnailUrl = await uploadToCozeStorage(thumbnailBuffer, thumbnailFileName, 'image/jpeg');
+      thumbnailKey = thumbnailFileName;
+      console.log('[缩略图API] 缩略图上传成功:', thumbnailUrl.substring(0, 80) + '...');
     } catch (error: unknown) {
       console.error('[缩略图API] 上传缩略图失败:', error);
       return NextResponse.json(
         {
           success: false,
           message: '上传缩略图失败',
-          error: getErrorMessage(error),
-        },
-        { status: 500 }
-      );
-    }
-
-    // 生成缩略图签名URL
-    console.log('[缩略图API] 生成签名URL...');
-    let thumbnailUrl: string;
-    try {
-      thumbnailUrl = await storage.generatePresignedUrl({
-        key: thumbnailKey,
-        expireTime: 365 * 24 * 60 * 60, // 1年有效期
-      });
-      console.log('[缩略图API] 缩略图URL生成成功');
-    } catch (error: unknown) {
-      console.error('[缩略图API] 生成签名URL失败:', error);
-      return NextResponse.json(
-        {
-          success: false,
-          message: '生成缩略图URL失败',
           error: getErrorMessage(error),
         },
         { status: 500 }

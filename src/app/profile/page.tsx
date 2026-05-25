@@ -1,10 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ChangeEvent, type ReactNode } from 'react';
 import Image, { type ImageLoaderProps, type ImageProps } from 'next/image';
 import { useRouter } from 'next/navigation';
 import Navbar from '@/components/Navbar';
+import PointsIconLabel from '@/components/PointsIconLabel';
+import RechargePanel from '@/components/RechargePanel';
 import { useUser } from '@/contexts/UserContext';
+import { isRechargeTransaction } from '@/lib/recharge';
 import { showToast } from '@/lib/toast';
 import { toUserFacingErrorMessage } from '@/lib/userFacingError';
 
@@ -17,8 +20,10 @@ interface JsonObject {
 interface Transaction {
   id: string;
   orderNumber: string;
+  toolPage?: string;
   description: string;
   points: number;
+  actualPoints?: number;
   remainingPoints: number;
   time: number;
   status: string;
@@ -27,7 +32,23 @@ interface Transaction {
   resultData: JsonValue;
 }
 
-type ProfileTab = 'info' | 'security' | 'transactions';
+type ProfileTab = 'info' | 'security' | 'transactions' | 'recharge';
+type TransactionFilter = 'all' | 'recharge' | 'usage' | 'pending' | 'success';
+
+const PROFILE_TABS: Array<{ key: ProfileTab; label: string }> = [
+  { key: 'info', label: '资料' },
+  { key: 'security', label: '安全' },
+  { key: 'transactions', label: '明细' },
+  { key: 'recharge', label: '充值' },
+];
+
+const TRANSACTION_FILTERS: Array<{ key: TransactionFilter; label: string }> = [
+  { key: 'all', label: '全部' },
+  { key: 'recharge', label: '充值' },
+  { key: 'usage', label: '消费' },
+  { key: 'pending', label: '待支付' },
+  { key: 'success', label: '成功' },
+];
 
 const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
 
@@ -42,6 +63,7 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<ProfileTab>('info');
   const [showCopySuccess, setShowCopySuccess] = useState(false);
+  const [transactionFilter, setTransactionFilter] = useState<TransactionFilter>('all');
 
   // 表单状态
   const [editUsername, setEditUsername] = useState('');
@@ -50,14 +72,24 @@ export default function ProfilePage() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isOpeningAdmin, setIsOpeningAdmin] = useState(false);
+  const userId = user?.id;
+  const username = user?.username || '';
 
   // 错误和成功消息
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+    if (tab === 'info' || tab === 'security' || tab === 'transactions' || tab === 'recharge') {
+      setActiveTab(tab);
+    }
+  }, []);
+
   // 获取用户信息和积分明细
   useEffect(() => {
     if (isLoading) return;
-    if (!user) {
+    if (!userId) {
       router.push('/login');
       return;
     }
@@ -68,14 +100,14 @@ export default function ProfilePage() {
         await refreshUser();
 
         // 获取积分明细
-        const transResponse = await fetch(`/api/user/transactions?userId=${user!.id}`);
+        const transResponse = await fetch(`/api/user/transactions?userId=${userId}`);
         const transResult = await transResponse.json();
 
         if (transResult.success) {
           setTransactions(transResult.data);
         }
 
-        setEditUsername(user!.username);
+        setEditUsername(username);
       } catch (error) {
         console.error('获取用户信息失败:', error);
       } finally {
@@ -84,12 +116,51 @@ export default function ProfilePage() {
     };
 
     void fetchData();
-  }, [isLoading, refreshUser, router, user]);
+  }, [isLoading, refreshUser, router, userId, username]);
 
   const showMessage = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 3000);
   };
+
+  const handleTabChange = (tab: ProfileTab) => {
+    setActiveTab(tab);
+    const url = tab === 'info' ? '/profile' : `/profile?tab=${tab}`;
+    window.history.replaceState(null, '', url);
+  };
+
+  const refreshTransactions = async () => {
+    if (!user?.id) return;
+
+    try {
+      const transResponse = await fetch(`/api/user/transactions?userId=${user.id}`, { credentials: 'include' });
+      const transResult = await transResponse.json();
+
+      if (transResult.success) {
+        setTransactions(transResult.data);
+      }
+    } catch (error) {
+      console.error('[Profile] 刷新积分明细失败:', error);
+    }
+  };
+
+  const filteredTransactions = transactions.filter((trans) => {
+    if (transactionFilter === 'all') return true;
+
+    if (transactionFilter === 'recharge') {
+      return isRechargeTransaction(trans.toolPage);
+    }
+
+    if (transactionFilter === 'usage') {
+      return !isRechargeTransaction(trans.toolPage);
+    }
+
+    if (transactionFilter === 'pending') {
+      return trans.status === '待支付' || trans.status === '处理中';
+    }
+
+    return trans.status === '成功';
+  });
 
   const handleOpenAdmin = async () => {
     if (!user?.id || isOpeningAdmin) {
@@ -141,13 +212,21 @@ export default function ProfilePage() {
 
   // 获取状态标签
   const getStatusBadge = (status: string) => {
-    const statusConfig: Record<string, { className: string; icon: React.ReactNode }> = {
+    const statusConfig: Record<string, { className: string; icon: ReactNode }> = {
       '处理中': {
-        className: 'bg-blue-500/20 text-blue-300',
+        className: 'bg-violet-500/20 text-violet-100',
         icon: (
           <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+        ),
+      },
+      '待支付': {
+        className: 'bg-violet-500/20 text-violet-100',
+        icon: (
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         ),
       },
@@ -275,7 +354,7 @@ export default function ProfilePage() {
   };
 
   // 处理头像修改
-  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -317,8 +396,8 @@ export default function ProfilePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-black">
-        <div className="text-white text-lg">加载中...</div>
+      <div className="flex min-h-screen items-center justify-center bg-black">
+        <div className="rounded-full border border-violet-300/18 bg-violet-500/[0.08] px-5 py-3 text-sm text-violet-100 shadow-2xl shadow-violet-950/30 backdrop-blur-xl">个人中心加载中...</div>
       </div>
     );
   }
@@ -328,315 +407,318 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="min-h-screen bg-black relative overflow-hidden">
-      {/* 动态背景层 */}
-      <div className="absolute inset-0">
-        <div className="absolute inset-0 bg-gradient-to-b from-black via-neutral-900 to-black" />
-        <div className="absolute top-1/4 left-1/4 w-[800px] h-[800px] bg-purple-600/12 rounded-full blur-[120px] animate-pulse" />
-        <div className="absolute bottom-1/4 right-1/4 w-[700px] h-[700px] bg-blue-600/12 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: '1.5s' }} />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] bg-indigo-600/8 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: '2.5s' }} />
-      </div>
+    <div className="relative min-h-screen bg-[#08080a] text-white">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(124,58,237,0.12),transparent_36%),linear-gradient(180deg,#0b0b10_0%,#050507_58%,#050507_100%)]" />
 
-      {/* 主内容区 */}
       <div className="relative z-10">
-        {/* 导航栏 */}
         <Navbar />
 
-        {/* 内容容器 */}
-        <div className="max-w-4xl mx-auto px-6 py-8">
-          {/* 标题栏 */}
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-white mb-2 bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
-              个人中心
-            </h1>
-            <p className="text-neutral-400">管理账号、安全设置与积分信息</p>
-
-            {/* 管理员入口 - 仅管理员可见 */}
-            {user.isAdmin && (
-              <div className="mt-4">
-                <button
-                  onClick={() => void handleOpenAdmin()}
-                  disabled={isOpeningAdmin}
-                  className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg text-sm font-medium text-white hover:from-purple-700 hover:to-blue-700 transition-all shadow-lg shadow-purple-500/30 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                  </svg>
-                  {isOpeningAdmin ? '校验权限中...' : '进入管理员后台'}
-                </button>
-              </div>
-            )}
+        <main className="mx-auto max-w-3xl px-4 py-5 sm:px-6 sm:py-8">
+          <div className="mb-4 flex items-end justify-between gap-4 px-1">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-white/30">Profile</p>
+              <h1 className="mt-1 text-2xl font-semibold tracking-tight text-white">个人中心</h1>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleTabChange('recharge')}
+              className="rounded-full border border-violet-300/18 bg-violet-500/[0.08] px-3 py-2 text-sm text-violet-100 transition hover:bg-violet-500/[0.14] hover:text-white"
+            >
+              <PointsIconLabel points={user.points || 0} className="font-semibold text-yellow-200" iconClassName="h-4 w-4" />
+            </button>
           </div>
 
           {/* 消息提示 */}
           {message && (
-            <div className={`mb-6 p-4 rounded-lg ${message.type === 'success' ? 'bg-green-500/20 border border-green-500/30 text-green-400' : 'bg-red-500/20 border border-red-500/30 text-red-400'}`}>
+            <div className={`mb-6 rounded-lg p-4 ${message.type === 'success' ? 'border border-emerald-400/24 bg-emerald-500/12 text-emerald-200' : 'border border-rose-400/24 bg-rose-500/12 text-rose-200'}`}>
               {message.text}
             </div>
           )}
 
           {/* 复制成功提示 */}
           {showCopySuccess && (
-            <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-black/80 backdrop-blur-md text-white px-6 py-3 rounded-lg text-sm shadow-2xl">
+            <div className="fixed top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-violet-300/16 bg-[#111019]/90 px-6 py-3 text-sm text-white shadow-2xl shadow-violet-950/35 backdrop-blur-md">
               ✓ 编号已复制
             </div>
           )}
 
-          {/* 标签页切换 */}
-          <div className="flex mb-6 bg-white/10 rounded-lg p-1 border border-white/20">
-            {([
-              { key: 'info', label: '基本信息' },
-              { key: 'security', label: '安全设置' },
-              { key: 'transactions', label: '积分明细' },
-            ] as Array<{ key: ProfileTab; label: string }>).map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                className={`flex-1 py-2.5 rounded-md text-sm font-medium transition-all ${
-                  activeTab === tab.key
-                    ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-lg shadow-purple-500/30'
-                    : 'text-neutral-500 hover:text-neutral-300'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+          <div className="mb-5 rounded-full border border-violet-300/15 bg-violet-500/[0.06] p-1 backdrop-blur-xl">
+            <div className="grid grid-cols-4 gap-1">
+              {PROFILE_TABS.map((tab) => (
+                <button
+                  type="button"
+                  key={tab.key}
+                  onClick={() => handleTabChange(tab.key)}
+                  className={`rounded-full px-3 py-2 text-center text-sm font-medium transition ${
+                    activeTab === tab.key
+                      ? 'bg-violet-400 text-white shadow-sm shadow-violet-500/20'
+                      : 'text-white/48 hover:bg-violet-500/[0.09] hover:text-white/85'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* 基本信息标签页 */}
           {activeTab === 'info' && (
-            <div className="bg-white/10 backdrop-blur-2xl rounded-2xl p-8 border border-white/20 shadow-2xl">
-              {/* 头像区域 */}
-              <div className="flex items-center mb-8">
-                <div className="relative group h-24 w-24">
-                  <SafeImage
-                    src={user.avatar || '/images/avatar.png'}
-                    alt="用户头像"
-                    fill
-                    sizes="96px"
-                    className="rounded-full object-cover border-4 border-white/20 shadow-lg shadow-purple-500/30"
-                  />
-                  <label className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
-                    <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                    <input type="file" className="hidden" accept="image/*" onChange={handleAvatarChange} />
-                  </label>
-                </div>
-                <div className="ml-6 flex-1">
-                  <h2 className="text-2xl font-bold text-white mb-1">{user.username}</h2>
-                  <p className="text-neutral-400 text-sm">{user.email}</p>
-                </div>
-              </div>
-
-              {/* 用户信息列表 */}
-              <div className="space-y-4">
-                <div className="flex items-center justify-between p-4 bg-white/5 rounded-lg border border-white/10">
-                  <div>
-                    <label className="block text-neutral-400 text-sm mb-1">用户ID</label>
-                    <p className="text-white font-mono text-sm">{user.id}</p>
+            <div className="space-y-5">
+              <section className="overflow-hidden rounded-[1.4rem] border border-violet-300/14 bg-violet-500/[0.05] backdrop-blur-xl">
+                <label className="flex cursor-pointer items-center gap-3 px-4 py-3.5 transition hover:bg-violet-500/[0.05]">
+                  <div className="relative h-12 w-12 shrink-0">
+                    <SafeImage src={user.avatar || '/images/avatar.png'} alt="用户头像" fill sizes="48px" className="rounded-2xl object-cover" />
                   </div>
-                </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-white">头像</p>
+                    <p className="text-xs text-white/34">点击更换头像</p>
+                  </div>
+                  <span className="text-sm text-white/34">更换</span>
+                  <input type="file" className="hidden" accept="image/*" onChange={handleAvatarChange} />
+                </label>
 
-                <div className="flex items-center justify-between p-4 bg-white/5 rounded-lg border border-white/10">
-                  <div className="flex-1">
-                    <label className="block text-neutral-400 text-sm mb-1">用户名</label>
-                    {showEditUsername ? (
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={editUsername}
-                          onChange={(e) => setEditUsername(e.target.value)}
-                          className="flex-1 px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:border-purple-500/60"
-                        />
-                        <button
-                          onClick={handleUpdateUsername}
-                          className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:opacity-90 transition-opacity"
-                        >
+                <div className="mx-4 h-px bg-violet-300/10" />
+
+                <div className="px-4 py-3.5">
+                  <p className="text-xs text-white/34">用户名</p>
+                  {showEditUsername ? (
+                    <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                      <input
+                        type="text"
+                        value={editUsername}
+                        onChange={(e) => setEditUsername(e.target.value)}
+                        className="min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-black/25 px-3 py-2 text-sm text-white outline-none transition focus:border-white/25"
+                      />
+                        <button type="button" onClick={handleUpdateUsername} className="rounded-xl bg-violet-400 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-300">
                           保存
                         </button>
-                        <button
-                          onClick={() => {
-                            setEditUsername(user.username);
-                            setShowEditUsername(false);
-                          }}
-                          className="px-4 py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-opacity"
-                        >
-                          取消
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-between">
-                        <p className="text-white">{user.username}</p>
-                        <button onClick={() => setShowEditUsername(true)} className="px-3 py-1 text-sm text-purple-400 hover:text-purple-300">
-                          修改
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between p-4 bg-white/5 rounded-lg border border-white/10">
-                  <div>
-                    <label className="block text-neutral-400 text-sm mb-1">邮箱</label>
-                    <p className="text-white">{user.email}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between p-4 bg-white/5 rounded-lg border border-white/10">
-                  <div>
-                    <div className="flex items-center gap-2 text-neutral-400 text-sm mb-1">
-                      <Image src="/points-icon.png" alt="积分" width={16} height={16} className="w-4 h-4" />
-                      <span>剩余积分</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditUsername(user.username);
+                          setShowEditUsername(false);
+                        }}
+                        className="rounded-xl bg-violet-500/[0.1] px-4 py-2 text-sm text-violet-100 transition hover:bg-violet-500/[0.16] hover:text-white"
+                      >
+                        取消
+                      </button>
                     </div>
-                    <p className="text-2xl font-bold text-white bg-gradient-to-r from-yellow-400 to-orange-400 bg-clip-text text-transparent">
-                      {user.points}
-                    </p>
-                  </div>
+                  ) : (
+                    <div className="mt-1 flex items-center justify-between gap-3">
+                      <p className="min-w-0 truncate text-base text-white">{user.username}</p>
+                      <button type="button" onClick={() => setShowEditUsername(true)} className="text-sm text-violet-200 transition hover:text-violet-100">
+                        修改
+                      </button>
+                    </div>
+                  )}
                 </div>
 
-                <div className="flex items-center justify-between p-4 bg-white/5 rounded-lg border border-white/10">
-                  <div>
-                    <label className="block text-neutral-400 text-sm mb-1">注册时间</label>
-                    <p className="text-white">{formatTime(user.createTime ?? user.createdAt ?? '')}</p>
-                  </div>
+                <div className="mx-4 h-px bg-violet-300/10" />
+                <div className="flex items-center justify-between gap-4 px-4 py-3.5">
+                  <span className="text-sm text-white/44">邮箱</span>
+                  <span className="min-w-0 truncate text-right text-sm text-white/82">{user.email}</span>
                 </div>
-              </div>
+                <div className="mx-4 h-px bg-violet-300/10" />
+                <div className="flex items-center justify-between gap-4 px-4 py-3.5">
+                  <span className="text-sm text-white/44">用户 ID</span>
+                  <span className="min-w-0 truncate text-right font-mono text-xs text-white/55">{user.id}</span>
+                </div>
+                <div className="mx-4 h-px bg-violet-300/10" />
+                <div className="flex items-center justify-between gap-4 px-4 py-3.5">
+                  <span className="text-sm text-white/44">注册时间</span>
+                  <span className="text-right text-sm text-white/70">{formatTime(user.createTime ?? user.createdAt ?? '')}</span>
+                </div>
+              </section>
+
+              {user.isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => void handleOpenAdmin()}
+                  disabled={isOpeningAdmin}
+                  className="flex w-full items-center justify-between rounded-[1.4rem] border border-violet-300/14 bg-violet-500/[0.05] px-4 py-3.5 text-sm text-white transition hover:bg-violet-500/[0.09] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span>{isOpeningAdmin ? '校验权限中...' : '进入管理员后台'}</span>
+                  <span className="text-white/28">›</span>
+                </button>
+              )}
             </div>
           )}
 
-          {/* 安全设置标签页 */}
           {activeTab === 'security' && (
-            <div className="bg-white/10 backdrop-blur-2xl rounded-2xl p-8 border border-white/20 shadow-2xl">
-              <h3 className="text-xl font-bold text-white mb-6">修改密码</h3>
+            <div className="space-y-4">
+              <section className="overflow-hidden rounded-[1.4rem] border border-violet-300/14 bg-violet-500/[0.05] backdrop-blur-xl">
+                <div className="px-4 py-4">
+                  <h3 className="text-base font-semibold text-white">修改密码</h3>
+                  <p className="mt-1 text-sm text-white/38">新密码至少 6 位，建议不要与邮箱或旧密码相同。</p>
+                </div>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-neutral-400 text-sm mb-1.5">当前密码</label>
+                <div className="mx-4 h-px bg-violet-300/10" />
+
+                <label className="block px-4 py-3.5">
+                  <span className="block text-sm text-white/44">当前密码</span>
                   <input
                     type="password"
                     value={oldPassword}
                     onChange={(e) => setOldPassword(e.target.value)}
                     placeholder="请输入当前密码"
-                    className="w-full px-4 py-2.5 bg-white/10 backdrop-blur-md border border-white/20 rounded-lg text-white placeholder-neutral-500 focus:outline-none focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/20 transition-all"
+                    className="mt-2 w-full rounded-xl border border-white/[0.1] bg-black/25 px-3 py-2.5 text-sm text-white placeholder-white/25 outline-none transition focus:border-white/25"
                   />
-                </div>
+                </label>
 
-                <div>
-                  <label className="block text-neutral-400 text-sm mb-1.5">新密码</label>
+                <div className="mx-4 h-px bg-violet-300/10" />
+
+                <label className="block px-4 py-3.5">
+                  <span className="block text-sm text-white/44">新密码</span>
                   <input
                     type="password"
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="请输入新密码（至少6位）"
-                    className="w-full px-4 py-2.5 bg-white/10 backdrop-blur-md border border-white/20 rounded-lg text-white placeholder-neutral-500 focus:outline-none focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/20 transition-all"
+                    placeholder="至少 6 位"
+                    className="mt-2 w-full rounded-xl border border-white/[0.1] bg-black/25 px-3 py-2.5 text-sm text-white placeholder-white/25 outline-none transition focus:border-white/25"
                   />
-                </div>
+                </label>
 
-                <div>
-                  <label className="block text-neutral-400 text-sm mb-1.5">确认新密码</label>
+                <div className="mx-4 h-px bg-violet-300/10" />
+
+                <label className="block px-4 py-3.5">
+                  <span className="block text-sm text-white/44">确认新密码</span>
                   <input
                     type="password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder="请再次输入新密码"
-                    className="w-full px-4 py-2.5 bg-white/10 backdrop-blur-md border border-white/20 rounded-lg text-white placeholder-neutral-500 focus:outline-none focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/20 transition-all"
+                    placeholder="再次输入新密码"
+                    className="mt-2 w-full rounded-xl border border-white/[0.1] bg-black/25 px-3 py-2.5 text-sm text-white placeholder-white/25 outline-none transition focus:border-white/25"
                   />
-                </div>
+                </label>
+              </section>
 
-                <button
-                  onClick={handleUpdatePassword}
-                  className="w-full py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:opacity-90 transition-opacity font-medium shadow-lg shadow-purple-500/30"
-                >
-                  修改密码
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={handleUpdatePassword}
+                className="w-full rounded-[1.15rem] bg-gradient-to-r from-violet-500 to-blue-500 py-3 text-sm font-semibold text-white transition hover:brightness-110"
+              >
+                保存新密码
+              </button>
             </div>
           )}
 
-          {/* 积分明细标签页 */}
+          {/* 充值中心标签页 */}
+          {activeTab === 'recharge' && (
+            <RechargePanel
+              onRechargeUpdated={async () => {
+                await refreshUser();
+                await refreshTransactions();
+              }}
+            />
+          )}
+
           {activeTab === 'transactions' && (
-            <div className="bg-white/10 backdrop-blur-2xl rounded-2xl p-8 border border-white/20 shadow-2xl">
-              <div className="mb-6 flex items-start justify-between gap-4">
+            <div className="space-y-4">
+              <div className="flex items-end justify-between gap-4 px-1">
                 <div>
-                  <h3 className="text-xl font-bold text-white">积分明细</h3>
-                  <p className="mt-1 text-sm text-white/42">这里查看每笔积分变化；订单进度、结果图和下载入口请到首页右侧订单记录查看。</p>
+                  <h3 className="text-base font-semibold text-white">积分明细</h3>
+                  <p className="mt-1 text-sm text-white/38">共 {filteredTransactions.length} / {transactions.length} 条记录</p>
                 </div>
                 <button
+                  type="button"
                   onClick={() => router.push('/home')}
-                  className="shrink-0 rounded-full border border-white/10 bg-white/6 px-3 py-2 text-xs text-white/72 transition-colors hover:bg-white/12 hover:text-white"
+                  className="shrink-0 rounded-full border border-violet-300/14 bg-violet-500/[0.06] px-4 py-2 text-sm text-violet-100 transition hover:bg-violet-500/[0.12] hover:text-white"
                 >
-                  前往订单记录
+                  订单记录
                 </button>
               </div>
 
-              {transactions.length === 0 ? (
-                <div className="text-center py-12">
-                  <p className="text-neutral-400">暂无积分明细</p>
-                </div>
-              ) : (
-                <div className="max-h-[600px] overflow-y-auto space-y-3 pr-2 history-scrollbar">
-                  {transactions.map((trans) => (
-                    <div
-                      key={trans.id}
-                      className="flex items-center justify-between px-3 py-2 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10 transition-colors"
+              <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {TRANSACTION_FILTERS.map((filter) => {
+                  const active = transactionFilter === filter.key;
+
+                  return (
+                    <button
+                      key={filter.key}
+                      type="button"
+                      onClick={() => setTransactionFilter(filter.key)}
+                      className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                        active
+                          ? 'border-violet-300/35 bg-violet-400 text-white shadow-sm shadow-violet-500/20'
+                          : 'border-violet-300/12 bg-violet-500/[0.05] text-white/58 hover:bg-violet-500/[0.1] hover:text-white'
+                      }`}
                     >
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white font-medium text-sm truncate">{trans.description}</p>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <svg className="w-3 h-3 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                          </svg>
-                          <p className="text-neutral-500 text-xs truncate">编号 {trans.orderNumber}</p>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (trans.orderNumber) {
-                                navigator.clipboard.writeText(trans.orderNumber).then(() => {
-                                  setShowCopySuccess(true);
-                                  setTimeout(() => setShowCopySuccess(false), 2000);
-                                }).catch((err) => {
-                                  console.error('复制失败:', err);
-                                });
-                              }
-                            }}
-                            className="hover:bg-white/10 rounded p-1 transition-colors cursor-pointer text-neutral-500"
-                            title="复制编号"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                      <div className="text-center mx-4 min-w-[120px]">
-                        <div className="flex items-center gap-1.5 justify-center">
-                          <svg className="w-3 h-3 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                          </svg>
-                          <p className="text-neutral-500 text-xs whitespace-nowrap">{formatTime(trans.time)}</p>
-                        </div>
-                      </div>
-                      <div className="text-right flex items-center gap-3 min-w-fit">
-                        <div className="text-right">
-                          {trans.status === '成功' && (
-                            <div className="flex items-center justify-end gap-1">
-                              <span className="text-red-400 font-bold text-sm">-{trans.points}</span>
-                              <Image src="/points-icon.png" alt="积分" width={12} height={12} className="w-3 h-3" />
+                      {filter.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {filteredTransactions.length === 0 ? (
+                <section className="rounded-[1.4rem] border border-dashed border-violet-300/18 bg-violet-500/[0.03] px-4 py-10 text-center">
+                  <p className="text-sm text-white/48">暂无积分明细</p>
+                  <button
+                    type="button"
+                    onClick={() => handleTabChange('recharge')}
+                    className="mt-4 rounded-full bg-violet-400 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-300"
+                  >
+                    去充值
+                  </button>
+                </section>
+              ) : (
+                <section className="max-h-[620px] overflow-y-auto overflow-x-hidden rounded-[1.4rem] border border-violet-300/14 bg-violet-500/[0.05] backdrop-blur-xl history-scrollbar">
+                  {filteredTransactions.map((trans, index) => {
+                    const isRecharge = isRechargeTransaction(trans.toolPage);
+                    const pointValue = isRecharge ? (trans.actualPoints || trans.points) : trans.points;
+                    const amountClass = trans.status !== '成功' ? 'text-white/38' : isRecharge ? 'text-emerald-300' : 'text-rose-300';
+
+                    return (
+                      <div key={trans.id}>
+                        {index > 0 && <div className="mx-4 h-px bg-violet-300/10" />}
+                        <div className="px-4 py-3.5 transition hover:bg-violet-500/[0.06]">
+                          <div className="flex items-start gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                <p className="min-w-0 max-w-full truncate text-sm font-medium text-white">{trans.description}</p>
+                                {getStatusBadge(trans.status)}
+                              </div>
+                              <p className="mt-1 text-xs text-white/34">{formatTime(trans.time)}</p>
+                              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-white/34">
+                                <button
+                                  type="button"
+                                  disabled={!trans.orderNumber}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (trans.orderNumber) {
+                                      navigator.clipboard.writeText(trans.orderNumber).then(() => {
+                                        setShowCopySuccess(true);
+                                        setTimeout(() => setShowCopySuccess(false), 2000);
+                                      }).catch((err) => {
+                                        console.error('复制失败:', err);
+                                      });
+                                    }
+                                  }}
+                                  className="min-w-0 max-w-full truncate rounded-full border border-violet-300/14 bg-violet-500/[0.06] px-2.5 py-1 text-left transition hover:bg-violet-500/[0.12] disabled:cursor-default disabled:opacity-50"
+                                  title="复制编号"
+                                >
+                                  编号 {trans.orderNumber || '-'}
+                                </button>
+                                <span className="inline-flex items-center gap-1 rounded-full border border-violet-300/14 bg-violet-500/[0.06] px-2.5 py-1">
+                                  <span>余额</span>
+                                  <PointsIconLabel points={trans.remainingPoints} iconClassName="h-3.5 w-3.5" />
+                                </span>
+                              </div>
                             </div>
-                          )}
-                          <p className="text-neutral-500 text-xs">剩余积分: {trans.remainingPoints}</p>
+                            <div className={`shrink-0 pt-0.5 text-sm font-semibold ${amountClass}`}>
+                              <div className="flex items-center justify-end gap-0.5">
+                                <span>{isRecharge ? '+' : '-'}</span>
+                                <PointsIconLabel points={pointValue} iconClassName="h-4 w-4" />
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                        {getStatusBadge(trans.status)}
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    );
+                  })}
+                </section>
               )}
             </div>
           )}
-        </div>
+        </main>
       </div>
     </div>
   );
