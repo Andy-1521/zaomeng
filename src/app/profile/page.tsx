@@ -116,7 +116,7 @@ export default function ProfilePage() {
     };
 
     void fetchData();
-  }, [isLoading, refreshUser, router, userId, username]);
+  }, [isLoading, refreshUser, router, userId]);
 
   const showMessage = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });

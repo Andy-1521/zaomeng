@@ -21,20 +21,19 @@ export default function HomePage() {
   }, [pathname]);
 
   useEffect(() => {
-    // 等待 UserContext 从 localStorage 初始化完成
-    if (isLoading) return;
+    if (isLoading || user?.id) return;
 
-    if (!user) {
-      queueMicrotask(() => {
-        router.replace('/login');
-      });
-      return;
-    }
+    queueMicrotask(() => {
+      router.replace('/login');
+    });
+  }, [isLoading, router, user?.id]);
 
-    // 首次加载时从服务器刷新用户信息（确保积分是最新的）
-    refreshUser();
+  useEffect(() => {
+    if (isLoading || !user?.id) return;
 
-    fetch('/api/auth/refresh', {
+    void refreshUser();
+
+    void fetch('/api/auth/refresh', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -42,17 +41,20 @@ export default function HomePage() {
     }).catch(err => {
       console.error('刷新会话失败:', err);
     });
+  }, [isLoading, refreshUser, user?.id]);
 
-    // 窗口获得焦点时刷新用户信息
+  useEffect(() => {
+    if (!user?.id) return;
+
     const handleFocus = () => {
-      refreshUser();
+      void refreshUser();
     };
 
     window.addEventListener('focus', handleFocus);
     return () => {
       window.removeEventListener('focus', handleFocus);
     };
-  }, [isLoading, refreshUser, router, user]);
+  }, [refreshUser, user?.id]);
 
   if (isLoading || !user) {
     return (

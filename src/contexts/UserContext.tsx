@@ -20,7 +20,7 @@ interface UserContextType {
   setUser: (user: User | null) => void;
   updatePoints: (delta: number) => void;
   setPoints: (absolutePoints: number) => void;
-  refreshUser: () => void;
+  refreshUser: () => Promise<void>;
   logout: () => void;
 }
 
@@ -114,6 +114,17 @@ export function UserProvider({ children }: { children: ReactNode }) {
         setUserState(prev => {
           if (!prev) return data.data;
           const updated = { ...prev, ...data.data };
+          const hasChanged =
+            updated.id !== prev.id ||
+            updated.username !== prev.username ||
+            updated.email !== prev.email ||
+            updated.phone !== prev.phone ||
+            updated.avatar !== prev.avatar ||
+            updated.points !== prev.points ||
+            updated.isAdmin !== prev.isAdmin;
+
+          if (!hasChanged) return prev;
+
           localStorage.setItem('user', JSON.stringify(updated));
           return updated;
         });
