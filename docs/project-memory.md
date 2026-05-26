@@ -43,7 +43,7 @@
 - pnpm
 - MySQL + Drizzle ORM
 - Redis
-- 腾讯云 COS
+- 阿里云 OSS
 - Psydo OpenAI-compatible 图像编辑接口
 - Coze workflow，用于彩绘提取相关历史/当前工作流能力
 - RunningHub，用于高清放大、PSD 分层等流程
@@ -163,8 +163,8 @@ PSD 当前要点：
 
 存储和下载：
 
-- `src/lib/dualStorage.ts`：当前只走腾讯 COS，失败直接失败
-- `src/lib/tencentCOS.ts`：COS 上传和签名 URL
+- `src/lib/dualStorage.ts`：当前只走阿里云 OSS，失败直接失败
+- `src/lib/aliyunOSS.ts`：OSS 上传和签名 URL
 - `src/lib/safeRemoteImage.ts`：远程图片安全下载
 - `src/lib/localUploadStorage.ts`：本地素材文件读取/历史文件能力，不作为失败替代存储
 - `src/app/api/material-file/[...path]/route.ts`：历史本地素材文件读取
@@ -287,7 +287,7 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 
 - `src/lib/psydoImageEdits.ts`：只保留主图像编辑目标，移除切备用目标相关行为
 - `src/lib/openaiCompatible.ts`：移除备用目标环境变量读取
-- `src/lib/dualStorage.ts`：对象存储只走腾讯 COS，上传失败直接抛错
+- `src/lib/dualStorage.ts`：对象存储只走阿里云 OSS，上传失败直接抛错
 - `src/app/api/image-to-image/run/route.ts`：生成、上传、尺寸读取失败不再继续替代链路
 - `src/app/api/material-editor/route.ts`：智能改图上传失败直接失败，不再写本地替代结果
 - `src/app/api/color-extraction/run/handler.ts`：不再换模式、不再改传 URL、不再保留临时结果 URL

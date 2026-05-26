@@ -24,7 +24,7 @@ Read `docs/project-memory.md` before doing non-trivial work. It is the current h
 - Cache / temp state: Redis
 - UI: Tailwind CSS 4, shadcn/ui components
 - Package manager: pnpm only; never use npm or yarn
-- Storage: Tencent COS as the active object-storage path
+- Storage: Aliyun OSS as the active object-storage path
 - Model/workflow integrations: Psydo OpenAI-compatible image edits, Coze workflows, RunningHub
 
 ## Build & Run Commands
@@ -75,7 +75,7 @@ src/
 ├── lib/
 │   ├── psydoImageEdits.ts        # Primary image edit call
 │   ├── openaiCompatible.ts       # Primary OpenAI-compatible config
-│   ├── dualStorage.ts            # COS upload wrapper; failures are hard failures
+│   ├── dualStorage.ts            # OSS upload wrapper; failures are hard failures
 │   ├── safeRemoteImage.ts        # Safe remote image downloader
 │   ├── materialEditorPrompt.ts   # Smart edit prompt agent
 │   └── pricing.ts                # Points pricing
@@ -111,7 +111,7 @@ The project currently has a strict no-backup/no-degrade/no-fallback policy for g
 Do not reintroduce:
 
 - Switching image edits to a fallback target
-- Falling back to local `public/` storage after COS upload failure
+- Falling back to local `public/` storage after OSS upload failure
 - Falling back from Coze file upload to URL input
 - Falling back from hollow color extraction to full extraction
 - Returning template prompts when the prompt agent fails

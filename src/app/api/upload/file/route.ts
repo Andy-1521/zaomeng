@@ -24,7 +24,7 @@ function getErrorStack(error: unknown) {
   return error instanceof Error ? error.stack : undefined;
 }
 
-console.log('[文件上传] 使用腾讯COS对象存储（1年有效期）');
+console.log('[文件上传] 使用阿里云OSS对象存储（1年有效期）');
 
 export async function POST(request: NextRequest) {
   try {
@@ -54,9 +54,9 @@ export async function POST(request: NextRequest) {
     const extension = normalizeFileExtension(imageInfo.extension);
     const fileName = `${folder}/${timestamp}_${random}.${extension}`;
 
-    console.log('[文件上传] 开始上传到腾讯COS:', fileName);
+    console.log('[文件上传] 开始上传到阿里云OSS:', fileName);
     const storageUrl = await uploadToCozeStorage(buffer, fileName, imageInfo.contentType);
-    console.log('[文件上传] 腾讯COS上传成功:', storageUrl.substring(0, 80) + '...');
+    console.log('[文件上传] 阿里云OSS上传成功:', storageUrl.substring(0, 80) + '...');
 
     let materialRecord = null;
     if (createMaterial) {

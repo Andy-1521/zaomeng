@@ -1,14 +1,14 @@
 /**
  * 对象存储上传工具
- * 只上传到腾讯云COS；上传失败直接抛错。
+ * 只上传到阿里云 OSS；上传失败直接抛错。
  */
 
 import { compressImageFromUrl } from './imageCompression';
 import {
-  getTencentCOSUrl,
-  uploadFromUrlToTencentCOS,
-  uploadToTencentCOS,
-} from './tencentCOS';
+  getAliyunOSSUrl,
+  uploadFromUrlToAliyunOSS,
+  uploadToAliyunOSS,
+} from './aliyunOSS';
 
 /**
  * 存储上传结果
@@ -29,11 +29,11 @@ export async function uploadToCozeStorage(
   fileName: string,
   contentType: string
 ): Promise<string> {
-  console.log(`[对象存储] 开始上传到腾讯COS: ${fileName}, 大小: ${buffer.length} bytes`);
-  const cosKey = await uploadToTencentCOS(buffer, fileName, contentType);
-  const cosUrl = await getTencentCOSUrl(cosKey);
-  console.log(`[对象存储] 腾讯COS上传成功: ${cosUrl.substring(0, 80)}...`);
-  return cosUrl;
+  console.log(`[对象存储] 开始上传到阿里云OSS: ${fileName}, 大小: ${buffer.length} bytes`);
+  const ossKey = await uploadToAliyunOSS(buffer, fileName, contentType);
+  const ossUrl = await getAliyunOSSUrl(ossKey);
+  console.log(`[对象存储] 阿里云OSS上传成功: ${ossUrl.substring(0, 80)}...`);
+  return ossUrl;
 }
 
 /**
@@ -48,7 +48,7 @@ export async function uploadFromUrlToCozeStorage(
   fileName: string,
   contentType?: string
 ): Promise<string> {
-  console.log(`[对象存储] 开始从URL上传到腾讯COS: ${url.substring(0, 80)}...`);
+  console.log(`[对象存储] 开始从URL上传到阿里云OSS: ${url.substring(0, 80)}...`);
 
   // 判断是否需要压缩（仅对图片进行压缩）
   const isImage = contentType?.startsWith('image/') ||
@@ -72,10 +72,10 @@ export async function uploadFromUrlToCozeStorage(
     console.log(`[对象存储] 使用压缩后的图片上传`);
     return uploadToCozeStorage(imageBuffer, fileName, contentType || 'image/jpeg');
   } else {
-    console.log(`[对象存储] 使用原始URL上传到腾讯COS`);
-    const cosKey = await uploadFromUrlToTencentCOS(url, fileName, contentType);
-    const cosUrl = await getTencentCOSUrl(cosKey);
-    console.log(`[对象存储] 腾讯COS上传成功: ${cosUrl.substring(0, 80)}...`);
-    return cosUrl;
+    console.log(`[对象存储] 使用原始URL上传到阿里云OSS`);
+    const ossKey = await uploadFromUrlToAliyunOSS(url, fileName, contentType);
+    const ossUrl = await getAliyunOSSUrl(ossKey);
+    console.log(`[对象存储] 阿里云OSS上传成功: ${ossUrl.substring(0, 80)}...`);
+    return ossUrl;
   }
 }
