@@ -1,9 +1,14 @@
 (() => {
   const origin = window.location.origin
   let lastReadyAt = 0
+  const extensionVersion = (chrome.runtime.getManifest?.() || {}).version || '0.0.0'
 
   const postToPage = (type, payload = null) => {
     window.postMessage({ source: 'zaomeng-extension', type, payload }, origin)
+  }
+
+  const postReady = () => {
+    postToPage('ZAOMENG_EXTENSION_READY', { version: extensionVersion })
   }
 
   chrome.runtime.onMessage.addListener((message) => {
@@ -29,7 +34,7 @@
 
     if (data.type === 'ZAOMENG_EXTENSION_PING') {
       lastReadyAt = Date.now()
-      postToPage('ZAOMENG_EXTENSION_READY')
+      postReady()
       return
     }
 
@@ -42,11 +47,11 @@
 
   window.setInterval(() => {
     if (Date.now() - lastReadyAt > 10000) {
-      postToPage('ZAOMENG_EXTENSION_READY')
+      postReady()
       lastReadyAt = Date.now()
     }
   }, 5000)
 
-  postToPage('ZAOMENG_EXTENSION_READY')
+  postReady()
   lastReadyAt = Date.now()
 })()

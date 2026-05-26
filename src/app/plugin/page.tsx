@@ -64,7 +64,7 @@ export default async function PluginPage() {
                   <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">版本 v{version}</span>
                   <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">Manifest V3</span>
                   <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">支持右键采图和悬浮采图</span>
-                  <span className="rounded-full border border-amber-300/18 bg-amber-400/[0.08] px-3 py-1.5 text-amber-100">换过服务器或域名请重新安装</span>
+                  <span className="rounded-full border border-amber-300/18 bg-amber-400/[0.08] px-3 py-1.5 text-amber-100">换过服务器、域名或版本请重新安装</span>
                 </div>
               </div>
 
@@ -127,6 +127,7 @@ export default async function PluginPage() {
               <div className="mt-5 space-y-3 text-sm leading-7 text-white/68">
                 <p>先登录造梦AI网站，插件保存图片时会直接写入当前账号的素材库。</p>
                 <p>如果你曾经安装过旧服务器或本地测试版插件，请删除旧插件后重新从当前站点下载，保证权限和连接地址一致。</p>
+                <p>网站会识别插件版本，导航栏显示“插件需更新”时，请下载新版插件并重新加载。</p>
                 <p>安装完成后刷新造梦AI页面，导航栏状态会从“插件未连接”变成“插件已连接”。</p>
                 <p>点击浏览器工具栏里的插件图标，会自动打开或聚焦造梦AI工作台。</p>
               </div>

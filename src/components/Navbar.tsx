@@ -20,6 +20,21 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
   const pathname = usePathname();
   const { user, logout } = useUser();
   const [pluginReady, setPluginReady] = useState(false);
+  const [pluginVersion, setPluginVersion] = useState<string | null>(null);
+  const [latestPluginVersion, setLatestPluginVersion] = useState<string | null>(null);
+
+  const compareVersions = (left: string, right: string) => {
+    const leftParts = left.split('.').map((part) => Number(part) || 0);
+    const rightParts = right.split('.').map((part) => Number(part) || 0);
+    const maxLength = Math.max(leftParts.length, rightParts.length);
+    for (let index = 0; index < maxLength; index += 1) {
+      const diff = (leftParts[index] || 0) - (rightParts[index] || 0);
+      if (diff !== 0) return diff;
+    }
+    return 0;
+  };
+
+  const pluginNeedsUpdate = pluginReady && latestPluginVersion && (!pluginVersion || compareVersions(pluginVersion, latestPluginVersion) < 0);
 
   const handlePluginClick = () => {
     router.push('/plugin');
@@ -41,11 +56,22 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
   useEffect(() => {
     const handler = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
-      const data = event.data as { source?: string; type?: string };
+      const data = event.data as { source?: string; type?: string; payload?: { version?: string } | null };
       if (data?.source === 'zaomeng-extension' && data.type === 'ZAOMENG_EXTENSION_READY') {
         setPluginReady(true);
+        setPluginVersion(data.payload?.version || null);
       }
     };
+
+    fetch('/api/plugin/version', { credentials: 'include' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((result) => {
+        const version = result?.data?.version;
+        if (typeof version === 'string' && version.trim()) {
+          setLatestPluginVersion(version);
+        }
+      })
+      .catch(() => undefined);
 
     window.addEventListener('message', handler);
     window.postMessage({ source: 'zaomeng-web', type: 'ZAOMENG_EXTENSION_PING' }, window.location.origin);
@@ -79,13 +105,24 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
               <button
                 type="button"
                 onClick={handlePluginClick}
-                className={`px-3 py-1.5 rounded-full border text-xs flex items-center gap-2 transition-colors ${pluginReady ? 'bg-green-500/15 border-green-500/30 text-green-300 hover:bg-green-500/20' : 'bg-white/[0.055] border-white/10 text-white/58 hover:bg-white/[0.1] hover:text-white'}`}
+                className={`px-3 py-1.5 rounded-full border text-xs flex items-center gap-2 transition-colors ${
+                  pluginNeedsUpdate
+                    ? 'bg-amber-500/15 border-amber-500/35 text-amber-200 hover:bg-amber-500/20'
+                    : pluginReady
+                      ? 'bg-green-500/15 border-green-500/30 text-green-300 hover:bg-green-500/20'
+                      : 'bg-white/[0.055] border-white/10 text-white/58 hover:bg-white/[0.1] hover:text-white'
+                }`}
               >
-                <span className={`w-2 h-2 rounded-full ${pluginReady ? 'bg-green-400' : 'bg-white/40'}`}></span>
-                插件{pluginReady ? '已连接' : '未连接'}
+                <span className={`w-2 h-2 rounded-full ${pluginNeedsUpdate ? 'bg-amber-300' : pluginReady ? 'bg-green-400' : 'bg-white/40'}`}></span>
+                插件{pluginNeedsUpdate ? '需更新' : pluginReady ? '已连接' : '未连接'}
               </button>
               <div className="absolute right-0 top-full z-[90] mt-2 w-80 rounded-2xl border border-white/15 bg-black/85 p-4 text-xs text-white/70 opacity-0 invisible transition-all group-hover:visible group-hover:opacity-100 backdrop-blur-xl">
                 <p className="text-white font-medium mb-2">插件下载与安装</p>
+                {pluginNeedsUpdate ? (
+                  <p className="mb-3 rounded-xl border border-amber-300/18 bg-amber-400/[0.08] px-3 py-2 leading-5 text-amber-100">
+                    当前插件版本{pluginVersion ? ` v${pluginVersion}` : '较旧'}，最新版本 v{latestPluginVersion}。请重新下载并安装插件。
+                  </p>
+                ) : null}
                 <p className="text-white/52 leading-5">支持 Chrome、Edge、Brave、Arc、360 极速。下载后解压安装，刷新页面即可连接。</p>
                 <ol className="space-y-1 list-decimal pl-4">
                   <li>打开 `chrome://extensions/`</li>
