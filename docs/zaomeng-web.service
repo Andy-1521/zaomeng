@@ -5,14 +5,15 @@ After=network.target
 [Service]
 Type=simple
 User=ubuntu
-WorkingDirectory=/home/ubuntu/Downloads/zaomeng/project/projects
+WorkingDirectory=/home/ubuntu/zaomeng
 Environment=NODE_ENV=production
 Environment=PORT=5000
+EnvironmentFile=/home/ubuntu/zaomeng/.env.local
 ExecStart=/usr/bin/pnpm start
 Restart=always
 RestartSec=5
-StandardOutput=append:/home/ubuntu/Downloads/zaomeng/project/projects/.coze-logs/systemd-web.log
-StandardError=append:/home/ubuntu/Downloads/zaomeng/project/projects/.coze-logs/systemd-web-error.log
+StandardOutput=append:/home/ubuntu/zaomeng/.coze-logs/systemd-web.log
+StandardError=append:/home/ubuntu/zaomeng/.coze-logs/systemd-web-error.log
 
 [Install]
 WantedBy=multi-user.target

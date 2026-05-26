@@ -15,6 +15,7 @@ type TransactionFilters = {
   endDate?: Date;
   includeUserIds?: string[];
   excludeUserIds?: string[];
+  excludeToolPages?: string[];
   excludeSubOrders?: boolean;
 };
 
@@ -133,6 +134,10 @@ function buildConditions(filters?: TransactionFilters) {
 
   if (filters?.excludeUserIds && filters.excludeUserIds.length > 0) {
     conditions.push(sql`${transactions.userId} NOT IN (${sql.join(filters.excludeUserIds.map((id) => sql`${id}`), sql`, `)})`);
+  }
+
+  if (filters?.excludeToolPages && filters.excludeToolPages.length > 0) {
+    conditions.push(sql`${transactions.toolPage} NOT IN (${sql.join(filters.excludeToolPages.map((toolPage) => sql`${toolPage}`), sql`, `)})`);
   }
 
   if (filters?.excludeSubOrders) {

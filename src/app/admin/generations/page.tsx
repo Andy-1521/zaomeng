@@ -564,20 +564,6 @@ function AdminFilterDropdown({
 
 export default function AdminGenerationsPage() {
   const router = useRouter();
-  const initialLocalAdmin = (() => {
-    if (typeof window === 'undefined') {
-      return null;
-    }
-
-    try {
-      const userStr = localStorage.getItem('user');
-      if (!userStr) return null;
-      const parsed = JSON.parse(userStr) as { id?: string; isAdmin?: boolean };
-      return parsed.isAdmin ? parsed : null;
-    } catch {
-      return null;
-    }
-  })();
   const [activeTab, setActiveTab] = useState<TabType>('generations');
   const [records, setRecords] = useState<GenerationRecord[]>([]);
   const [users, setUsers] = useState<UserInfo[]>([]);
@@ -585,14 +571,14 @@ export default function AdminGenerationsPage() {
   const [rechargeCodeAmount, setRechargeCodeAmount] = useState(30);
   const [generatedRechargeCode, setGeneratedRechargeCode] = useState<RechargeCodeRecord | null>(null);
   const [isCreatingRechargeCode, setIsCreatingRechargeCode] = useState(false);
-  const [loading, setLoading] = useState(!initialLocalAdmin);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [previewImages, setPreviewImages] = useState<string[]>([]);
   const [previewIndex, setPreviewIndex] = useState(0);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
-  const [currentAdminId, setCurrentAdminId] = useState<string | null>(initialLocalAdmin?.id || null);
-  const [sessionRefreshed, setSessionRefreshed] = useState(!!initialLocalAdmin);
+  const [currentAdminId, setCurrentAdminId] = useState<string | null>(null);
+  const [sessionRefreshed, setSessionRefreshed] = useState(false);
 
   // 详情模态框状态
   const [detailModal, setDetailModal] = useState<{ open: boolean; record: GenerationRecord | null }>({

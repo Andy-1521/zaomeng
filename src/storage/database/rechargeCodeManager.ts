@@ -70,8 +70,8 @@ export class RechargeCodeManager {
 
       try {
         await pool.query(
-          `INSERT INTO recharge_codes (id, code, amount_yuan, points, status, created_by)
-           VALUES (?, ?, ?, ?, 'unused', ?)`,
+          `INSERT INTO recharge_codes (id, code, amount_yuan, points, status, created_by, created_at)
+           VALUES (?, ?, ?, ?, 'unused', ?, UTC_TIMESTAMP())`,
           [id, code, data.amountYuan, data.points, data.createdBy]
         );
 

@@ -57,14 +57,14 @@ export default async function PluginPage() {
                 <div className="space-y-3">
                   <h1 className="text-3xl font-semibold tracking-tight text-white lg:text-5xl">一键下载造梦AI采图插件</h1>
                   <p className="max-w-2xl text-sm leading-7 text-white/70 lg:text-base">
-                    下载安装后，你可以在任意网页的图片上直接右键保存到造梦AI素材库，也可以在较大的图片上使用悬浮采集按钮。当前版本会按你正在访问的网站域名生成安装包，安装后能直接连接当前站点。
+                    安装后，你可以在任意网页的图片上右键保存到造梦AI素材库，也可以在较大的图片上使用悬浮采集按钮。网站会自动识别插件版本，提醒你保持最新版。
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3 text-xs text-white/52">
-                  <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">版本 v{version}</span>
-                  <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">Manifest V3</span>
+                  <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">最新版 v{version}</span>
+                  <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">支持主流浏览器</span>
                   <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">支持右键采图和悬浮采图</span>
-                  <span className="rounded-full border border-amber-300/18 bg-amber-400/[0.08] px-3 py-1.5 text-amber-100">换过服务器、域名或版本请重新安装</span>
+                  <span className="rounded-full border border-amber-300/18 bg-amber-400/[0.08] px-3 py-1.5 text-amber-100">看到更新提醒时请安装最新版</span>
                 </div>
               </div>
 
@@ -73,7 +73,7 @@ export default async function PluginPage() {
                   href="/api/plugin/download?browser=chromium"
                   className="inline-flex items-center justify-center rounded-2xl bg-gradient-to-r from-fuchsia-600 via-violet-600 to-sky-600 px-5 py-3 text-sm font-medium text-white shadow-[0_18px_40px_rgba(92,70,255,0.32)] transition hover:scale-[1.01] hover:from-fuchsia-500 hover:via-violet-500 hover:to-sky-500"
                 >
-                  下载通用 Chromium 版
+                  下载最新版插件
                 </a>
                 <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3">
                   {browserDownloads.map((item) => (
@@ -87,7 +87,7 @@ export default async function PluginPage() {
                   ))}
                 </div>
                 <p className="text-xs leading-6 text-white/50 lg:text-right">
-                  下载的是 zip 压缩包，不同按钮只是文件名和浏览器标记不同，插件主体均适配 Chromium 家族。解压后到浏览器扩展管理页里选择“加载已解压的扩展程序”。
+                  下载后解压文件夹，在浏览器扩展管理页选择“加载已解压的扩展程序”。不同按钮只是为了方便你按常用浏览器下载。
                 </p>
                 <Link
                   href="/home"
@@ -109,7 +109,7 @@ export default async function PluginPage() {
                 </div>
                 <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
                   <p className="text-sm font-medium text-emerald-200">Arc / 360 极速</p>
-                  <p className="mt-2 text-xs leading-6 text-emerald-100/70">同样基于 Chromium 内核，可加载相同安装包。</p>
+                  <p className="mt-2 text-xs leading-6 text-emerald-100/70">同样可以使用当前下载包安装。</p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                   <p className="text-sm font-medium text-white/78">Firefox</p>
@@ -126,8 +126,8 @@ export default async function PluginPage() {
               <h2 className="text-xl font-semibold text-white">安装前确认</h2>
               <div className="mt-5 space-y-3 text-sm leading-7 text-white/68">
                 <p>先登录造梦AI网站，插件保存图片时会直接写入当前账号的素材库。</p>
-                <p>如果你曾经安装过旧服务器或本地测试版插件，请删除旧插件后重新从当前站点下载，保证权限和连接地址一致。</p>
-                <p>网站会识别插件版本，导航栏显示“插件需更新”时，请下载新版插件并重新加载。</p>
+                <p>如果你曾经装过旧版本，建议先删除旧插件，再安装这里下载的最新版。</p>
+                <p>导航栏显示“插件需更新”时，请下载最新版插件并重新加载。</p>
                 <p>安装完成后刷新造梦AI页面，导航栏状态会从“插件未连接”变成“插件已连接”。</p>
                 <p>点击浏览器工具栏里的插件图标，会自动打开或聚焦造梦AI工作台。</p>
               </div>
@@ -185,7 +185,7 @@ export default async function PluginPage() {
               <div className="mt-5 space-y-4 text-sm leading-7 text-white/68">
                 <div>
                   <p className="font-medium text-white">导航栏一直显示“插件未连接”</p>
-                  <p className="mt-1 text-white/56">先确认插件已启用，再刷新一次造梦AI页面。如果你切换过域名，请重新下载当前站点生成的安装包。</p>
+                  <p className="mt-1 text-white/56">先确认插件已启用，再刷新一次造梦AI页面。仍未连接时，删除旧插件后重新安装最新版。</p>
                 </div>
                 <div>
                   <p className="font-medium text-white">右键时没有出现正确图片</p>
@@ -193,7 +193,7 @@ export default async function PluginPage() {
                 </div>
                 <div>
                   <p className="font-medium text-white">保存时报未登录</p>
-                  <p className="mt-1 text-white/56">插件需要读取你当前网站登录态，请确认造梦AI页面已登录，并且和下载插件时使用的是同一个站点域名。</p>
+                  <p className="mt-1 text-white/56">插件需要读取你当前网站登录态，请先回到造梦AI确认已经登录，再刷新页面重试。</p>
                 </div>
               </div>
             </div>

@@ -12,7 +12,7 @@ Current active capabilities:
 - 彩绘提取
 - Manual 彩绘 PSD generation
 - 高清+扩图
-- User profile, recharge entry, and admin generation records
+- User profile, recharge-code entry, admin generation records, and admin recharge-code management
 
 Read `docs/project-memory.md` before doing non-trivial work. It is the current handoff baseline.
 
@@ -34,13 +34,13 @@ Read `docs/project-memory.md` before doing non-trivial work. It is the current h
 - Diff whitespace check: `git diff --check`
 - Combined local check: `pnpm check`
 - Build: `pnpm build`
-- Vercel preview deployment for user acceptance: `pnpm deploy:preview`
-- Vercel production deployment only after acceptance: `pnpm deploy:prod`
 - Start locally: `pnpm start`
 - Restart production: `sudo systemctl restart zaomeng-web.service`
 - Check production status: `systemctl is-active zaomeng-web.service`
 
-Production project path: `/home/ubuntu/Downloads/zaomeng/project/projects`
+Local project path: `/Users/andy/Documents/zaomeng/zaomeng/project/projects`
+Production project path: `/home/ubuntu/zaomeng`
+Production URL: `https://zaomengai.icu`
 
 ## Release Workflow
 
@@ -49,11 +49,11 @@ Every change must follow this release order:
 1. Make and verify changes locally.
 2. Run `pnpm check` and `pnpm build`.
 3. Commit a GitHub backup snapshot with a `backup: YYYY-MM-DD summary` message and push it.
-4. Deploy a Vercel Preview with `pnpm deploy:preview` and send the preview URL to the user for visual acceptance.
-5. Do not deploy Production until the user confirms the preview result is acceptable.
-6. After acceptance, deploy Production with `pnpm deploy:prod`, then smoke test public pages and core flows.
+4. Start or update local preview on `http://localhost:5001` and send the visible result to the user for acceptance.
+5. Do not deploy Production until the user confirms the local preview result is acceptable.
+6. After acceptance, deploy to Tencent Cloud Hong Kong server at `/home/ubuntu/zaomeng`, then smoke test public pages and core flows.
 
-The user reviews visible results, not code. Keep preview URLs and validation status clear in handoff messages.
+The user reviews visible results, not code. Keep local preview URLs, production URLs, and validation status clear in handoff messages.
 
 ## Project Structure
 
@@ -135,6 +135,13 @@ Paid high-cost tasks must use:
 
 Manual 彩绘 PSD generation is a separate paid action and must only happen after the user clicks the PSD action.
 
+## Recharge Policy
+
+- Automated WeChat/Alipay payment is hidden until merchant credentials and compliance are ready.
+- Users recharge through `/profile?tab=recharge` by contacting admin WeChat `Kzai-1224` for a one-time recharge code.
+- Admins generate and review recharge codes in `/admin/generations` under the `兑换码` tab.
+- Recharge transactions should not appear in admin generation records.
+
 ## Code Style
 
 - Use `@/` path aliases for imports
@@ -153,12 +160,13 @@ Manual 彩绘 PSD generation is a separate paid action and must only happen afte
 
 ## Operational Notes
 
-- Runtime env file: `/home/ubuntu/Downloads/zaomeng/project/projects/.env.local`
+- Local runtime env file: `/Users/andy/Documents/zaomeng/zaomeng/project/projects/.env.local`
+- Production runtime env file: `/home/ubuntu/zaomeng/.env.local`
 - Do not leak real environment values or keys
-- Main app logs: `.coze-logs/systemd-web.log`
-- Error logs: `.coze-logs/systemd-web-error.log`
+- Production main app logs: `/home/ubuntu/zaomeng/.coze-logs/systemd-web.log`
+- Production error logs: `/home/ubuntu/zaomeng/.coze-logs/systemd-web-error.log`
 - `journalctl -u zaomeng-web.service` mostly shows systemd start/stop logs
-- Browser smoke tests should use `/snap/bin/chromium` when possible
+- Browser smoke tests should use the Codex in-app browser for local preview, then public domain checks after production deploy
 
 ## Known Risks
 

@@ -1,27 +1,39 @@
 # 造梦项目记忆文档
 
-最后更新：2026-05-23
+最后更新：2026-05-27
 
-本文档是当前服务器上的交接基线。旧的“备用目标、降级、回退本地/URL/模板”等说明已经失效，后续接手时以本文档为准。
+本文档是当前项目交接基线。旧的“备用目标、降级、回退本地/URL/模板”、旧服务器路径和 Vercel 发布说明已经失效，后续接手时以本文档为准。
 
 ## 当前结论
 
-- 主项目路径：`/home/ubuntu/Downloads/zaomeng/project/projects`
-- 交接根目录：`/home/ubuntu/Downloads/zaomeng`
-- 公网入口：`http://124.223.26.206/home`
+- 本地主项目路径：`/Users/andy/Documents/zaomeng/zaomeng/project/projects`
+- 本地交接根目录：`/Users/andy/Documents/zaomeng/zaomeng`
+- 生产项目路径：`/home/ubuntu/zaomeng`
+- 公网入口：`https://zaomengai.icu`
 - 生产服务：`zaomeng-web.service`
 - 运行方式：systemd 启动 `next start`，Nginx 反代到 `127.0.0.1:5000`
-- 运行配置：`/home/ubuntu/Downloads/zaomeng/project/projects/.env.local`
-- 应用日志：`/home/ubuntu/Downloads/zaomeng/project/projects/.coze-logs/systemd-web.log`
-- 错误日志：`/home/ubuntu/Downloads/zaomeng/project/projects/.coze-logs/systemd-web-error.log`
+- 运行配置：`/home/ubuntu/zaomeng/.env.local`
+- 应用日志：`/home/ubuntu/zaomeng/.coze-logs/systemd-web.log`
+- 错误日志：`/home/ubuntu/zaomeng/.coze-logs/systemd-web-error.log`
 - 当前服务状态：已完成构建和重启验证，`zaomeng-web.service` 为 `active`
 - 当前核心原则：只有主链路；没有备用、没有降级、没有失败后换路；失败要明确失败并按积分规则补偿
+- 当前发布原则：先本地预览给用户验收，再备份 GitHub，最后部署腾讯云香港生产服务器
+
+## 网站作用
+
+造梦 AI 是图片素材采集、素材管理和 AI 图片生产工作台。它面向需要批量处理商品图、参考图、彩绘稿和手机壳/周边图案素材的用户，核心体验集中在 `/home`：
+
+- 用浏览器插件从网页采集图片到当前账号素材库
+- 本地上传、拖拽上传、收藏、分组、预览和管理素材
+- 基于选中素材执行 AI 生图、智能改图、彩绘提取、手动 PSD、高清+扩图
+- 在任务中心查看处理进度、失败原因、退款结果和下载入口
+- 用积分计费高成本功能；自动支付暂时隐藏，当前使用管理员生成的一次性兑换码充值
 
 ## 目录交接
 
-`/home/ubuntu/Downloads/zaomeng` 是造梦项目交接根目录，当前已归档散落文件。
+`/Users/andy/Documents/zaomeng/zaomeng` 是本地造梦项目交接根目录。生产服务器只运行 `/home/ubuntu/zaomeng`。
 
-- `project/projects/`：Next.js 主应用
+- `project/projects/`：Next.js 主应用，也是 Git 工作区
 - `project/projects/docs/project-memory.md`：本文档，当前主记忆文件
 - `HANDOFF.md`：顶层交接入口，给下一位接手者先读
 - `deployment/nginx-default-zaomeng.conf`：归档的 Nginx 反代配置
@@ -32,7 +44,7 @@
 - `archive/docs/`：历史迁移/重构文档，只作参考
 - `archive/log-snapshots/`：大日志清理前保留的最近日志片段
 
-不要再从 `/home/ubuntu` 根目录或 `/tmp/opencode` 旧路径找造梦脚本；已明确属于造梦的文件已归档到上面的目录。
+不要再从旧的 `/home/ubuntu/Downloads/zaomeng`、`/tmp/opencode` 或 Vercel 配置里找当前生产入口；当前以本地 Git 工作区和腾讯云香港 `/home/ubuntu/zaomeng` 为准。
 
 ## 技术栈
 
@@ -52,10 +64,10 @@
 
 - `/home`：素材库和所有图片加工的主入口
 - `/login`：登录
-- `/profile`：个人中心、充值入口
-- `/profile?tab=recharge`：充值页固定入口
+- `/profile`：个人中心和积分入口
+- `/profile?tab=recharge`：积分兑换码入口
 - `/plugin`：浏览器采图插件下载页
-- `/admin/generations`：管理员订单/生成记录后台
+- `/admin/generations`：管理员订单/生成记录、用户管理、兑换码后台
 
 首页已收敛为“素材库 + 选图后加工 + 右侧任务中心”的单入口工作流。不要恢复旧的多页面工具导航模式。
 
@@ -68,7 +80,8 @@
 - 彩绘 PSD：用户手动点击生成，单独计费
 - 高清+扩图：扩图后接高清放大，后台执行
 - 任务中心：展示处理中、成功、失败、超时、PSD 状态和下载入口
-- 插件采图：Chromium 插件从电商页采集图片回素材库
+- 插件采图：浏览器插件从网页采集图片回素材库；网站会检测插件版本并提示更新
+- 积分兑换码：管理员生成一次性兑换码，用户在个人中心兑换积分
 
 ## 主链路决策
 
@@ -210,20 +223,51 @@ PSD 当前要点：
 
 删除兼容路径前必须观察 Nginx `access.log*` 和 `.coze-logs/systemd-web.log`，确认旧路径没有真实命中。
 
-## 部署命令
+## 本地开发和验收方式
 
-所有命令在主项目目录执行：
+接手者必须按这个顺序工作：
+
+1. 只在本地 Git 工作区修改代码：`/Users/andy/Documents/zaomeng/zaomeng/project/projects`。
+2. 启动本地预览给用户验收，默认端口 `5001`，不要直接改生产。
+3. 用户只看本地预览结果，不看代码；验收没问题后才能进入生产发布。
+4. 生产发布前先跑类型检查、空白字符检查、构建检查。
+5. 检查通过后提交并推送 GitHub，提交信息用 `backup: YYYY-MM-DD 摘要`。
+6. GitHub 备份完成后，再部署到腾讯云香港生产服务器。
+
+本地命令：
 
 ```bash
-cd /home/ubuntu/Downloads/zaomeng/project/projects
-pnpm exec tsc --noEmit --pretty false
+cd /Users/andy/Documents/zaomeng/zaomeng/project/projects
+pnpm dev --port 5001
+pnpm exec tsc --noEmit --pretty false --incremental false
 git diff --check
 pnpm build
-sudo systemctl restart zaomeng-web.service
-systemctl is-active zaomeng-web.service
 ```
 
 不要用 `npm` 或 `yarn`。
+
+## 生产服务器和发布方式
+
+生产环境只在腾讯云香港服务器运行：
+
+- SSH：`ubuntu@43.129.173.9`
+- 应用目录：`/home/ubuntu/zaomeng`
+- 服务名：`zaomeng-web`
+- Next.js 端口：`127.0.0.1:5000`
+- 公网域名：`https://zaomengai.icu`
+- Nginx：80/443 反代到本机 5000
+
+发布时从本地 rsync 到服务器临时构建目录，排除 `.git`、`node_modules`、`.next`、`.vercel`、`.env.local`、日志和运行生成素材。服务器上的 `/home/ubuntu/zaomeng/.env.local` 必须保留并复制到新版本目录。
+
+生产检查命令：
+
+```bash
+ssh ubuntu@43.129.173.9
+cd /home/ubuntu/zaomeng
+systemctl is-active zaomeng-web.service
+curl -fsSI http://127.0.0.1:5000/
+curl -fsS http://127.0.0.1:5000/api/plugin/version
+```
 
 Nginx 检查：
 
@@ -254,15 +298,11 @@ node scripts/verification/real-page-smoke.mjs
 pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 ```
 
-浏览器测试优先用：
-
-```bash
-/snap/bin/chromium
-```
+本地浏览器测试优先使用 Codex in-app browser 或 Chrome。生产发布后必须用公网域名再做一次 smoke。
 
 当前最近验证结果：
 
-- `pnpm exec tsc --noEmit --pretty false`：通过
+- `pnpm exec tsc --noEmit --pretty false --incremental false`：通过
 - `git diff --check`：通过
 - `pnpm build`：通过
 - `sudo systemctl restart zaomeng-web.service`：已执行
@@ -280,6 +320,7 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 - 智能改图：`MD1779548832983_4622`
 - 彩绘提取：`CE_REAL_1779549053077`
 - 高清+扩图退款验证：`HDO-1779436077389_5588`
+- 2026-05-26 本地新增验证：登录、注册接口、用户资料刷新、素材上传到阿里云 OSS、插件采图、插件版本接口、兑换码生成和兑换、管理员兑换码记录均通过
 
 ## 已完成清理
 
@@ -332,11 +373,27 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 ## 环境变量原则
 
 - `.env.local` 是真实运行配置，不能外泄密钥
-- `zaomeng-web.service` 通过 `EnvironmentFile=/home/ubuntu/Downloads/zaomeng/project/projects/.env.local` 注入变量
+- `zaomeng-web.service` 通过 `/home/ubuntu/zaomeng/.env.local` 注入变量
 - 文档里只记录变量用途和变量名，不记录真实值
 - 当前图像编辑只使用主配置，不再配置备用图像编辑目标
 - `RUNNINGHUB_API_KEY` 存在时才能跑相关流程
 - `RUNNINGHUB_WATERMARK_API_KEY` 不存在时不要假设高清放大水印专用链路可用
+
+## 充值和兑换码
+
+- 自动微信/支付宝支付暂时隐藏，相关 API 代码保留但前端不暴露给普通用户。
+- 用户充值路径是 `/profile?tab=recharge`，页面展示管理员微信 `Kzai-1224` 和二维码。
+- 管理员路径是 `/admin/generations`，进入“兑换码”标签后输入充值额度生成一次性兑换码。
+- 兑换成功后用户积分立即到账，管理员记录中会显示已兑换、兑换用户和兑换时间。
+- 生图记录接口会排除 `积分充值` 交易，充值记录只在兑换码/用户交易里看，不混进生成记录。
+
+## 插件版本和下载
+
+- 插件下载页是 `/plugin`，当前面向用户只展示“下载最新版插件”和安装步骤，不暴露服务器、域名迁移等内部信息。
+- 插件版本接口是 `GET /api/plugin/version`。
+- 插件下载接口是 `GET /api/plugin/download`。
+- 网站导航栏会识别插件是否连接、版本是否过旧；用户看到“插件需更新”时重新下载最新版即可。
+- 如果未来换域名或服务器，对用户文案仍应保持“安装最新版插件”，不要暴露迁移细节。
 
 ## 视觉和产品偏好
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { transactionManager } from '@/storage/database';
 import { userManager } from '@/storage/database';
+import { RECHARGE_TOOL_PAGE } from '@/lib/recharge';
 
 type GenerationFilters = {
   toolPage?: string;
@@ -10,6 +11,7 @@ type GenerationFilters = {
   startDate?: Date;
   endDate?: Date;
   includeUserIds?: string[];
+  excludeToolPages?: string[];
   excludeSubOrders?: boolean;
 };
 
@@ -81,7 +83,9 @@ export async function GET(request: NextRequest) {
     const endDate = searchParams.get('endDate') || '';
 
     // 构建基础筛选条件
-    const baseFilters: GenerationFilters = {};
+    const baseFilters: GenerationFilters = {
+      excludeToolPages: [RECHARGE_TOOL_PAGE],
+    };
     if (toolPage) {
       const mapped = mapToolFilter(toolPage);
       if (mapped.length === 1) {
