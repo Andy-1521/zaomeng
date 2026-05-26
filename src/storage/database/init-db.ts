@@ -143,6 +143,25 @@ export async function initializeDatabase() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS recharge_codes (
+      id VARCHAR(36) PRIMARY KEY NOT NULL,
+      code VARCHAR(32) NOT NULL,
+      amount_yuan INT NOT NULL,
+      points INT NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'unused',
+      created_by VARCHAR(36) NOT NULL,
+      redeemed_by VARCHAR(36) NULL,
+      transaction_id VARCHAR(36) NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      redeemed_at TIMESTAMP NULL DEFAULT NULL,
+      UNIQUE KEY recharge_codes_code_unique (code),
+      KEY recharge_codes_status_idx (status),
+      KEY recharge_codes_created_at_idx (created_at),
+      KEY recharge_codes_redeemed_by_idx (redeemed_by)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
   await ensureColumn('captured_images', 'folder_id', 'ALTER TABLE captured_images ADD COLUMN folder_id VARCHAR(36) NULL');
   await ensureColumn('captured_images', 'is_favorite', 'ALTER TABLE captured_images ADD COLUMN is_favorite BOOLEAN NOT NULL DEFAULT FALSE');
   await ensureIndex('captured_images', 'captured_images_user_folder_idx', 'CREATE INDEX captured_images_user_folder_idx ON captured_images (user_id, folder_id)');

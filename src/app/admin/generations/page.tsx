@@ -37,7 +37,7 @@ interface UserInfo {
   createdAt: string;
 }
 
-type TabType = 'generations' | 'users';
+type TabType = 'generations' | 'users' | 'recharge-codes';
 
 type RequestParamsValue = Record<string, unknown> | null;
 
@@ -78,6 +78,19 @@ type EditModalState = {
   type: 'points' | 'avatar' | null;
   userId: string;
   currentData: EditModalValue;
+};
+
+type RechargeCodeRecord = {
+  id: string;
+  code: string;
+  amountYuan: number;
+  points: number;
+  status: 'unused' | 'redeemed';
+  createdByName: string | null;
+  redeemedByName: string | null;
+  redeemedByEmail: string | null;
+  createdAt: string;
+  redeemedAt: string | null;
 };
 
 type RecordFilters = {
@@ -568,6 +581,10 @@ export default function AdminGenerationsPage() {
   const [activeTab, setActiveTab] = useState<TabType>('generations');
   const [records, setRecords] = useState<GenerationRecord[]>([]);
   const [users, setUsers] = useState<UserInfo[]>([]);
+  const [rechargeCodes, setRechargeCodes] = useState<RechargeCodeRecord[]>([]);
+  const [rechargeCodeAmount, setRechargeCodeAmount] = useState(30);
+  const [generatedRechargeCode, setGeneratedRechargeCode] = useState<RechargeCodeRecord | null>(null);
+  const [isCreatingRechargeCode, setIsCreatingRechargeCode] = useState(false);
   const [loading, setLoading] = useState(!initialLocalAdmin);
   const [error, setError] = useState<string | null>(null);
   const [previewImages, setPreviewImages] = useState<string[]>([]);
@@ -784,6 +801,59 @@ export default function AdminGenerationsPage() {
     }
   }, [currentAdminId]);
 
+  const loadRechargeCodes = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/admin/recharge-codes', {
+        credentials: 'include',
+      });
+      const data = await response.json() as { success?: boolean; data?: RechargeCodeRecord[]; message?: string };
+
+      if (data.success) {
+        setRechargeCodes(Array.isArray(data.data) ? data.data : []);
+      } else {
+        setError(data.message || '加载兑换码失败');
+      }
+    } catch {
+      setError('网络错误，请稍后重试');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const createRechargeCode = async () => {
+    if (!Number.isInteger(rechargeCodeAmount) || rechargeCodeAmount < 1 || rechargeCodeAmount > 5000) {
+      showToast('请输入 1 - 5000 元的整数额度', 'error');
+      return;
+    }
+
+    setIsCreatingRechargeCode(true);
+    try {
+      const response = await fetch('/api/admin/recharge-codes', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amountYuan: rechargeCodeAmount }),
+      });
+      const data = await response.json() as { success?: boolean; data?: RechargeCodeRecord; message?: string };
+
+      if (!response.ok || !data.success || !data.data) {
+        showToast(toUserFacingErrorMessage(data.message, '生成兑换码失败，请稍后重试'), 'error');
+        return;
+      }
+
+      setGeneratedRechargeCode(data.data);
+      setRechargeCodes((prev) => [data.data!, ...prev.filter((item) => item.id !== data.data!.id)]);
+      showToast('兑换码已生成', 'success');
+    } catch {
+      showToast('生成兑换码失败，请稍后重试', 'error');
+    } finally {
+      setIsCreatingRechargeCode(false);
+    }
+  };
+
   const handleToolPageChange = (value: string) => {
     closeDropdowns();
     setFilterToolPage(value);
@@ -979,14 +1049,16 @@ export default function AdminGenerationsPage() {
       const timeoutId = window.setTimeout(() => {
         if (activeTab === 'generations') {
           void loadRecords(0);
-        } else {
+        } else if (activeTab === 'users') {
           void loadUsers();
+        } else {
+          void loadRechargeCodes();
         }
       }, 0);
 
       return () => window.clearTimeout(timeoutId);
     }
-  }, [activeTab, sessionRefreshed, currentAdminId, loadRecords, loadUsers]);
+  }, [activeTab, sessionRefreshed, currentAdminId, loadRecords, loadUsers, loadRechargeCodes]);
 
   const handleToggleAdmin = async (userId: string, currentIsAdmin: boolean, username: string) => {
     const action = currentIsAdmin ? '取消' : '设置';
@@ -1199,7 +1271,14 @@ export default function AdminGenerationsPage() {
     ? getDiagnosticRecommendations(detailRecord, detailDiagnostic)
     : [];
 
-  if (loading && (activeTab === 'generations' ? records.length === 0 : users.length === 0)) {
+  const activeTabHasNoData =
+    activeTab === 'generations'
+      ? records.length === 0
+      : activeTab === 'users'
+        ? users.length === 0
+        : rechargeCodes.length === 0;
+
+  if (loading && activeTabHasNoData) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center relative overflow-hidden">
         <div className="absolute inset-0">
@@ -1241,6 +1320,7 @@ export default function AdminGenerationsPage() {
             {[
               { key: 'generations' as TabType, label: '生图记录' },
               { key: 'users' as TabType, label: '用户管理' },
+              { key: 'recharge-codes' as TabType, label: '兑换码' },
             ].map((tab) => (
               <button
                 key={tab.key}
@@ -1374,6 +1454,137 @@ export default function AdminGenerationsPage() {
                   </table>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ===== Recharge Codes Tab ===== */}
+          {activeTab === 'recharge-codes' && (
+            <div className="flex-1 min-h-0 flex flex-col gap-4">
+              <section className="rounded-2xl border border-white/10 bg-white/[0.05] p-4">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold text-white">生成充值兑换码</h2>
+                    <p className="mt-1 text-sm text-white/42">输入充值额度后生成一次性兑换码，用户在个人中心兑换后自动到账。</p>
+                  </div>
+
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <label className="min-w-[180px]">
+                      <span className="mb-1 block text-xs text-white/45">充值额度（元）</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={5000}
+                        step={1}
+                        value={rechargeCodeAmount || ''}
+                        onChange={(event) => setRechargeCodeAmount(Number(event.target.value || 0))}
+                        className="w-full rounded-xl border border-white/15 bg-black/40 px-4 py-2.5 text-sm text-white outline-none focus:border-purple-500"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => void createRechargeCode()}
+                      disabled={isCreatingRechargeCode}
+                      className="rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isCreatingRechargeCode ? '生成中...' : '生成兑换码'}
+                    </button>
+                  </div>
+                </div>
+
+                {generatedRechargeCode && (
+                  <div className="mt-4 rounded-2xl border border-emerald-400/24 bg-emerald-500/10 p-4">
+                    <p className="text-sm text-emerald-100/70">最新生成</p>
+                    <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="font-mono text-2xl font-semibold tracking-[0.12em] text-emerald-100">{generatedRechargeCode.code}</p>
+                        <p className="mt-1 text-sm text-emerald-100/62">¥{generatedRechargeCode.amountYuan} / {generatedRechargeCode.points} 积分</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(generatedRechargeCode.code).then(() => {
+                            showToast('兑换码已复制', 'success');
+                          }).catch(() => {
+                            showToast('复制失败，请手动复制', 'error');
+                          });
+                        }}
+                        className="rounded-xl border border-emerald-300/20 bg-emerald-300/10 px-4 py-2 text-sm text-emerald-100 transition hover:bg-emerald-300/16"
+                      >
+                        复制兑换码
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              <section className="flex-1 min-h-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.05]">
+                <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+                  <div>
+                    <h2 className="text-base font-semibold text-white">兑换码记录</h2>
+                    <p className="mt-0.5 text-xs text-white/38">共 {rechargeCodes.length} 条，显示最近 200 条</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void loadRechargeCodes()}
+                    className="rounded-xl border border-white/12 px-3 py-2 text-sm text-white/70 transition hover:bg-white/10 hover:text-white"
+                  >
+                    刷新
+                  </button>
+                </div>
+
+                {rechargeCodes.length === 0 && !loading ? (
+                  <div className="flex h-full items-center justify-center py-20 text-sm text-white/50">暂无兑换码</div>
+                ) : (
+                  <div className="h-full overflow-auto">
+                    <table className="w-full min-w-[900px]">
+                      <thead className="sticky top-0 z-[1]">
+                        <tr className="border-b border-white/10 bg-neutral-900/95 backdrop-blur">
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-white/60">兑换码</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-white/60">额度</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-white/60">状态</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-white/60">兑换用户</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-white/60">生成时间</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-white/60">兑换时间</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rechargeCodes.map((item, idx) => (
+                          <tr key={item.id} className={`border-b border-white/10 last:border-0 ${idx % 2 === 1 ? 'bg-white/[0.06]' : ''}`}>
+                            <td className="px-4 py-3">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(item.code).then(() => showToast('兑换码已复制', 'success')).catch(() => showToast('复制失败', 'error'));
+                                }}
+                                className="font-mono text-sm tracking-[0.08em] text-white transition hover:text-purple-200"
+                              >
+                                {item.code}
+                              </button>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-white/78">¥{item.amountYuan} / {item.points} 积分</td>
+                            <td className="px-4 py-3">
+                              {item.status === 'redeemed' ? (
+                                <span className="rounded-full border border-emerald-400/24 bg-emerald-500/12 px-2.5 py-1 text-xs text-emerald-200">已兑换</span>
+                              ) : (
+                                <span className="rounded-full border border-blue-400/24 bg-blue-500/12 px-2.5 py-1 text-xs text-blue-200">未兑换</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-white/62">
+                              {item.redeemedByName ? (
+                                <span>{item.redeemedByName}{item.redeemedByEmail ? ` / ${item.redeemedByEmail}` : ''}</span>
+                              ) : (
+                                <span className="text-white/32">-</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-white/50">{formatTime(item.createdAt)}</td>
+                            <td className="px-4 py-3 text-sm text-white/50">{item.redeemedAt ? formatTime(item.redeemedAt) : '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
             </div>
           )}
 
