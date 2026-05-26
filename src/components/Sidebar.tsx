@@ -21,7 +21,7 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
   ];
 
   return (
-    <div className="fixed left-6 top-1/2 -translate-y-1/2 flex flex-col gap-4 px-2 py-6 z-50">
+    <div className="fixed left-6 top-1/2 -translate-y-1/2 z-[70] flex flex-col gap-4 px-2 py-6">
       {tabs.map((tab) => (
         <button
           key={tab.id}

@@ -53,7 +53,7 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
   }, []);
 
   return (
-    <nav className="sticky top-0 z-40 border-b border-white/[0.08] bg-black/72 px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.22)] backdrop-blur-2xl sm:px-6 sm:py-3">
+    <nav className="sticky top-0 z-[80] border-b border-white/[0.08] bg-black/72 px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.22)] backdrop-blur-2xl sm:px-6 sm:py-3">
       <div className="mx-auto flex max-w-[92vw] items-center justify-between gap-2 2xl:max-w-[1780px]">
         {/* Logo - 点击回到首页 */}
         <button
@@ -84,7 +84,7 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
                 <span className={`w-2 h-2 rounded-full ${pluginReady ? 'bg-green-400' : 'bg-white/40'}`}></span>
                 插件{pluginReady ? '已连接' : '未连接'}
               </button>
-              <div className="absolute right-0 top-full mt-2 w-80 rounded-2xl border border-white/15 bg-black/85 p-4 text-xs text-white/70 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all backdrop-blur-xl z-50">
+              <div className="absolute right-0 top-full z-[90] mt-2 w-80 rounded-2xl border border-white/15 bg-black/85 p-4 text-xs text-white/70 opacity-0 invisible transition-all group-hover:visible group-hover:opacity-100 backdrop-blur-xl">
                 <p className="text-white font-medium mb-2">插件下载与安装</p>
                 <p className="text-white/52 leading-5">支持 Chrome、Edge、Brave、Arc、360 极速。下载后解压安装，刷新页面即可连接。</p>
                 <ol className="space-y-1 list-decimal pl-4">

@@ -520,7 +520,7 @@ function AdminFilterDropdown({
       </button>
 
       {isOpen ? (
-        <div className={`absolute ${positionClassName} top-full z-30 mt-2 max-w-[calc(100vw-2rem)] ${menuWidthClassName} overflow-hidden rounded-2xl border border-white/12 bg-[#0d0d12] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.4)]`}>
+        <div className={`absolute ${positionClassName} top-full z-30 mt-2 max-w-[calc(100vw-2rem)] ${menuWidthClassName} overflow-hidden rounded-[1rem] border border-white/12 bg-[#0d0d12]/98 p-1 shadow-[0_18px_40px_rgba(0,0,0,0.4)] backdrop-blur-xl`}>
           {options.map((option) => {
             const selected = option.value === value;
             return (
@@ -529,17 +529,17 @@ function AdminFilterDropdown({
                 type="button"
                 onClick={() => onSelect(option.value)}
                 title={option.description || option.label}
-                className={`flex w-full items-start gap-2 rounded-xl px-3 py-2 text-left text-xs transition ${selected ? 'bg-white text-slate-950' : 'text-white/72 hover:bg-white/[0.08] hover:text-white'}`}
+                className={`flex w-full items-start gap-2 rounded-[0.8rem] border px-3 py-2 text-left text-xs transition ${selected ? 'border-purple-300/24 bg-purple-500/16 text-purple-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]' : 'border-transparent text-white/72 hover:bg-white/[0.08] hover:text-white'}`}
               >
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate">{option.label}</span>
                   {option.description ? (
-                    <span className={`mt-0.5 text-[11px] leading-4 ${selected ? 'text-slate-600' : 'text-white/42'}`}>
+                    <span className={`mt-0.5 text-[11px] leading-4 ${selected ? 'text-purple-100/70' : 'text-white/42'}`}>
                       {option.description}
                     </span>
                   ) : null}
                 </span>
-                {selected ? <span className="pt-0.5 text-[10px]">✓</span> : null}
+                {selected ? <span className="pt-0.5 text-[10px] text-purple-100">✓</span> : null}
               </button>
             );
           })}

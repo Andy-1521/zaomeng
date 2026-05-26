@@ -1588,7 +1588,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                                     event.stopPropagation();
                                     handleCandidateSelect(activeRegion.id, candidate);
                                   }}
-                                  className={`rounded-full px-3 py-1.5 text-xs transition ${selected ? 'bg-white text-slate-950' : 'border border-white/8 bg-white/[0.04] text-white/74 hover:bg-white/[0.10]'}`}
+                                  className={`rounded-full border px-3 py-1.5 text-xs transition ${selected ? 'border-purple-300/24 bg-purple-500/16 text-purple-50' : 'border-white/8 bg-white/[0.04] text-white/74 hover:bg-white/[0.10]'}`}
                                 >
                                   {candidate}
                                 </button>
@@ -1666,7 +1666,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                         </button>
 
                         {isAspectRatioMenuOpen ? (
-                          <div className="absolute bottom-full left-0 z-30 mb-2 min-w-[180px] max-w-[72vw] overflow-hidden rounded-2xl border border-white/12 bg-[#0d0d12] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.4)] sm:min-w-[220px]">
+                          <div className="absolute bottom-full left-0 z-30 mb-2 min-w-[180px] max-w-[72vw] overflow-hidden rounded-[1rem] border border-white/12 bg-[#0d0d12]/98 p-1 shadow-[0_18px_40px_rgba(0,0,0,0.4)] backdrop-blur-xl sm:min-w-[220px]">
                             {SMART_EDIT_SIZE_OPTIONS.map((option) => {
                               const selected = option.value === outputSize;
                               return (
@@ -1677,12 +1677,12 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                                     setOutputSize(option.value);
                                     setIsAspectRatioMenuOpen(false);
                                   }}
-                                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition ${selected ? 'bg-white text-slate-950' : 'text-white/72 hover:bg-white/[0.08] hover:text-white'}`}
+                                  className={`flex w-full items-center gap-3 rounded-[0.8rem] border px-3 py-2 text-left transition ${selected ? 'border-purple-300/24 bg-purple-500/16 text-purple-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]' : 'border-transparent text-white/72 hover:bg-white/[0.08] hover:text-white'}`}
                                   title={option.description}
                                 >
                                   <span className="min-w-[40px] text-sm font-medium">{option.label}</span>
                                   <span className="flex-1 text-xs opacity-70">{option.description}</span>
-                                  {selected ? <span className="text-[10px]">✓</span> : null}
+                                  {selected ? <span className="text-[10px] text-purple-100">✓</span> : null}
                                 </button>
                               );
                             })}
@@ -1705,7 +1705,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                         </button>
 
                         {isResolutionMenuOpen ? (
-                          <div className="absolute bottom-full left-0 z-30 mb-2 min-w-[188px] overflow-hidden rounded-2xl border border-white/12 bg-[#0d0d12] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.4)]">
+                          <div className="absolute bottom-full left-0 z-30 mb-2 min-w-[188px] overflow-hidden rounded-[1rem] border border-white/12 bg-[#0d0d12]/98 p-1 shadow-[0_18px_40px_rgba(0,0,0,0.4)] backdrop-blur-xl">
                             {SMART_EDIT_RESOLUTION_OPTIONS.map((option) => {
                               const selected = option.value === outputResolution;
                               return (
@@ -1716,12 +1716,12 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                                     setOutputResolution(option.value);
                                     setIsResolutionMenuOpen(false);
                                   }}
-                                  className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs transition ${selected ? 'bg-white text-slate-950' : 'text-white/72 hover:bg-white/[0.08] hover:text-white'}`}
+                                  className={`flex w-full items-center gap-2 rounded-[0.8rem] border px-3 py-2 text-left text-xs transition ${selected ? 'border-purple-300/24 bg-purple-500/16 text-purple-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]' : 'border-transparent text-white/72 hover:bg-white/[0.08] hover:text-white'}`}
                                 >
                                   <span className="w-8 shrink-0 font-medium">{option.label}</span>
                                   <span className="flex-1 opacity-70">{option.description}</span>
                                   <PointsIconLabel points={option.points} className="shrink-0 opacity-70" iconClassName="h-3 w-3" />
-                                  {selected ? <span className="text-[10px]">✓</span> : null}
+                                  {selected ? <span className="text-[10px] text-purple-100">✓</span> : null}
                                 </button>
                               );
                             })}
@@ -1760,7 +1760,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                           </button>
 
                           {isBrushColorMenuOpen ? (
-                            <div className="absolute bottom-full left-0 z-30 mb-2 min-w-[132px] overflow-hidden rounded-2xl border border-white/12 bg-[#0d0d12] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.4)]">
+                            <div className="absolute bottom-full left-0 z-30 mb-2 min-w-[132px] overflow-hidden rounded-[1rem] border border-white/12 bg-[#0d0d12]/98 p-1 shadow-[0_18px_40px_rgba(0,0,0,0.4)] backdrop-blur-xl">
                               {BRUSH_COLOR_OPTIONS.map((option) => {
                                 const selected = option.value === brushColor;
                                 return (
@@ -1771,11 +1771,11 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                                       setBrushColor(option.value);
                                       setIsBrushColorMenuOpen(false);
                                     }}
-                                    className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs transition ${selected ? 'bg-white text-slate-950' : 'text-white/72 hover:bg-white/[0.08] hover:text-white'}`}
+                                    className={`flex w-full items-center gap-2 rounded-[0.8rem] border px-3 py-2 text-left text-xs transition ${selected ? 'border-purple-300/24 bg-purple-500/16 text-purple-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]' : 'border-transparent text-white/72 hover:bg-white/[0.08] hover:text-white'}`}
                                   >
                                     <span className="h-3 w-3 rounded-full" style={{ backgroundColor: option.value }} />
                                     <span className="flex-1">{option.label}</span>
-                                    {selected ? <span className="text-[10px]">✓</span> : null}
+                                    {selected ? <span className="text-[10px] text-purple-100">✓</span> : null}
                                   </button>
                                 );
                               })}

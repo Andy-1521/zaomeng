@@ -290,7 +290,7 @@ function QuickCreateDropdown({
       </button>
 
       {isOpen ? (
-        <div className={`absolute z-[130] ${positionClassName} ${menuWidthClassName} overflow-hidden rounded-2xl border border-white/12 bg-[#0d0d12] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.4)]`}>
+        <div className={`absolute z-[130] ${positionClassName} ${menuWidthClassName} overflow-hidden rounded-[1rem] border border-white/12 bg-[#0d0d12]/98 p-1 shadow-[0_18px_40px_rgba(0,0,0,0.4)] backdrop-blur-xl`}>
           {options.map((option) => {
             const selected = option.value === value;
             return (
@@ -301,11 +301,11 @@ function QuickCreateDropdown({
                   event.stopPropagation();
                   onSelect(option.value);
                 }}
-                className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs transition ${selected ? 'bg-white text-slate-950' : 'text-white/72 hover:bg-white/[0.08] hover:text-white'}`}
+                className={`flex w-full items-center gap-2 rounded-[0.8rem] border px-3 py-2 text-left text-xs transition ${selected ? 'border-purple-300/24 bg-purple-500/16 text-purple-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]' : 'border-transparent text-white/72 hover:bg-white/[0.08] hover:text-white'}`}
               >
                 <span className="min-w-0 flex-1 truncate">{option.label}</span>
                 {option.description ? <span className="shrink-0 text-[11px] opacity-60">{option.description}</span> : null}
-                {selected && showSelectedCheck ? <span className="text-[10px]">✓</span> : null}
+                {selected && showSelectedCheck ? <span className="text-[10px] text-purple-100">✓</span> : null}
               </button>
             );
           })}
@@ -2072,7 +2072,7 @@ export default function QuickCreatePage() {
       )}
 
       {duplicateReview.open && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/68 px-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/68 px-4 backdrop-blur-sm">
           <div className="flex max-h-[86vh] w-full max-w-5xl flex-col rounded-3xl border border-white/12 bg-[#09090b]/96 shadow-2xl">
             <div className="flex items-start justify-between gap-4 border-b border-white/10 px-6 py-5">
               <div>
@@ -2231,7 +2231,7 @@ export default function QuickCreatePage() {
           </button>
         </div>
 
-        <div className="relative z-[90] mb-5 rounded-[1.8rem] border border-white/[0.08] bg-black/28 p-3 shadow-[0_18px_70px_rgba(0,0,0,0.2)] backdrop-blur-2xl ring-1 ring-white/[0.03]">
+        <div className="relative z-10 mb-5 rounded-[1.8rem] border border-white/[0.08] bg-black/28 p-3 shadow-[0_18px_70px_rgba(0,0,0,0.2)] backdrop-blur-2xl ring-1 ring-white/[0.03]">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className={`flex min-w-0 flex-1 items-center gap-2 pb-1 ${libraryView === 'gallery' ? 'overflow-x-auto' : 'overflow-visible'}`}>
               {libraryView === 'gallery' ? (
@@ -2391,8 +2391,10 @@ export default function QuickCreatePage() {
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <label className="hidden items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.045] px-3 py-2 text-xs text-white/52 lg:flex" title={`缩略图大小：${thumbnailSize}px`}>
-              <span className="text-white/38">小</span>
+            <label className="hidden items-center gap-2 rounded-full bg-white/[0.025] px-2.5 py-1.5 text-[11px] text-white/38 transition hover:bg-white/[0.05] hover:text-white/58 lg:flex" title={`缩略图大小：${thumbnailSize}px`}>
+              <svg className="h-3.5 w-3.5 text-white/32" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v4H4zM14 15h6v4h-6z" />
+              </svg>
               <input
                 type="range"
                 min="170"
@@ -2400,9 +2402,8 @@ export default function QuickCreatePage() {
                 step="10"
                 value={thumbnailSize}
                 onChange={(event) => setThumbnailSize(Number(event.target.value))}
-                className="w-28 accent-purple-400"
+                className="zaomeng-subtle-range w-20"
               />
-              <span className="text-white/72">大</span>
             </label>
 
             {libraryView === 'gallery' && duplicateImageCount > 0 && (

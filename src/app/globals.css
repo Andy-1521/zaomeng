@@ -62,6 +62,52 @@ body {
   background: rgba(255, 255, 255, 0.1);
 }
 
+.zaomeng-subtle-range {
+  height: 16px;
+  cursor: pointer;
+  appearance: none;
+  background: transparent;
+  opacity: 0.48;
+  transition: opacity 160ms ease;
+}
+
+.zaomeng-subtle-range:hover,
+.zaomeng-subtle-range:focus-visible {
+  opacity: 0.86;
+}
+
+.zaomeng-subtle-range::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.zaomeng-subtle-range::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -4.5px;
+  appearance: none;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.28);
+}
+
+.zaomeng-subtle-range::-moz-range-track {
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.zaomeng-subtle-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.28);
+}
+
 /* 自动隐藏滚动条样式 */
 .scrollbar-auto-hide {
   scrollbar-width: thin;

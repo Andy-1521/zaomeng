@@ -1375,7 +1375,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
   return (
     <div
-      className="fixed right-5 top-1/2 -translate-y-1/2 z-50"
+      className="fixed right-5 top-1/2 -translate-y-1/2 z-[70]"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
@@ -1456,7 +1456,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                   </button>
 
                   {isToolFilterOpen ? (
-                    <div data-role="task-history-tool-filter-menu" className="absolute left-0 top-full z-40 mt-2 w-[190px] overflow-hidden rounded-2xl border border-white/12 bg-[#0d0d12] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.42)]" role="listbox">
+                    <div data-role="task-history-tool-filter-menu" className="absolute left-0 top-full z-40 mt-2 w-[190px] overflow-hidden rounded-[1rem] border border-white/12 bg-[#0d0d12]/98 p-1 shadow-[0_18px_40px_rgba(0,0,0,0.42)] backdrop-blur-xl" role="listbox">
                       {TASK_FILTER_VALUES.map((filter) => {
                         const selected = filter === filterTab;
                         return (
@@ -1468,12 +1468,12 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                               setFilterTab(filter);
                               setIsToolFilterOpen(false);
                             }}
-                            className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs transition ${selected ? 'bg-white text-slate-950' : 'text-white/72 hover:bg-white/[0.08] hover:text-white'}`}
+                            className={`flex w-full items-center gap-2 rounded-[0.8rem] border px-3 py-2 text-left text-xs transition ${selected ? 'border-purple-300/24 bg-purple-500/16 text-purple-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]' : 'border-transparent text-white/72 hover:bg-white/[0.08] hover:text-white'}`}
                             role="option"
                             aria-selected={selected}
                           >
                             <span className="flex-1 truncate">{getFilterLabel(filter)}</span>
-                            {selected ? <span className="text-[10px]">✓</span> : null}
+                            {selected ? <span className="text-[10px] text-purple-100">✓</span> : null}
                           </button>
                         );
                       })}
