@@ -39,12 +39,12 @@ const PROFILE_TABS: Array<{ key: ProfileTab; label: string }> = [
   { key: 'info', label: '资料' },
   { key: 'security', label: '安全' },
   { key: 'transactions', label: '明细' },
-  { key: 'recharge', label: '充值' },
+  { key: 'recharge', label: '兑换' },
 ];
 
 const TRANSACTION_FILTERS: Array<{ key: TransactionFilter; label: string }> = [
   { key: 'all', label: '全部' },
-  { key: 'recharge', label: '充值' },
+  { key: 'recharge', label: '兑换' },
   { key: 'usage', label: '消费' },
   { key: 'pending', label: '待支付' },
   { key: 'success', label: '成功' },
@@ -656,7 +656,7 @@ export default function ProfilePage() {
                     onClick={() => handleTabChange('recharge')}
                     className="mt-4 rounded-full bg-violet-400 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-300"
                   >
-                    去充值
+                    去兑换
                   </button>
                 </section>
               ) : (

@@ -124,7 +124,7 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
               type="button"
               onClick={() => router.push('/profile?tab=recharge')}
               className="flex items-center gap-1.5 rounded-full border border-yellow-500/25 bg-yellow-500/12 px-2.5 py-1.5 transition-colors hover:bg-yellow-500/18 sm:px-3"
-              title="前往充值中心"
+              title="前往积分兑换"
             >
               <Image src="/points-icon.png" alt="积分" width={16} height={16} className="h-4 w-4" />
               <span className="text-sm text-yellow-300">{user.points}</span>

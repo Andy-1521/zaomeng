@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 PROJECT_ROOT="/home/ubuntu/Downloads/zaomeng/project/projects"
 SERVICE_NAME="zaomeng-web"
-PUBLIC_BASE_URL="http://124.223.26.206"
+PUBLIC_BASE_URL="https://zaomengai.icu"
 
 cd "$PROJECT_ROOT"
 
@@ -31,7 +31,7 @@ echo "[deploy] running browser smoke check"
 pnpm exec node tmp/check-pages.js >/tmp/zaomeng-deploy-check.log
 cat /tmp/zaomeng-deploy-check.log
 
-if grep -E "HTTPERR: (404|500) http://124\.223\.26\.206/_next/static/chunks/" /tmp/zaomeng-deploy-check.log >/dev/null; then
+if grep -E "HTTPERR: (404|500) https://zaomengai\.icu/_next/static/chunks/" /tmp/zaomeng-deploy-check.log >/dev/null; then
   echo "[deploy] chunk validation failed"
   exit 1
 fi

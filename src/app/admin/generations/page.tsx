@@ -1463,13 +1463,13 @@ export default function AdminGenerationsPage() {
               <section className="rounded-2xl border border-white/10 bg-white/[0.05] p-4">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                   <div>
-                    <h2 className="text-lg font-semibold text-white">生成充值兑换码</h2>
-                    <p className="mt-1 text-sm text-white/42">输入充值额度后生成一次性兑换码，用户在个人中心兑换后自动到账。</p>
+                    <h2 className="text-lg font-semibold text-white">生成积分兑换码</h2>
+                    <p className="mt-1 text-sm text-white/42">输入兑换额度后生成一次性兑换码，用户在个人中心兑换后自动到账。</p>
                   </div>
 
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                     <label className="min-w-[180px]">
-                      <span className="mb-1 block text-xs text-white/45">充值额度（元）</span>
+                      <span className="mb-1 block text-xs text-white/45">兑换额度（元）</span>
                       <input
                         type="number"
                         min={1}

@@ -62,18 +62,31 @@ function buildWebsiteConfig(origin: string): WebsiteConfig {
   const url = new URL(origin);
   const currentProtocol = url.protocol === 'https:' ? 'https' : 'http';
   const alternateProtocol = currentProtocol === 'https' ? 'http' : 'https';
-  const authority = `${url.hostname}${url.port ? `:${url.port}` : ''}`;
+  const hostnames = new Set([url.hostname]);
 
-  const primaryOrigin = `${currentProtocol}://${authority}`;
-  const alternateOrigins = Array.from(new Set([primaryOrigin, `${alternateProtocol}://${authority}`]));
+  if (!url.port) {
+    if (url.hostname.startsWith('www.')) {
+      hostnames.add(url.hostname.replace(/^www\./, ''));
+    } else if (!/^(localhost|127\.0\.0\.1|\[::1\])$/.test(url.hostname)) {
+      hostnames.add(`www.${url.hostname}`);
+    }
+  }
+
+  const primaryAuthority = `${url.hostname}${url.port ? `:${url.port}` : ''}`;
+  const primaryOrigin = `${currentProtocol}://${primaryAuthority}`;
+  const alternateOrigins = Array.from(new Set(
+    Array.from(hostnames).flatMap((hostname) => {
+      const authority = `${hostname}${url.port ? `:${url.port}` : ''}`;
+      return [`${currentProtocol}://${authority}`, `${alternateProtocol}://${authority}`];
+    }),
+  ));
   const matchPatterns = alternateOrigins.map((item) => `${item}/*`);
-  const hostnames = Array.from(new Set([url.hostname, url.hostname.replace(/^www\./, '')].filter(Boolean)));
 
   return {
     primaryOrigin,
     alternateOrigins,
     matchPatterns,
-    hostnames,
+    hostnames: Array.from(hostnames),
   };
 }
 
