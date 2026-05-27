@@ -11,6 +11,7 @@ const MAX_CANDIDATES = 4;
 const IDENTIFY_CACHE_TTL_MS = 10 * 60 * 1000;
 const IDENTIFY_CACHE_DISTANCE = 0.015;
 const IMAGE_ASSET_CACHE_TTL_MS = 10 * 60 * 1000;
+const IDENTIFY_MODEL_TIMEOUT_MS = 16000;
 
 function getIdentifyErrorMessage(error?: unknown) {
   if (error instanceof Error && /timeout|超时|ETIMEDOUT|AbortError/i.test(error.message)) {
@@ -66,39 +67,47 @@ async function callVisionModel(
   imageUrls: string[],
   prompt: string
 ): Promise<string> {
-  const response = await fetch(buildOpenAICompatVisionUrl('/chat/completions'), {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: prompt },
-            ...imageUrls.map((url) => ({ type: 'image_url', image_url: { url } })),
-          ],
-        },
-      ],
-      max_tokens: 220,
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), IDENTIFY_MODEL_TIMEOUT_MS);
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`API调用失败: ${response.status} - ${errorText.substring(0, 200)}`);
+  try {
+    const response = await fetch(buildOpenAICompatVisionUrl('/chat/completions'), {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              ...imageUrls.map((url) => ({ type: 'image_url', image_url: { url } })),
+            ],
+          },
+        ],
+        max_tokens: 140,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`API调用失败: ${response.status} - ${errorText.substring(0, 200)}`);
+    }
+
+    const result = await response.json() as {
+      choices?: Array<{
+        message?: { content?: string };
+      }>;
+    };
+
+    return result.choices?.[0]?.message?.content?.trim() || '';
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  const result = await response.json() as {
-    choices?: Array<{
-      message?: { content?: string };
-    }>;
-  };
-
-  return result.choices?.[0]?.message?.content?.trim() || '';
 }
 
 async function fetchImageBuffer(imageUrl: string, request: NextRequest): Promise<{ buffer: Buffer; contentType: string }> {
@@ -163,8 +172,8 @@ async function prepareImageAssets(imageUrl: string, request: NextRequest, forceR
   }
 
   const overviewBuffer = await sharp(normalizedBuffer)
-    .resize(896, 896, { fit: 'inside', withoutEnlargement: true })
-    .jpeg({ quality: 72 })
+    .resize(720, 720, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 66 })
     .toBuffer();
 
   const assets: PreparedImageAssets = {
@@ -202,10 +211,10 @@ async function buildFocusCrop(
     .rotate()
     .extract({ left, top, width: Math.min(cropSize, imageWidth), height: Math.min(cropSize, imageHeight) })
       .resize(outputSize, outputSize, { fit: 'cover', position: 'centre' })
-      .png()
+      .jpeg({ quality: 70 })
       .toBuffer();
 
-  return toDataUrl(cropBuffer, 'image/png');
+  return toDataUrl(cropBuffer, 'image/jpeg');
 }
 
 function cleanLabel(value: string): string {
@@ -417,8 +426,8 @@ export async function POST(request: NextRequest) {
 - 不要返回“所选区域”“点击位置”“图案”“内容”“元素”这类泛化词，除非实在无法识别
 - 如果中心点落在局部小物件上，优先说该小物件，不要说整张图的大类`;
 
-    const focusCropUrl = await buildFocusCrop(prepared.assets.normalizedBuffer, prepared.assets.width, prepared.assets.height, assetClickX, assetClickY, 0.32, 512);
-    const detailCropUrl = await buildFocusCrop(prepared.assets.normalizedBuffer, prepared.assets.width, prepared.assets.height, assetClickX, assetClickY, 0.16, 576);
+    const focusCropUrl = await buildFocusCrop(prepared.assets.normalizedBuffer, prepared.assets.width, prepared.assets.height, assetClickX, assetClickY, 0.3, 384);
+    const detailCropUrl = await buildFocusCrop(prepared.assets.normalizedBuffer, prepared.assets.width, prepared.assets.height, assetClickX, assetClickY, 0.14, 448);
     const fullImageUrl = prepared.assets.overviewUrl;
     const modelResult = await callVisionModel(
       apiKey,

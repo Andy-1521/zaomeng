@@ -16,6 +16,7 @@ export type FilterType = 'all' | TabType;
 type TaskCenterFilter = 'all' | 'processing' | 'success' | 'failed';
 export type TaskStatus = '处理中' | '成功' | '失败' | '超时' | '部分成功';
 type PsdGenerationStatus = 'pending' | 'processing' | 'success' | 'failed';
+const PSD_PROCESSING_STALE_MS = 12 * 60 * 1000;
 
 const TASK_FILTER_VALUES: FilterType[] = ['all', 'color-extraction', 'ai-generate', 'smart-edit', 'watermark', 'custom'];
 
@@ -33,6 +34,7 @@ export interface TaskRecord {
   status?: TaskStatus; // 任务状态
   psdUrl?: string; // PSD文件URL（彩绘提取订单）
   psdGenerationStatus?: PsdGenerationStatus;
+  psdGenerationStartedAt?: number;
   psdPoints?: number;
   aspectRatio?: string; // 图像比例
   imageSize?: string; // 分辨率
@@ -68,6 +70,7 @@ type RequestParamsObject = {
   summary?: string;
   promptSummary?: string;
   psdGenerationStatus?: PsdGenerationStatus;
+  psdGenerationStartedAt?: string | number;
   psdPoints?: number;
   [key: string]: unknown;
 };
@@ -574,6 +577,12 @@ export const forceRefreshCache = (userId?: string) => {
       }
 
       const psdGenerationStatus = params?.psdGenerationStatus;
+      const rawPsdGenerationStartedAt = params?.psdGenerationStartedAt;
+      const psdGenerationStartedAt = typeof rawPsdGenerationStartedAt === 'number'
+        ? rawPsdGenerationStartedAt
+        : typeof rawPsdGenerationStartedAt === 'string'
+          ? new Date(rawPsdGenerationStartedAt).getTime()
+          : undefined;
       const psdPoints = params?.psdPoints;
 
       const isSmartEditOrder = item.toolPage === '智能改图'
@@ -709,6 +718,7 @@ export const forceRefreshCache = (userId?: string) => {
         status,
         psdUrl,
         psdGenerationStatus,
+        psdGenerationStartedAt: Number.isFinite(psdGenerationStartedAt) ? psdGenerationStartedAt : undefined,
         psdPoints,
         aspectRatio,
         imageSize,
@@ -1078,7 +1088,11 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       return;
     }
 
-    if (task.psdGenerationStatus === 'processing') {
+    const psdProcessingIsFresh = task.psdGenerationStatus === 'processing'
+      && task.psdGenerationStartedAt
+      && Date.now() - task.psdGenerationStartedAt <= PSD_PROCESSING_STALE_MS;
+
+    if (psdProcessingIsFresh) {
       showToast('PSD正在生成中，请稍后查看', 'info');
       return;
     }
@@ -1573,9 +1587,12 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                         const statusLabel = getTaskStatusLabel(task);
                         const isSuccessTask = task.status === '成功' || task.status === '部分成功' || !task.status;
                         const isFailedTask = task.status === '失败' || task.status === '超时';
+                        const psdProcessingIsFresh = task.psdGenerationStatus === 'processing'
+                          && task.psdGenerationStartedAt
+                          && Date.now() - task.psdGenerationStartedAt <= PSD_PROCESSING_STALE_MS;
                         const isPsdGenerating = task.orderId
-                          ? generatingPsdOrders.has(task.orderId) || task.psdGenerationStatus === 'processing'
-                          : task.psdGenerationStatus === 'processing';
+                          ? generatingPsdOrders.has(task.orderId) || Boolean(psdProcessingIsFresh)
+                          : Boolean(psdProcessingIsFresh);
                         const psdPoints = task.psdPoints || getGeneratePsdPoints();
 
                         const canDelete = task.status !== '处理中';
@@ -1659,9 +1676,9 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                                         }}
                                         disabled={isPsdGenerating}
                                         className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${task.psdUrl ? 'border-[#31a8ff]/20 bg-[#001e36] text-[#31a8ff] hover:bg-[#001e36]/80' : 'border-violet-300/25 bg-violet-500/15 text-violet-200 hover:bg-violet-500/22'}`}
-                                        title={isPsdGenerating ? 'PSD生成中' : task.psdUrl ? '下载PSD文件' : `点击生成PSD（${formatPointsLabel(psdPoints)}）`}
+                                        title={isPsdGenerating ? 'PSD生成中' : task.psdUrl ? '下载PSD文件' : task.psdGenerationStatus === 'processing' ? '上次生成中断，点击重新生成PSD' : `点击生成PSD（${formatPointsLabel(psdPoints)}）`}
                                       >
-                                        {isPsdGenerating ? '生成中...' : task.psdUrl ? '下载PSD' : (
+                                        {isPsdGenerating ? '生成中...' : task.psdUrl ? '下载PSD' : task.psdGenerationStatus === 'processing' ? '重新生成PSD' : (
                                           <span className="inline-flex items-center gap-1.5">
                                             <span>生成PSD</span>
                                             <span className="text-violet-100/45">·</span>

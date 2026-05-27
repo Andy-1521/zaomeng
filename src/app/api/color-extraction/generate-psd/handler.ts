@@ -8,6 +8,7 @@ import { getGeneratePsdPoints } from '@/lib/pricing';
 type ParsedRecord = Record<string, unknown>;
 
 const PSD_POINTS = getGeneratePsdPoints();
+const PSD_PROCESSING_STALE_MS = 12 * 60 * 1000;
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && /timeout|超时|ETIMEDOUT|AbortError/i.test(error.message)) {
@@ -52,6 +53,15 @@ function parseRecord(value: unknown): ParsedRecord | null {
 function getPsdGenerationStatus(record: ParsedRecord | null) {
   const status = record?.psdGenerationStatus;
   return status === 'processing' || status === 'success' || status === 'failed' || status === 'pending' ? status : null;
+}
+
+function getTimestamp(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 function extractImageUrls(value: unknown): string[] {
@@ -145,6 +155,9 @@ export async function POST(request: NextRequest) {
     const requestParams = parseRecord(transaction.requestParams);
     const extractionMode = getString(requestParams?.actualExtractionMode) || getString(requestParams?.extractionMode);
     const psdGenerationStatus = getPsdGenerationStatus(requestParams);
+    const psdGenerationStartedAt = getTimestamp(requestParams?.psdGenerationStartedAt);
+    const isStaleProcessing = psdGenerationStatus === 'processing'
+      && (!psdGenerationStartedAt || Date.now() - psdGenerationStartedAt > PSD_PROCESSING_STALE_MS);
     const psdPoints = typeof requestParams?.psdPoints === 'number' && requestParams.psdPoints > 0 ? requestParams.psdPoints : PSD_POINTS;
     const psdPointsCharged = requestParams?.psdPointsCharged === true;
     const resultImages = extractImageUrls(transaction.resultData);
@@ -171,7 +184,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, message: 'PSD已存在', data: { psdUrl: transaction.psdUrl } });
     }
 
-    if (psdGenerationStatus === 'processing') {
+    if (psdGenerationStatus === 'processing' && !isStaleProcessing) {
       return NextResponse.json({ success: false, error: 'PSD正在生成中，请稍后再试' }, { status: 409 });
     }
 
@@ -181,6 +194,7 @@ export async function POST(request: NextRequest) {
 
     let chargedForPsd = psdPointsCharged;
     let remainingPoints = transaction.remainingPoints;
+    const shouldRefundStalePsdChargeOnFailure = psdPointsCharged && isStaleProcessing;
 
     if (!psdPointsCharged) {
       const user = await userManager.getUserById(transaction.userId);
@@ -212,13 +226,15 @@ export async function POST(request: NextRequest) {
         ...requestParams,
         psdPoints,
         psdGenerationStatus: 'processing',
+        psdGenerationStartedAt: new Date().toISOString(),
+        psdGenerationError: undefined,
         psdPointsCharged: chargedForPsd,
       }),
     });
 
     const psdResult = await processRunningHubLayeringAndPsd(layeringImageUrl, orderNumber, additionalImageUrl);
     if (!psdResult.psdUrl) {
-      const refundedUser = chargedForPsd && !psdPointsCharged
+      const refundedUser = chargedForPsd && (!psdPointsCharged || shouldRefundStalePsdChargeOnFailure)
         ? await userManager.addPointsAtomically(transaction.userId, psdPoints)
         : null;
       chargedByThisRequest = false;
@@ -230,6 +246,7 @@ export async function POST(request: NextRequest) {
           ...requestParams,
           psdPoints,
           psdGenerationStatus: 'failed',
+          psdGenerationStartedAt: undefined,
           psdPointsCharged: false,
           psdGenerationError: psdResult.error || 'PSD生成失败',
         }),
@@ -246,6 +263,7 @@ export async function POST(request: NextRequest) {
         ...requestParams,
         psdPoints,
         psdGenerationStatus: 'success',
+        psdGenerationStartedAt: undefined,
         psdPointsCharged: true,
         psdGeneratedAt: new Date().toISOString(),
       }),

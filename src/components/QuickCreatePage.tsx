@@ -2688,7 +2688,7 @@ export default function QuickCreatePage() {
           syncPoints(data.data.remainingPoints);
         }
         dispatchTaskHistoryUpdated();
-        void loadCapturedImages();
+        void loadOrderResults();
       } catch (error) {
         console.error('[素材库] AI生图执行失败:', error);
         updateTaskRecordStatus(tempOrderId, '失败');
@@ -2696,7 +2696,7 @@ export default function QuickCreatePage() {
         showToast(toUserFacingErrorFromUnknown(error, '暂时未能完成处理，请稍后重试'), 'error');
       }
     })();
-  }, [dispatchTaskHistoryUpdated, loadCapturedImages, syncPoints, user?.id]);
+  }, [dispatchTaskHistoryUpdated, loadOrderResults, syncPoints, user?.id]);
 
   const handleRunAction = useCallback(async (actionId: GalleryActionId) => {
     if (!ensureUserReady()) return;
@@ -3155,7 +3155,6 @@ export default function QuickCreatePage() {
         return;
       }
 
-      const containerRect = container.getBoundingClientRect();
       const bounds = selectedRects.reduce(
         (acc, rect) => ({
           left: Math.min(acc.left, rect.left),
@@ -3171,8 +3170,19 @@ export default function QuickCreatePage() {
         }
       );
 
-      const centerX = (bounds.left + bounds.right) / 2 - containerRect.left;
-      const top = bounds.bottom - containerRect.top + 16;
+      const preferredCenterX = (bounds.left + bounds.right) / 2;
+      const expectedPanelWidth = Math.min(
+        window.innerWidth - 24,
+        showAiPromptPanel ? 760 : 500
+      );
+      const minCenterX = expectedPanelWidth / 2 + 12;
+      const maxCenterX = window.innerWidth - expectedPanelWidth / 2 - 12;
+      const clampedCenterX = Math.min(Math.max(preferredCenterX, minCenterX), Math.max(minCenterX, maxCenterX));
+      const expectedPanelHeight = showAiPromptPanel ? 520 : 220;
+      const preferredTop = bounds.bottom + 16;
+      const maxTop = Math.max(12, window.innerHeight - expectedPanelHeight - 12);
+      const top = Math.min(Math.max(preferredTop, 12), maxTop);
+      const centerX = clampedCenterX;
       setActionBarPosition({ left: centerX, top });
     };
 
@@ -3184,7 +3194,7 @@ export default function QuickCreatePage() {
       window.removeEventListener('resize', updateActionBarPosition);
       window.removeEventListener('scroll', updateActionBarPosition, true);
     };
-  }, [isCompactActionBar, selectedImageList]);
+  }, [isCompactActionBar, selectedImageList, showAiPromptPanel]);
 
   return (
     <div className={`flex-1 px-6 py-8 overflow-y-auto ${isCompactActionBar && selectedImageList.length > 0 ? 'pb-40' : ''}`}>
@@ -3985,9 +3995,9 @@ export default function QuickCreatePage() {
         {selectedImageList.length > 0 && (actionBarPosition || isCompactActionBar) && (
           <div
             data-role="selection-action-bar"
-            className={`pointer-events-none transition-all duration-150 ${isCompactActionBar ? 'fixed inset-x-3 bottom-4 z-40' : 'absolute z-30'}`}
+            className={`pointer-events-none transition-all duration-150 ${isCompactActionBar ? 'fixed inset-x-3 bottom-4 z-40' : 'fixed z-40'}`}
             style={isCompactActionBar || !actionBarPosition ? undefined : {
-              top: actionBarPosition.top + 6,
+              top: actionBarPosition.top,
               left: actionBarPosition.left,
               transform: 'translateX(-50%)',
             }}
@@ -3995,7 +4005,7 @@ export default function QuickCreatePage() {
             {!isCompactActionBar && (
               <div className="pointer-events-none absolute left-1/2 top-0 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[3px] border-l border-t border-white/12 bg-black/78 backdrop-blur-2xl" />
             )}
-            <div className={`pointer-events-auto rounded-[1.7rem] border border-white/12 bg-black/82 backdrop-blur-2xl shadow-[0_18px_44px_rgba(0,0,0,0.42),0_6px_20px_rgba(88,28,135,0.2)] ring-1 ring-white/5 transition-all ${isCompactActionBar ? 'max-h-[72vh] w-full overflow-y-auto px-3 py-3' : `max-w-[92vw] px-4 py-4 ${showAiPromptPanel ? 'min-w-[760px]' : 'min-w-[500px]'}`}`}>
+            <div className={`pointer-events-auto rounded-[1.7rem] border border-white/12 bg-black/82 backdrop-blur-2xl shadow-[0_18px_44px_rgba(0,0,0,0.42),0_6px_20px_rgba(88,28,135,0.2)] ring-1 ring-white/5 transition-all ${isCompactActionBar ? 'max-h-[72vh] w-full overflow-y-auto px-3 py-3' : `max-w-[calc(100vw-24px)] px-4 py-4 ${showAiPromptPanel ? 'w-[min(760px,calc(100vw-24px))]' : 'w-[min(500px,calc(100vw-24px))]'}`}`}>
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <span className="whitespace-nowrap rounded-full border border-white/[0.08] bg-white/[0.045] px-3 py-1.5 text-xs font-medium text-white/62">已选 {selectedImageList.length} 张</span>
                 {processingActionLabel && (
@@ -4078,6 +4088,11 @@ export default function QuickCreatePage() {
                     <textarea
                       value={aiPrompt}
                       onChange={(event) => setAiPrompt(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+                        event.preventDefault();
+                        void submitAiGenerate();
+                      }}
                       placeholder="请输入 AI 生图提示词"
                       className="w-full min-h-[108px] rounded-2xl border border-white/12 bg-white/6 px-4 py-3 pb-14 text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/35"
                     />

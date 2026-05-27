@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import sharp from 'sharp';
-import { capturedImageManager, transactionManager, userManager } from '@/storage/database';
+import { transactionManager, userManager } from '@/storage/database';
 import { uploadToCozeStorage } from '@/lib/dualStorage';
 import { isImageEditTimeoutError, runPsydoImageEditFromUrl } from '@/lib/psydoImageEdits';
 import { getAiGeneratePoints } from '@/lib/pricing';
@@ -182,27 +182,10 @@ export async function POST(request: NextRequest) {
       resultData: uploadedUrl,
     });
 
-    let recordId = '';
-    try {
-      const record = await capturedImageManager.createCapturedImage({
-        userId,
-        imageUrl: uploadedUrl,
-        originalUrl: imageUrl,
-        pageUrl: null,
-        pageTitle: 'AI生图生成',
-        sourceHost: 'image-to-image',
-        imageType: 'edited',
-      });
-      recordId = record.id;
-    } catch (recordError) {
-      console.warn('[AI生图] 素材记录创建失败，订单结果已保留:', recordError);
-    }
-
     return NextResponse.json({
       success: true,
       data: {
         orderId,
-        id: recordId,
         url: uploadedUrl,
         remainingPoints: chargedUser.points,
       },

@@ -859,12 +859,7 @@ async function completeSmartEditRedrawInBackground(params: {
     });
     logStep('update-order-success');
 
-    try {
-      await createMaterialRecord(userId, editedUrl, 'redraw');
-      logStep('create-material-record');
-    } catch (recordError) {
-      console.warn('[MaterialEditor] smart-edit-material-record-failed', { orderNumber, error: recordError });
-    }
+    logStep('skip-material-record', { reason: 'order-result-only' });
   } catch (error) {
     console.error('[MaterialEditor] smart-edit-background-failed', { orderNumber, totalMs: Date.now() - startedAt, error });
     let refundedPoints: number | undefined;

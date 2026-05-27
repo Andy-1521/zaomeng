@@ -1299,7 +1299,7 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
       return;
     }
 
-    const promptText = instruction.trim();
+    const promptText = (promptEditorRef.current?.innerText || instruction).replace(/\u00a0/g, ' ').trim();
     if (!promptText) {
       setSubmitError(activeTool === 'tag' && hasTagRegions ? '请先选择标记，并补充前后文案' : '请先填写你希望如何修改该区域');
       return;
@@ -1644,6 +1644,13 @@ export default function LocalEditPanel({ imageUrl, onClose, onComplete }: Props)
                     contentEditable
                     suppressContentEditableWarning
                     onInput={handlePromptEditorInput}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+                      event.preventDefault();
+                      saveEditorSelection();
+                      syncPromptFromEditor();
+                      void handleSubmit();
+                    }}
                     onKeyUp={saveEditorSelection}
                     onMouseUp={saveEditorSelection}
                     onBlur={saveEditorSelection}
