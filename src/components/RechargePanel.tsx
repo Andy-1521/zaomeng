@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import Image from 'next/image';
 import { showToast } from '@/lib/toast';
 import { toUserFacingErrorMessage } from '@/lib/userFacingError';
 
@@ -60,24 +59,11 @@ export default function RechargePanel({ onRechargeUpdated }: RechargePanelProps)
 
         <div className="mx-4 h-px bg-violet-300/10" />
 
-        <div className="grid gap-4 px-4 py-4 sm:grid-cols-[160px_1fr]">
-          <div className="rounded-2xl border border-white/12 bg-white p-2">
-            <Image
-              src="/assets/recharge-admin-wechat.jpg"
-              alt="管理员微信二维码"
-              width={320}
-              height={320}
-              className="aspect-square w-full rounded-xl object-cover"
-              priority={false}
-            />
-          </div>
-
-          <div className="flex min-w-0 flex-col justify-center gap-3">
-            <div>
-              <p className="text-sm text-white/42">管理员微信</p>
-              <p className="mt-1 text-lg font-semibold text-white">Kzai-1224</p>
-            </div>
-            <p className="text-sm leading-6 text-white/48">添加管理员后说明需要兑换的积分额度，管理员确认后会给你一串兑换码。</p>
+        <div className="px-4 py-4">
+          <div className="flex min-w-0 flex-col gap-3 rounded-2xl border border-white/10 bg-black/18 px-4 py-4">
+            <p className="text-sm text-white/42">管理员微信</p>
+            <p className="text-lg font-semibold text-white">Kzai-1224</p>
+            <p className="text-sm leading-6 text-white/48">联系管理员并说明需要兑换的积分额度，确认后会给你一串兑换码。</p>
             <div className="rounded-2xl border border-amber-300/18 bg-amber-400/[0.08] px-3 py-2 text-sm text-amber-100">
               兑换码只可使用一次，请勿转发给他人。
             </div>

@@ -41,6 +41,29 @@
 - OSS 图片首次读取偶发失败时前端会自动短间隔重试，不应立刻显示“图片不可用”。
 - 上传刷新中断后，前端会用 sessionStorage 记录未完成 OSS key，并在重新进入页面后尝试补完成入库。
 
+## 页面加载和同步逻辑
+
+`/home` 的主界面由 `src/components/QuickCreatePage.tsx` 驱动，当前页面加载分为三条并行链路：
+
+- 用户信息：`UserContext` 调 `/api/auth/refresh` 和 `/api/user/profile` 保持顶部头像、积分和管理员状态同步。
+- 图库列表：进入图库视图时调用 `/api/plugin/captured-images`，按 `scope`、日期、文件夹和分页 `limit/offset` 加载；初次加载显示“素材加载中”，后续“加载更多”只追加新页，不清空已加载内容。
+- 订单结果：进入订单视图或任务状态变化时调用 `/api/task/orders` / `/api/user/transactions` 相关链路刷新订单卡片；右侧 `TaskHistory` 展开时也会主动拉取数据库记录。
+
+图库显示方案：
+
+- 图片实际存储在阿里云 OSS，数据库 `captured_images` 只保存签名 URL、来源、分组、收藏和时间等元数据。
+- 前端先按瀑布流尺寸渲染缩略图，图片加载失败时会用短间隔重试；不要把首次 OSS 慢响应直接当成素材失败。
+- 缩略图大小由本地 `material-library:thumbnail-size` 保存，页面刷新后沿用用户上次选择。
+- 上传和插件采集成功后，后端返回完整 `material`，前端用 `prependUploadedMaterials` 立即插入当前图库；之后的列表刷新只负责校准总数和排序。
+- 订单记录里的 88px 小图不直接拉 OSS 原图，走 `/api/image/thumbnail-url` 生成带 OSS 图片处理参数的签名小图，减少订单面板加载体积。
+
+上传/采集状态方案：
+
+- 本地上传先压缩大图但不改变像素尺寸，再优先走 `/api/upload/oss-policy` 浏览器直传 OSS，最后调 `/api/upload/complete-material` 入库。
+- 插件采图优先由插件直传 OSS，再调 `/api/plugin/complete-capture` 入库；跨站限制下才走 `/api/plugin/capture-image` 服务端兼容保存。
+- 上传过程中会在图库位置显示占位卡片，状态包括准备中、上传中、已上传、写入图库、恢复中、失败。
+- 页面刷新或关闭导致直传完成但入库未确认时，sessionStorage 会记录未完成 OSS key；重新进入页面后自动调用完成入库，用户也可以点击“重试入库”。
+
 ## 目录交接
 
 `/Users/andy/Documents/zaomeng/zaomeng` 是本地造梦项目交接根目录。生产服务器只运行 `/home/ubuntu/zaomeng`。
@@ -80,6 +103,8 @@
 - `/profile?tab=recharge`：积分兑换码入口
 - `/plugin`：浏览器采图插件下载页
 - `/admin/generations`：管理员订单/生成记录、用户管理、兑换码后台
+- `/terms`：用户服务协议
+- `/privacy`：隐私政策
 
 首页已收敛为“素材库 + 选图后加工 + 右侧任务中心”的单入口工作流。不要恢复旧的多页面工具导航模式。
 
@@ -153,6 +178,19 @@ PSD 当前要点：
 - PSD 生成单独收积分
 - PSD 失败只退 PSD 的积分，不影响已成功的彩绘结果
 - 镂空模式会保存 `psdAdditionalImageUrl` 给后续 PSD 使用
+
+## 智能改图流程
+
+智能改图是“前端选图和标记 + 后端 prompt agent + 图像编辑模型 + OSS 持久化 + 订单记录”的链路：
+
+- 前端入口在 `src/components/LocalEditPanel.tsx` 和 `src/components/QuickCreatePage.tsx`，用户从图库或订单结果中选择 1 张图进入智能改图。
+- 标记识别入口是 `POST /api/smart-edit/identify`，实现位于 `src/app/api/smart-edit/identify/handler.ts`。前端保留预识别 `prewarm`，实际识别会发送更小的 JPEG 裁切图，当前超时控制为 16 秒。
+- prompt 组合入口是 `POST /api/material-editor/compose-prompt`，核心逻辑在 `src/lib/materialEditorPrompt.ts`。Prompt Agent 失败时直接失败，不返回模板提示词。
+- 正式提交入口是 `POST /api/material-editor`，智能改图会创建订单、记录 requestParams、预扣积分，然后后台执行编辑任务。
+- 后台任务调用 `composePromptFromImage` 形成最终提示词，再通过 `src/lib/psydoImageEdits.ts` 调主图像编辑接口；当前没有备用模型目标。
+- 编辑结果下载成 buffer 后上传阿里云 OSS，订单 `resultData` 保存最终 OSS URL。AI 生图和智能改图结果只进入订单记录，不自动写入图库。
+- 成功后通过 `taskHistoryUpdated` 和订单轮询刷新右侧任务中心；失败、超时、上传失败或结果缺失时，订单标记失败并按预扣规则退款。
+- 当前 mask 仍以 base64 JSON 提交，Nginx 已放宽 `/api/material-editor` 请求体；长期建议改 multipart 或先上传 mask 到 OSS。
 
 ## 关键代码索引
 
@@ -407,10 +445,18 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 ## 充值和兑换码
 
 - 自动微信/支付宝支付暂时隐藏，相关 API 代码保留但前端不暴露给普通用户。
-- 用户充值路径是 `/profile?tab=recharge`，页面展示管理员微信 `Kzai-1224` 和二维码。
+- 用户充值路径是 `/profile?tab=recharge`，页面只展示管理员微信 `Kzai-1224`，不展示管理员二维码。
 - 管理员路径是 `/admin/generations`，进入“兑换码”标签后输入充值额度生成一次性兑换码。
 - 兑换成功后用户积分立即到账，管理员记录中会显示已兑换、兑换用户和兑换时间。
 - 生图记录接口会排除 `积分充值` 交易，充值记录只在兑换码/用户交易里看，不混进生成记录。
+
+## 合规页面
+
+- 用户服务协议页面：`/terms`，说明服务内容、账号规则、用户内容、积分兑换、插件使用、责任限制和联系方式。
+- 隐私政策页面：`/privacy`，说明账号信息、素材和创作信息、积分记录、插件采图、Cookie、本地存储、第三方处理和数据删除方式。
+- 登录/注册页会显示“登录/注册即表示同意用户服务协议和隐私政策”。
+- 个人中心底部保留协议和隐私政策入口。
+- 当前没有正式企业主体和自动支付主体时，不要在文档里编造公司名称、客服电话或商户信息；后续主体确定后再更新协议文本。
 
 ## 插件版本和下载
 

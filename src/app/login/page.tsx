@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useUser } from '@/contexts/UserContext';
 import { showToast } from '@/lib/toast';
@@ -543,6 +544,19 @@ export default function AuthPage() {
             >
               {loading ? '处理中...' : (mode === 'login' ? '登录' : mode === 'register' ? '注册' : '重置密码')}
             </button>
+
+            {mode !== 'reset' && (
+              <p className="text-center text-xs leading-5 text-neutral-500">
+                {mode === 'login' ? '登录' : '注册'}即表示你已阅读并同意
+                <Link href="/terms" className="mx-1 text-purple-300 transition-colors hover:text-purple-200">
+                  用户服务协议
+                </Link>
+                和
+                <Link href="/privacy" className="ml-1 text-purple-300 transition-colors hover:text-purple-200">
+                  隐私政策
+                </Link>
+              </p>
+            )}
           </form>
 
           {/* 底部提示 */}

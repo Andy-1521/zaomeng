@@ -2,6 +2,7 @@
 
 import { useState, useEffect, type ChangeEvent, type ReactNode } from 'react';
 import Image, { type ImageLoaderProps, type ImageProps } from 'next/image';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 import PointsIconLabel from '@/components/PointsIconLabel';
@@ -718,6 +719,12 @@ export default function ProfilePage() {
               )}
             </div>
           )}
+
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2 text-xs text-white/32">
+            <Link href="/terms" className="transition hover:text-white/70">用户服务协议</Link>
+            <span>/</span>
+            <Link href="/privacy" className="transition hover:text-white/70">隐私政策</Link>
+          </div>
         </main>
       </div>
     </div>

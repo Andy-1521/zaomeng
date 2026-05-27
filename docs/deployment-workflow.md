@@ -22,6 +22,17 @@
 - 插件因网页跨站限制无法直读图片时，可走 `/api/plugin/capture-image` 服务端兼容保存，但最终仍必须上传 OSS 并保存 OSS URL。
 - 生产服务器不应承担素材持久化，不应把新图库文件写进 `public/` 当作正式存储。
 - 上传或插件采集成功后，页面必须立即插入返回的素材记录；列表刷新只用于校准。
+- 图库页面通过 `/api/plugin/captured-images` 分页加载，上传中显示占位卡片；刷新中断后会根据 sessionStorage 中的 OSS key 自动补完成入库。
+- 订单记录缩略图通过 `/api/image/thumbnail-url` 获取 OSS 处理后的小图签名 URL，不应直接加载原始大图。
+
+## 智能改图主链路
+
+- 前端入口在 `/home` 的智能改图面板，相关组件是 `QuickCreatePage.tsx` 和 `LocalEditPanel.tsx`。
+- 标记识别调用 `/api/smart-edit/identify`，保留预识别 `prewarm`，实际识别发送压缩裁切图。
+- prompt 组合由 `/api/material-editor/compose-prompt` 和 `src/lib/materialEditorPrompt.ts` 处理。
+- 正式生成调用 `/api/material-editor`，后端创建订单、预扣积分、调用图像编辑主接口、上传结果到 OSS，再把结果 URL 写回订单。
+- AI 生图和智能改图结果只显示在订单记录，不自动加入图库。
+- 失败、超时、上传失败或结果缺失时，订单失败并按积分规则退款。
 
 ## 标准步骤
 
@@ -61,8 +72,16 @@
 
 - 自动微信/支付宝支付暂时隐藏。
 - 用户在 `/profile?tab=recharge` 联系管理员微信 `Kzai-1224` 获取一次性兑换码。
+- 用户侧不展示管理员二维码。
 - 管理员在 `/admin/generations` 的“兑换码”标签输入充值额度生成兑换码。
 - 兑换码只能使用一次，后台记录会显示生成额度、积分、生成者、兑换用户和兑换时间。
+
+## 合规入口
+
+- `/terms` 为用户服务协议。
+- `/privacy` 为隐私政策。
+- 登录/注册页展示同意提示，个人中心底部提供协议入口。
+- 如后续补齐企业主体、客服邮箱、自动支付主体或支付服务商信息，必须同步更新协议和隐私政策。
 
 ## 禁止事项
 
