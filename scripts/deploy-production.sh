@@ -39,7 +39,6 @@ git diff --check
 
 echo "[deploy] create remote release: ${REMOTE_RELEASE}"
 ssh_cmd "mkdir -p '$REMOTE_RELEASE'"
-printf '%s\n' "$SHA" | ssh_cmd "cat > '${REMOTE_RELEASE}/.deploy-sha'"
 
 echo "[deploy] sync source"
 rsync -az --delete \
@@ -58,6 +57,7 @@ rsync -az --delete \
   --exclude "public/avatars/" \
   -e "ssh -i $SSH_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
   ./ "${REMOTE_HOST}:${REMOTE_RELEASE}/"
+printf '%s\n' "$SHA" | ssh_cmd "cat > '${REMOTE_RELEASE}/.deploy-sha'"
 
 echo "[deploy] build remote release"
 ssh_cmd "set -Eeuo pipefail
