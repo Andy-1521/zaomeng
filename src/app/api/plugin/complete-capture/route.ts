@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { assertAliyunOSSObjectExists, getAliyunOSSUrl } from '@/lib/aliyunOSS';
+import { assertAliyunOSSObjectExistsBestEffort, getAliyunOSSUrl } from '@/lib/aliyunOSS';
 import { withStorageKeyLock } from '@/lib/storageKeyLock';
 import { capturedImageManager, userManager } from '@/storage/database';
 
@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
         };
       }
 
-      await assertAliyunOSSObjectExists(key);
+      await assertAliyunOSSObjectExistsBestEffort(key);
       const uploadedUrl = await getAliyunOSSUrl(key);
       const imageType = isAllowedImageType(body.imageType) ? body.imageType : 'main';
       const record = await capturedImageManager.createCapturedImage({

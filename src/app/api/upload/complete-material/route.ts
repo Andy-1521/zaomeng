@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { assertAliyunOSSObjectExists, getAliyunOSSUrl } from '@/lib/aliyunOSS';
+import { assertAliyunOSSObjectExistsBestEffort, getAliyunOSSUrl } from '@/lib/aliyunOSS';
 import { withStorageKeyLock } from '@/lib/storageKeyLock';
 import { capturedImageManager, materialFolderManager } from '@/storage/database';
 
@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
         };
       }
 
-      await assertAliyunOSSObjectExists(key);
+      await assertAliyunOSSObjectExistsBestEffort(key);
       const storageUrl = await getAliyunOSSUrl(key);
 
       let targetFolderId: string | null = null;

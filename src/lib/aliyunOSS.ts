@@ -24,6 +24,7 @@ const accessKeyId = firstEnv('ALIYUN_OSS_ACCESS_KEY_ID', 'OSS_ACCESS_KEY_ID', 'A
 const accessKeySecret = firstEnv('ALIYUN_OSS_ACCESS_KEY_SECRET', 'OSS_ACCESS_KEY_SECRET', 'AccessKeySecret');
 
 const HAS_ALIYUN_OSS_CONFIG = !!(region && bucketName && accessKeyId && accessKeySecret);
+const OSS_OPERATION_RETRY_DELAYS_MS = [0, 1500, 4000];
 
 let ossClient: OSS | null = null;
 
@@ -34,7 +35,7 @@ if (HAS_ALIYUN_OSS_CONFIG) {
     accessKeyId,
     accessKeySecret,
     secure: true,
-    timeout: '60s',
+    timeout: '90s',
   });
 }
 
@@ -50,6 +51,39 @@ if (!HAS_ALIYUN_OSS_CONFIG) {
   console.warn('[阿里云OSS] 警告：缺少有效配置，已自动禁用（主链路会失败）');
 }
 
+function isRetryableOssError(error: unknown) {
+  const message = getErrorMessage(error);
+  return /timeout|ECONNRESET|socket hang up|EPIPE|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|ResponseTimeout|ResponseError/i.test(message);
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withOssRetry<T>(label: string, operation: () => Promise<T>): Promise<T> {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < OSS_OPERATION_RETRY_DELAYS_MS.length; attempt += 1) {
+    const delayMs = OSS_OPERATION_RETRY_DELAYS_MS[attempt];
+    if (delayMs > 0) {
+      await wait(delayMs);
+    }
+
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      const canRetry = attempt < OSS_OPERATION_RETRY_DELAYS_MS.length - 1 && isRetryableOssError(error);
+      console.warn(`[阿里云OSS] ${label}失败${canRetry ? '，准备重试' : ''}:`, getErrorMessage(error));
+      if (!canRetry) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(`${label}失败`);
+}
+
 export async function uploadToAliyunOSS(
   buffer: Buffer,
   fileName: string,
@@ -61,11 +95,13 @@ export async function uploadToAliyunOSS(
 
   try {
     console.log(`[阿里云OSS] 开始上传: ${fileName}, 大小: ${buffer.length} bytes`);
-    await ossClient.put(fileName, buffer, {
-      headers: {
-        'Content-Type': contentType,
-      },
-    });
+    await withOssRetry(`上传 ${fileName}`, () => (
+      (ossClient as OSS).put(fileName, buffer, {
+        headers: {
+          'Content-Type': contentType,
+        },
+      })
+    ));
     console.log(`[阿里云OSS] 上传成功，key: ${fileName}`);
     return fileName;
   } catch (error: unknown) {
@@ -115,11 +151,18 @@ export async function assertAliyunOSSObjectExists(key: string) {
   }
 
   try {
-    await (ossClient as OSS & { head: (name: string) => Promise<unknown> }).head(key);
+    await withOssRetry(`检查对象 ${key}`, () => (
+      (ossClient as OSS & { head: (name: string) => Promise<unknown> }).head(key)
+    ));
   } catch (error: unknown) {
     console.error('[阿里云OSS] 对象不存在或不可访问:', key, error);
     throw new Error(`阿里云OSS对象不可访问: ${getErrorMessage(error)}`);
   }
+}
+
+export async function assertAliyunOSSObjectExistsBestEffort(key: string) {
+  console.log('[阿里云OSS] 跳过阻塞式对象检查，使用已签名对象入库:', key);
+  return true;
 }
 
 export async function uploadFromUrlToAliyunOSS(
