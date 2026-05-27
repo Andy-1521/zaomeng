@@ -95,8 +95,17 @@ ssh_cmd "set -Eeuo pipefail
   curl -fsSI 'http://127.0.0.1:5000/home' >/dev/null"
 
 echo "[deploy] public smoke"
-curl -fsSI "${PUBLIC_BASE_URL}/login" >/dev/null
-curl -fsS "${PUBLIC_BASE_URL}/api/plugin/version" >/dev/null
+for attempt in 1 2 3 4 5 6; do
+  if curl --connect-timeout 10 -fsSI "${PUBLIC_BASE_URL}/login" >/dev/null \
+    && curl --connect-timeout 10 -fsS "${PUBLIC_BASE_URL}/api/plugin/version" >/dev/null; then
+    break
+  fi
+  if [ "$attempt" = 6 ]; then
+    echo "[deploy] public smoke failed after retries" >&2
+    exit 1
+  fi
+  sleep 5
+done
 
 echo "[deploy] prune old remote releases"
 ssh_cmd "set -Eeuo pipefail
