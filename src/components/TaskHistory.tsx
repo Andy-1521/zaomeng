@@ -16,6 +16,9 @@ export type FilterType = 'all' | TabType;
 type TaskCenterFilter = 'all' | 'processing' | 'success' | 'failed';
 export type TaskStatus = '处理中' | '成功' | '失败' | '超时' | '部分成功';
 type PsdGenerationStatus = 'pending' | 'processing' | 'success' | 'failed';
+type TaskHistoryUpdatedEventDetail = {
+  highlight?: boolean;
+};
 const PSD_PROCESSING_STALE_MS = 12 * 60 * 1000;
 
 const TASK_FILTER_VALUES: FilterType[] = ['all', 'color-extraction', 'ai-generate', 'smart-edit', 'watermark'];
@@ -914,9 +917,10 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       void loadTasks();
     };
 
-    const handleTaskHistoryUpdate = () => {
+    const handleTaskHistoryUpdate = (event: Event) => {
+      const shouldHighlight = !(event instanceof CustomEvent && (event.detail as TaskHistoryUpdatedEventDetail | undefined)?.highlight === false);
       const latestTask = getTaskCache(userId)[0];
-      if (latestTask?.id) {
+      if (shouldHighlight && latestTask?.id) {
         setIsCollapsed(false);
         setHighlightTaskId(latestTask.id);
       }
@@ -1070,6 +1074,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
     try {
       showToast('正在下载图片...', 'info');
+      let successCount = 0;
 
       for (let i = 0; i < imagesToDownload.length; i++) {
         const url = imagesToDownload[i];
@@ -1078,17 +1083,30 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
         }
 
         await new Promise(resolve => setTimeout(resolve, i * 200));
-        const response = await fetch(url);
+        const fileName = `image-${task.orderId || task.id}-${i + 1}.png`;
+        const downloadUrl = `/api/image/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fileName)}`;
+        const response = await fetch(downloadUrl, { credentials: 'include' });
+        if (!response.ok) {
+          throw new Error(`下载失败: ${response.status}`);
+        }
         const blob = await response.blob();
         const blobUrl = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = blobUrl;
-        link.download = `image-${task.orderId || task.id}-${i + 1}.png`;
+        link.download = fileName;
+        document.body.appendChild(link);
         link.click();
+        link.remove();
         window.URL.revokeObjectURL(blobUrl);
+        successCount += 1;
       }
 
-      showToast('图片下载成功', 'success');
+      if (successCount === 0) {
+        showToast('没有可下载的图片', 'error');
+        return;
+      }
+
+      showToast(successCount === 1 ? '图片下载成功' : `已下载 ${successCount} 张图片`, 'success');
     } catch (error) {
       console.error('下载图片失败:', error);
       showToast('下载失败，请重试', 'error');
@@ -1342,7 +1360,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
         // 【关键修复】触发 taskHistoryUpdated 事件，通知其他组件（如彩绘提取页面）刷新订单记录
         debugTaskHistory('[TaskHistory] 清空历史记录成功，触发 taskHistoryUpdated 事件');
-        window.dispatchEvent(new Event('taskHistoryUpdated'));
+        window.dispatchEvent(new CustomEvent<TaskHistoryUpdatedEventDetail>('taskHistoryUpdated', { detail: { highlight: false } }));
 
         // 显示成功提示
         showToast(`成功清空 ${result.data?.deletedCount || 0} 条历史记录`, 'success');
@@ -1373,7 +1391,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
         // 【关键修复】触发 taskHistoryUpdated 事件，通知其他组件（如彩绘提取页面）刷新订单记录
         debugTaskHistory('[TaskHistory] 清空筛选历史记录成功，触发 taskHistoryUpdated 事件');
-        window.dispatchEvent(new Event('taskHistoryUpdated'));
+        window.dispatchEvent(new CustomEvent<TaskHistoryUpdatedEventDetail>('taskHistoryUpdated', { detail: { highlight: false } }));
 
         // 显示成功提示
         showToast(`成功清空 ${filteredTasks.length} 条${getFilterLabel(filterTab)}记录`, 'success');
@@ -1421,7 +1439,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
         }),
       });
 
-      if (!response.ok) {
+      if (!response.ok && response.status !== 404) {
         const errorData = await response.json().catch(() => ({}));
         console.error('删除历史记录失败:', errorData.message || response.statusText);
         showToast(toUserFacingErrorMessage(errorData.message, '删除历史记录失败，请稍后重试'), 'error');
@@ -1436,7 +1454,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
       // 【关键修复】触发 taskHistoryUpdated 事件，通知其他组件（如彩绘提取页面）刷新订单记录
       debugTaskHistory('[TaskHistory] 删除历史记录成功，触发 taskHistoryUpdated 事件');
-      window.dispatchEvent(new Event('taskHistoryUpdated'));
+      window.dispatchEvent(new CustomEvent<TaskHistoryUpdatedEventDetail>('taskHistoryUpdated', { detail: { highlight: false } }));
 
       // 显示成功提示
       showToast('删除成功', 'success');
@@ -1772,13 +1790,11 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
           >
             ×
           </button>
-          <div className="relative flex h-[90vh] w-[90vw] items-center justify-center" onClick={() => setPreviewImageUrl(null)}>
-            <SafeImage
+          <div className="relative flex h-[90vh] w-[90vw] items-center justify-center p-2" onClick={() => setPreviewImageUrl(null)}>
+            <img
               src={previewImageUrl}
               alt="预览大图"
-              fill
-              sizes="90vw"
-              className="pointer-events-none rounded-xl object-contain"
+              className="pointer-events-none block max-h-full max-w-full rounded-xl object-contain"
             />
           </div>
         </div>,
