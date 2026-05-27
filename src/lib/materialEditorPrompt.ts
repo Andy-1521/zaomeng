@@ -1,5 +1,9 @@
 import { NextRequest } from 'next/server';
-import { buildOpenAICompatUrl, getOpenAICompatApiKey } from '@/lib/openaiCompatible';
+import {
+  buildOpenAICompatVisionUrl,
+  getOpenAICompatVisionApiKey,
+  getOpenAICompatVisionModel,
+} from '@/lib/openaiCompatible';
 
 const PROMPT_AGENT_TIMEOUT_MS = 25000;
 
@@ -45,19 +49,19 @@ function buildRegionText(regions: PromptRegion[]) {
     .join('\n');
 }
 
-async function callVisionModel(apiKey: string, imageUrl: string, prompt: string): Promise<string> {
+async function callVisionModel(apiKey: string, model: string, imageUrl: string, prompt: string): Promise<string> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), PROMPT_AGENT_TIMEOUT_MS);
 
   try {
-    const response = await fetch(buildOpenAICompatUrl('/chat/completions'), {
+    const response = await fetch(buildOpenAICompatVisionUrl('/chat/completions'), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-5.4-mini',
+        model,
         messages: [
           {
             role: 'user',
@@ -105,11 +109,12 @@ export async function composePromptFromImage(params: {
 }): Promise<ComposePromptResult> {
   const { request, imageUrl, mode, instruction, regions, sessionId } = params;
   const origin = params.origin || request?.nextUrl.origin;
-  const apiKey = getOpenAICompatApiKey();
+  const apiKey = getOpenAICompatVisionApiKey();
+  const model = getOpenAICompatVisionModel();
   const startedAt = Date.now();
 
   if (!apiKey) {
-    throw new Error('缺少环境变量: OPENAI_COMPAT_API_KEY');
+    throw new Error('缺少环境变量: OPENAI_COMPAT_VISION_API_KEY');
   }
 
   const prompt = `你是一个专业的电商图片智能改图 Agent。
@@ -143,7 +148,7 @@ ${instruction || '用户未填写额外要求，请根据图片内容做自然�
 }`;
 
   try {
-    const result = await callVisionModel(apiKey, resolveImageUrl(imageUrl, origin), prompt);
+    const result = await callVisionModel(apiKey, model, resolveImageUrl(imageUrl, origin), prompt);
     const cleaned = result.trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
 
     if (!cleaned) {

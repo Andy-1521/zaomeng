@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import { buildOpenAICompatUrl, getOpenAICompatApiKey } from '@/lib/openaiCompatible';
+import { buildOpenAICompatVisionUrl, getOpenAICompatVisionApiKey } from '@/lib/openaiCompatible';
 
 const OUTPAINT_PROMPT_TIMEOUT_MS = 25000;
 const OUTPAINT_PROMPT_MODELS = ['gpt-5.4-mini', 'gpt-5.4'] as const;
@@ -75,7 +75,7 @@ async function callVisionModel(apiKey: string, model: string, imageDataUrl: stri
 }`;
 
   try {
-    const response = await fetch(buildOpenAICompatUrl('/chat/completions'), {
+    const response = await fetch(buildOpenAICompatVisionUrl('/chat/completions'), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -124,9 +124,9 @@ export async function generateDynamicOutpaintPrompt(params: {
   width: number;
   height: number;
 }): Promise<DynamicOutpaintPromptResult> {
-  const apiKey = getOpenAICompatApiKey();
+  const apiKey = getOpenAICompatVisionApiKey();
   if (!apiKey) {
-    throw new Error('缺少环境变量: OPENAI_COMPAT_API_KEY');
+    throw new Error('缺少环境变量: OPENAI_COMPAT_VISION_API_KEY');
   }
 
   const previewBuffer = await sharp(params.imageBuffer)

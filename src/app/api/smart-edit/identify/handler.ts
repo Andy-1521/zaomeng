@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import sharp from 'sharp';
-import { buildOpenAICompatUrl, getOpenAICompatApiKey } from '@/lib/openaiCompatible';
+import {
+  buildOpenAICompatVisionUrl,
+  getOpenAICompatVisionApiKey,
+  getOpenAICompatVisionModel,
+} from '@/lib/openaiCompatible';
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 
-const FAST_VISION_MODEL = 'gpt-5.4-mini';
 const MAX_CANDIDATES = 4;
 const IDENTIFY_CACHE_TTL_MS = 10 * 60 * 1000;
 const IDENTIFY_CACHE_DISTANCE = 0.015;
@@ -63,7 +66,7 @@ async function callVisionModel(
   imageUrls: string[],
   prompt: string
 ): Promise<string> {
-  const response = await fetch(buildOpenAICompatUrl('/chat/completions'), {
+  const response = await fetch(buildOpenAICompatVisionUrl('/chat/completions'), {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
@@ -378,7 +381,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const apiKey = getOpenAICompatApiKey();
+    const apiKey = getOpenAICompatVisionApiKey();
+    const visionModel = getOpenAICompatVisionModel();
 
     if (!apiKey) {
       return NextResponse.json(
@@ -418,9 +422,9 @@ export async function POST(request: NextRequest) {
     const fullImageUrl = prepared.assets.overviewUrl;
     const modelResult = await callVisionModel(
       apiKey,
-      FAST_VISION_MODEL,
+      visionModel,
       [focusCropUrl, detailCropUrl, fullImageUrl],
-      betterPrompt.replace('请只返回一个 JSON 对象，不要输出 Markdown，不要解释：', `模型：${FAST_VISION_MODEL}\n\n请只返回一个 JSON 对象，不要输出 Markdown，不要解释：`)
+      betterPrompt.replace('请只返回一个 JSON 对象，不要输出 Markdown，不要解释：', `模型：${visionModel}\n\n请只返回一个 JSON 对象，不要输出 Markdown，不要解释：`)
     );
 
     if (!modelResult) {
