@@ -1115,6 +1115,7 @@ export default function QuickCreatePage() {
   const materialRequestIdRef = useRef(0);
   const hasLoadedMaterialsRef = useRef(false);
   const prefetchedMaterialKeysRef = useRef<Set<string>>(new Set());
+  const prefetchedMaterialPaginationRef = useRef<Map<string, CapturedImagesPagination>>(new Map());
   const prefetchingMaterialKeysRef = useRef<Set<string>>(new Set());
   const locallyInsertedMaterialIdsRef = useRef<Set<string>>(new Set());
   const requestedLatestCaptureRef = useRef(false);
@@ -1435,6 +1436,7 @@ export default function QuickCreatePage() {
     if (!user?.id) {
       hasLoadedMaterialsRef.current = false;
       prefetchedMaterialKeysRef.current.clear();
+      prefetchedMaterialPaginationRef.current.clear();
       prefetchingMaterialKeysRef.current.clear();
       setCapturedImages([]);
       setMaterialsPagination(EMPTY_CAPTURED_IMAGES_PAGINATION);
@@ -1478,6 +1480,7 @@ export default function QuickCreatePage() {
 
       hasLoadedMaterialsRef.current = true;
       prefetchedMaterialKeysRef.current.add(`${materialScope}:${materialFilter}`);
+      prefetchedMaterialPaginationRef.current.set(`${materialScope}:${materialFilter}`, nextPagination);
       setMaterialsPagination(nextPagination);
       setCapturedImages((prev) => {
         const nextData = data.data || [];
@@ -1566,7 +1569,16 @@ export default function QuickCreatePage() {
       const response = await fetch(`/api/plugin/captured-images?${params.toString()}`, { credentials: 'include' });
       const data = await response.json() as CapturedImagesResponse;
       if (!response.ok || !data.success || !Array.isArray(data.data)) return;
+      const pagination = data.pagination;
+      const nextPagination: CapturedImagesPagination = {
+        limit: Number(pagination?.limit ?? MATERIAL_PAGE_SIZE),
+        offset: Number(pagination?.offset ?? 0),
+        total: Number(pagination?.total ?? data.data.length),
+        hasMore: Boolean(pagination?.hasMore),
+        nextOffset: Number(pagination?.nextOffset ?? data.data.length),
+      };
       prefetchedMaterialKeysRef.current.add(key);
+      prefetchedMaterialPaginationRef.current.set(key, nextPagination);
       mergeCapturedImages(data.data);
     } catch (error) {
       console.warn('[素材库] 预取素材失败:', error);
@@ -3138,8 +3150,14 @@ export default function QuickCreatePage() {
 
   useEffect(() => {
     clearSelectionState();
+    const materialViewKey = `${materialScope}:${materialFilter}`;
+    const cachedPagination = prefetchedMaterialPaginationRef.current.get(materialViewKey);
+    if (hasLoadedMaterialsRef.current && cachedPagination) {
+      setMaterialsPagination(cachedPagination);
+      return;
+    }
     void loadCapturedImages({ preserveCurrent: hasLoadedMaterialsRef.current });
-  }, [clearSelectionState, loadCapturedImages]);
+  }, [clearSelectionState, loadCapturedImages, materialFilter, materialScope]);
 
   useEffect(() => {
     if (!user?.id || materialFilter !== 'all' || !hasLoadedMaterialsRef.current) return;
