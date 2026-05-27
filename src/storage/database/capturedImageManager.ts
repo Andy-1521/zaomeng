@@ -27,7 +27,7 @@ function buildCapturedImageConditions(userId: string, filters?: CapturedImageFil
   const conditions: SQL<unknown>[] = [eq(capturedImages.userId, userId)]
 
   if (filters?.displayableOnly) {
-    conditions.push(sql`lower(substring_index(${capturedImages.imageUrl}, '?', 1)) regexp ${'\\.(jpg|jpeg|png|webp|gif|bmp)$'}`)
+    conditions.push(sql`lower(substring_index(${capturedImages.imageUrl}, '?', 1)) regexp ${'\\.(jpg|jpeg|png|webp|gif|bmp|avif)$'}`)
   }
 
   if (filters && 'folderId' in filters) {

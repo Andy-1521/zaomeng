@@ -39,6 +39,21 @@ function isAllowedImageType(value: unknown): value is NonNullable<CaptureImageRe
   return value === 'main' || value === 'detail';
 }
 
+function toMaterialResponse(record: Awaited<ReturnType<typeof capturedImageManager.createCapturedImage>>) {
+  return {
+    id: record.id,
+    imageUrl: record.imageUrl,
+    originalUrl: record.originalUrl,
+    pageUrl: record.pageUrl,
+    pageTitle: record.pageTitle,
+    sourceHost: record.sourceHost,
+    imageType: record.imageType,
+    folderId: record.folderId,
+    isFavorite: record.isFavorite,
+    createdAt: record.createdAt,
+  };
+}
+
 async function downloadImageBuffer(imageUrl: string, pageUrl: string): Promise<{ buffer: Buffer; contentType: string; extension: string }> {
   return downloadSafeRemoteImage(imageUrl, {
     refererUrl: pageUrl || imageUrl,
@@ -110,6 +125,7 @@ export async function POST(request: NextRequest) {
       sourceHost,
       imageType,
     })
+    const material = toMaterialResponse(record);
 
     return NextResponse.json({
       success: true,
@@ -117,13 +133,18 @@ export async function POST(request: NextRequest) {
       data: {
         id: record.id,
         userId,
-        uploadedUrl,
+        uploadedUrl: material.imageUrl,
+        imageUrl: material.imageUrl,
         originalUrl: imageUrl,
         pageUrl,
         pageTitle,
         sourceHost,
         imageType,
+        folderId: material.folderId,
+        isFavorite: material.isFavorite,
+        createdAt: material.createdAt,
         capturedAt: capturedAt || Date.now(),
+        material,
       },
     });
   } catch (error) {

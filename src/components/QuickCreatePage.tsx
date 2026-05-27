@@ -20,6 +20,7 @@ type PluginCapturePayload = {
   sourceHost?: string;
   capturedAt?: number;
   imageType?: 'main' | 'detail';
+  captureMethod?: string;
 };
 
 type CapturedImageRecord = {
@@ -99,6 +100,19 @@ type UploadFileResponse = {
     url?: string;
     material?: CapturedImageRecord | null;
   };
+};
+
+type PluginCaptureSavedPayload = PluginCapturePayload & {
+  id?: string;
+  uploadedUrl?: string;
+  material?: CapturedImageRecord | null;
+};
+
+type PluginCaptureResponse = {
+  success?: boolean;
+  error?: string;
+  message?: string;
+  data?: PluginCaptureSavedPayload | null;
 };
 
 type MaterialUploadResult =
@@ -256,7 +270,7 @@ const AI_RESOLUTION_OPTIONS: Array<{ value: SmartEditResolution; label: string; 
 const UNCATEGORIZED_FOLDER_VALUE = '__uncategorized__';
 const PROCESSING_ORDER_POLL_TTL_MS = 20 * 60 * 1000;
 const MATERIAL_UPLOAD_CONCURRENCY = 3;
-const MATERIAL_UPLOAD_TIMEOUT_MS = 75_000;
+const MATERIAL_UPLOAD_TIMEOUT_MS = 180_000;
 const MATERIAL_UPLOAD_RECOVERY_TTL_MS = 10 * 60 * 1000;
 const MATERIAL_UPLOAD_COMPRESS_THRESHOLD_BYTES = 900 * 1024;
 const MATERIAL_UPLOAD_HARD_LIMIT_BYTES = 40 * 1024 * 1024;
@@ -356,6 +370,31 @@ function readStoredUserId() {
   } catch {
     return null;
   }
+}
+
+function getMaterialFromPluginPayload(payload?: PluginCaptureSavedPayload | null): CapturedImageRecord | null {
+  if (!payload) return null;
+
+  if (payload.material?.id && payload.material.imageUrl && payload.material.createdAt) {
+    return payload.material;
+  }
+
+  if (!payload.id || !payload.uploadedUrl) {
+    return null;
+  }
+
+  return {
+    id: payload.id,
+    imageUrl: payload.uploadedUrl,
+    originalUrl: payload.imageUrl || null,
+    pageUrl: payload.pageUrl || null,
+    pageTitle: payload.pageTitle || null,
+    sourceHost: payload.sourceHost || null,
+    imageType: payload.imageType || 'main',
+    folderId: null,
+    isFavorite: false,
+    createdAt: new Date(payload.capturedAt || Date.now()).toISOString(),
+  };
 }
 
 function getCompressedFileName(fileName: string, mimeType: string) {
@@ -802,6 +841,8 @@ export default function QuickCreatePage() {
   const trackedProcessingOrdersRef = useRef<Record<string, number>>({});
   const materialRequestIdRef = useRef(0);
   const locallyInsertedMaterialIdsRef = useRef<Set<string>>(new Set());
+  const requestedLatestCaptureRef = useRef(false);
+  const isPageLeavingRef = useRef(false);
   const [capturedImages, setCapturedImages] = useState<CapturedImageRecord[]>([]);
   const [materialFolders, setMaterialFolders] = useState<MaterialFolder[]>([]);
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
@@ -943,6 +984,24 @@ export default function QuickCreatePage() {
   const isLibraryEmpty = libraryView === 'gallery'
     ? isGalleryEmpty && !isLoadingMaterials
     : filteredOrderResults.length === 0;
+
+  useEffect(() => {
+    const markPageLeaving = () => {
+      isPageLeavingRef.current = true;
+    };
+    const markPageActive = () => {
+      isPageLeavingRef.current = false;
+    };
+
+    window.addEventListener('pagehide', markPageLeaving);
+    window.addEventListener('beforeunload', markPageLeaving);
+    window.addEventListener('pageshow', markPageActive);
+    return () => {
+      window.removeEventListener('pagehide', markPageLeaving);
+      window.removeEventListener('beforeunload', markPageLeaving);
+      window.removeEventListener('pageshow', markPageActive);
+    };
+  }, []);
 
   const dispatchTaskHistoryUpdated = useCallback((delay = 0) => {
     const dispatch = () => window.dispatchEvent(new Event('taskHistoryUpdated'));
@@ -1424,6 +1483,7 @@ export default function QuickCreatePage() {
 
     try {
       const uploadOne = async (file: File): Promise<MaterialUploadResult> => {
+        let shouldMarkSettled = true;
         const prepared = await prepareImageFileForUpload(file);
         const formData = new FormData();
         formData.append('file', prepared.file);
@@ -1463,6 +1523,15 @@ export default function QuickCreatePage() {
           return result;
         } catch (error) {
           const isAbortError = error instanceof DOMException && error.name === 'AbortError';
+          if (isAbortError && isPageLeavingRef.current) {
+            shouldMarkSettled = false;
+            return {
+              success: false,
+              fileName: file.name,
+              message: '页面刷新中，正在重新核对上传结果',
+            };
+          }
+
           failedCount += 1;
           return {
             success: false,
@@ -1470,7 +1539,9 @@ export default function QuickCreatePage() {
             message: isAbortError ? '上传超时，请稍后重试' : toUserFacingErrorFromUnknown(error, '上传失败，请重试'),
           };
         } finally {
-          settledCount += 1;
+          if (shouldMarkSettled) {
+            settledCount += 1;
+          }
           writeCurrentUploadSession();
           setUploadProgressText(
             files.length === 1
@@ -1914,17 +1985,21 @@ export default function QuickCreatePage() {
         body: JSON.stringify(payload),
       });
 
-      const data = await response.json();
-      if (!response.ok || !data.success || !data.data?.uploadedUrl) {
+      const data = await response.json() as PluginCaptureResponse;
+      const material = getMaterialFromPluginPayload(data.data);
+      if (!response.ok || !data.success || (!data.data?.uploadedUrl && !material?.imageUrl)) {
         throw new Error(toUserFacingErrorMessage(data.error || data.message, '插件采图失败，请重试'));
       }
 
-      await loadCapturedImages();
+      if (material) {
+        prependUploadedMaterials([material]);
+      }
+      void loadCapturedImages({ preserveCurrent: true });
       showToast('插件采图成功，图片已加入素材库', 'success');
     } catch (error) {
       showToast(toUserFacingErrorFromUnknown(error, '插件采图失败，请重试'), 'error');
     }
-  }, [loadCapturedImages]);
+  }, [loadCapturedImages, prependUploadedMaterials]);
 
   const ensureUserReady = useCallback(() => {
     if (!user?.id) {
@@ -2277,21 +2352,31 @@ export default function QuickCreatePage() {
   useEffect(() => {
     const handlePluginMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
-      const data = event.data as { source?: string; type?: string; payload?: PluginCapturePayload | null };
+      const data = event.data as { source?: string; type?: string; payload?: PluginCaptureSavedPayload | null };
       if (data?.source !== 'zaomeng-extension') return;
+      if (data.type === 'ZAOMENG_EXTENSION_READY' && !requestedLatestCaptureRef.current) {
+        requestedLatestCaptureRef.current = true;
+        window.postMessage({ source: 'zaomeng-web', type: 'ZAOMENG_REQUEST_LATEST_CAPTURE' }, window.location.origin);
+        return;
+      }
+
       if (data.type === 'ZAOMENG_CAPTURE_IMAGE' && data.payload) {
         void handlePluginCapture(data.payload);
         return;
       }
 
-      if (data.type === 'ZAOMENG_CAPTURE_IMAGE_SAVED') {
-        void loadCapturedImages();
+      if (data.type === 'ZAOMENG_CAPTURE_IMAGE_SAVED' || data.type === 'ZAOMENG_LATEST_CAPTURE') {
+        const material = getMaterialFromPluginPayload(data.payload);
+        if (material) {
+          prependUploadedMaterials([material]);
+        }
+        void loadCapturedImages({ preserveCurrent: true });
       }
     };
 
     window.addEventListener('message', handlePluginMessage);
     return () => window.removeEventListener('message', handlePluginMessage);
-  }, [handlePluginCapture, loadCapturedImages]);
+  }, [handlePluginCapture, loadCapturedImages, prependUploadedMaterials]);
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {

@@ -15,7 +15,7 @@ function getCookieUserId(request: NextRequest): string | null {
 
 function isLikelyDisplayableImage(imageUrl: string) {
   const normalized = imageUrl.split('?')[0].toLowerCase()
-  return /\.(jpg|jpeg|png|webp|gif|bmp)$/.test(normalized)
+  return /\.(jpg|jpeg|png|webp|gif|bmp|avif)$/.test(normalized)
 }
 
 function clampInteger(value: string | null, fallback: number, min: number, max: number) {

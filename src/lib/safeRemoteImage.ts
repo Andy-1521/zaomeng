@@ -94,6 +94,8 @@ export function getImageContentType(extension: string) {
       return 'image/gif';
     case 'bmp':
       return 'image/bmp';
+    case 'avif':
+      return 'image/avif';
     case 'jpeg':
     case 'jpg':
     default:
@@ -105,6 +107,7 @@ function getExtensionFromContentType(contentType: string, fallback: string) {
   const normalized = contentType.toLowerCase();
   if (normalized.includes('image/png')) return 'png';
   if (normalized.includes('image/webp')) return 'webp';
+  if (normalized.includes('image/avif')) return 'avif';
   if (normalized.includes('image/gif')) return 'gif';
   if (normalized.includes('image/bmp')) return 'bmp';
   if (normalized.includes('image/jpeg') || normalized.includes('image/jpg')) return 'jpg';

@@ -93,7 +93,15 @@ const captureFromPayload = (payload, sourceTabId = null) => {
 
   void saveCaptureDirectly(normalizedPayload)
     .then((data) => {
-      notifyWebsiteTabs({ ...normalizedPayload, uploadedUrl: data.uploadedUrl, id: data.id })
+      const material = data.material || null
+      const savedPayload = {
+        ...normalizedPayload,
+        uploadedUrl: data.uploadedUrl || material?.imageUrl,
+        id: data.id || material?.id,
+        material,
+      }
+      chrome.storage.local.set({ latestCapture: savedPayload })
+      notifyWebsiteTabs(savedPayload)
       showTabTip(sourceTabId, '已保存至造梦AI素材库')
     })
     .catch((error) => {

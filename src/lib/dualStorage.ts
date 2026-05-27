@@ -52,7 +52,7 @@ export async function uploadFromUrlToCozeStorage(
 
   // 判断是否需要压缩（仅对图片进行压缩）
   const isImage = contentType?.startsWith('image/') ||
-                   fileName.match(/\.(jpg|jpeg|png|webp)$/i);
+                   fileName.match(/\.(jpg|jpeg|png|webp|avif)$/i);
 
   let imageBuffer: Buffer | null = null;
 

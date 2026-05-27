@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "造梦AI 全网采图助手",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "支持全网图片右键保存到造梦AI素材库，也保留大图悬浮采集按钮作为辅助。",
   "icons": {
     "16": "icons/icon-16.png",
