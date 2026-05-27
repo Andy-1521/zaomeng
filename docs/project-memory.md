@@ -1,6 +1,6 @@
 # 造梦项目记忆文档
 
-最后更新：2026-05-27
+最后更新：2026-05-28
 
 本文档是当前项目交接基线。旧的“备用目标、降级、回退本地/URL/模板”、旧服务器路径和 Vercel 发布说明已经失效，后续接手时以本文档为准。
 
@@ -16,8 +16,10 @@
 - 应用日志：`/home/ubuntu/zaomeng/.coze-logs/systemd-web.log`
 - 错误日志：`/home/ubuntu/zaomeng/.coze-logs/systemd-web-error.log`
 - 当前服务状态：已完成构建和重启验证，`zaomeng-web.service` 为 `active`
+- 当前正式生产基线：Git commit `c2150ac`，公网入口 `https://zaomengai.icu`
 - 当前核心原则：只有主链路；没有备用、没有降级、没有失败后换路；失败要明确失败并按积分规则补偿
 - 当前发布原则：先本地预览给用户验收，再备份 GitHub，最后部署腾讯云香港生产服务器
+- 当前数据原则：后续优化尽量不动生产数据；排查生产问题先只读查询，任何修复性写入必须先得到用户确认
 
 ## 网站作用
 
@@ -56,6 +58,9 @@
 - 缩略图大小由本地 `material-library:thumbnail-size` 保存，页面刷新后沿用用户上次选择。
 - 上传和插件采集成功后，后端返回完整 `material`，前端用 `prependUploadedMaterials` 立即插入当前图库；之后的列表刷新只负责校准总数和排序。
 - 订单记录里的 88px 小图不直接拉 OSS 原图，走 `/api/image/thumbnail-url` 生成带 OSS 图片处理参数的签名小图，减少订单面板加载体积。
+- 订单记录下载按钮走 `/api/image/download` 同源下载代理，服务端读取 OSS 图片并返回附件，避免浏览器直接跨域下载 OSS 签名图失败。
+- 订单记录点击缩略图的大图预览使用普通 `img` 和 `object-contain`，保持原图比例完整显示。
+- 图库“订单结果”只显示成功或部分成功且有真实结果图的订单；失败、超时、处理中和无结果图订单不作为图片卡展示。
 
 上传/采集状态方案：
 
@@ -92,7 +97,7 @@
 - Redis
 - 阿里云 OSS 香港区域
 - Psydo OpenAI-compatible 图像编辑接口
-- Coze workflow，用于彩绘提取相关历史/当前工作流能力
+- Coze workflow 仅保留历史兼容代码；新彩绘提取主链路不走 Coze 去背景或镂空模式
 - RunningHub，用于高清放大、PSD 分层等流程
 
 ## 产品入口
@@ -127,7 +132,7 @@
 - 图像编辑失败后切换备用目标
 - 对象存储上传失败后保存到本地 public 当替代结果
 - Coze 文件上传失败后改传 URL 输入
-- 彩绘提取镂空模式失败后改跑完整模式
+- 彩绘提取镂空模式或 Coze 去背景分支
 - Prompt Agent 失败后返回模板提示词
 - 标记识别模型失败后返回“所选区域”兜底
 - 原图尺寸读取失败后使用默认比例继续生成
@@ -166,6 +171,10 @@
 - 正式入口：`POST /api/color-extraction/run`
 - 实现文件：`src/app/api/color-extraction/run/handler.ts`
 - 前端入口：`src/components/QuickCreatePage.tsx`
+- 当前只走 Psydo 图生图 API，不再保留镂空模式，不再调用 Coze 去背景工作流
+- 提交接口只做参数校验、创建订单、原子预扣积分并快速返回订单号；真实彩绘提取在后台并发执行
+- 批量彩绘提取不排队，前端按短间隔提交多个订单，订单状态通过轮询刷新
+- 失败或超时订单标记失败/超时并退款；失败订单保留在右侧订单记录用于重试和删除，但不显示在图库订单结果页
 - 新订单不会自动后台生成 PSD
 - 新订单的 PSD 状态初始为 `pending`
 - 彩绘结果成功后，用户可在任务中心手动点击生成 PSD
@@ -177,7 +186,7 @@ PSD 当前要点：
 - 前端入口：`src/components/TaskHistory.tsx`
 - PSD 生成单独收积分
 - PSD 失败只退 PSD 的积分，不影响已成功的彩绘结果
-- 镂空模式会保存 `psdAdditionalImageUrl` 给后续 PSD 使用
+- PSD 当前只基于彩绘结果图做 RunningHub 图层分解和 PSD 合成，不再读取镂空模式的额外图层
 
 ## 智能改图流程
 
@@ -229,6 +238,7 @@ PSD 当前要点：
 - `src/lib/dualStorage.ts`：当前只走阿里云 OSS，失败直接失败
 - `src/lib/aliyunOSS.ts`：OSS 上传和签名 URL
 - `src/lib/safeRemoteImage.ts`：远程图片安全下载
+- `src/app/api/image/download/route.ts`：订单记录同源下载代理，解决浏览器直连 OSS 的 CORS 下载问题
 - `src/lib/localUploadStorage.ts`：本地素材文件读取/历史文件能力，不作为失败替代存储
 - `src/app/api/material-file/[...path]/route.ts`：历史本地素材文件读取
 
@@ -314,7 +324,14 @@ pnpm build
 - Nginx：80/443 反代到本机 5000
 - 对象存储：阿里云 OSS 香港区域，生产桶 `zaomengai-hk-20260527`
 
-发布时使用 `scripts/deploy-production.sh` 从本地 rsync 到服务器临时构建目录，排除 `.git`、`node_modules`、`.next`、`.vercel`、`.env.local`、日志和运行生成素材。服务器上的 `/home/ubuntu/zaomeng/.env.local` 必须保留并复制到新版本目录。
+发布时使用 `scripts/deploy-production.sh` 从本地 rsync 到服务器临时构建目录，排除 `.git`、`.DS_Store`、`node_modules`、`.next`、`.vercel`、`.env.local`、日志和运行生成素材。服务器上的 `/home/ubuntu/zaomeng/.env.local` 必须保留并复制到新版本目录。
+
+发布脚本部署成功后只保留最近 1 个 `/home/ubuntu/zaomeng-prev-*` 回滚目录。当前服务器已清理为：
+
+- 当前生产：`/home/ubuntu/zaomeng`
+- 最近回滚：`/home/ubuntu/zaomeng-prev-20260528003948-c2150ac`
+
+不要手动删除当前生产目录、`.env.local`、数据库文件、Redis 数据或 OSS 素材。确实需要清理时，只清理旧 release、`.DS_Store`、`.next`、日志和可重新生成的构建产物。
 
 不要手写远程 `rm` / `mv` 拼路径发布。所有远程发布路径必须先通过脚本里的 guard 检查，避免空变量把 `/home/ubuntu/$name` 拼成 `/home/ubuntu/`。
 
@@ -364,10 +381,10 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 - `pnpm exec tsc --noEmit --pretty false --incremental false`：通过
 - `git diff --check`：通过
 - `pnpm build`：通过
-- `sudo systemctl restart zaomeng-web.service`：已执行
+- `scripts/deploy-production.sh`：已执行
 - `systemctl is-active zaomeng-web.service`：`active`
-- `/home` 页面 smoke：`consoleErrors: 0`，`failedRequests: 0`
-- `/profile` 页面 smoke：`consoleErrors: 0`，`failedRequests: 0`
+- `https://zaomengai.icu/home`：HTTP 200
+- `https://zaomengai.icu/api/plugin/version`：返回 v0.1.9
 - AI生图真实接口：已成功
 - 智能改图真实接口：已成功
 - 彩绘提取 full 模式真实接口：已成功
@@ -384,6 +401,7 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 - 2026-05-27 进一步恢复图库主链路：本地素材上传和插件采图均优先浏览器/插件直传阿里云 OSS，服务端只签名、校验和写数据库；插件包升级到 v0.1.9，补充插件采集成功/失败进度提示，修复 OSS 图片首次加载失败后必须刷新才显示的问题。本地真实验证通过：本地素材直传入库、插件直传入库、重复完成入库幂等、图库 API 可见、真实浏览器上传后即时插入、首次 OSS GET 被拦截后自动恢复、插件失败提示可见、插件下载包生产域名正确。
 - 2026-05-27 生产对象存储从阿里云上海切到香港桶 `zaomengai-hk-20260527`：上海 OSS 在腾讯云香港服务器上多次 `ECONNRESET` / 90s timeout，香港 OSS 验证通过。生产真实 smoke 通过：本地素材直传 OSS 126ms、素材入库 118ms、插件直传 OSS 28ms、插件入库 20ms、旧插件服务端兼容采集 452ms；AI 生图成功写入香港 OSS；智能改图成功写入香港 OSS，最终订单状态“成功”。
 - 2026-05-27 本地预览修复：AI 生图和智能改图结果只保留在订单记录，不再自动写入图库；PSD 生成中的状态超过 12 分钟可重新生成，避免旧请求中断后永久卡住；右侧选图浮层改为视口定位并上下左右夹紧；AI 生图和智能改图输入区支持 Enter 提交、Shift+Enter 换行；标记识别仍保留预识别 `prewarm`，实际识别请求改用更小 JPEG 裁切图和 16 秒超时以减少等待。验证：`pnpm exec tsc --noEmit --pretty false --incremental false`、`git diff --check`、`pnpm build`、本地 5011 Playwright 浮层/Enter 检查通过。
+- 2026-05-28 正式生产基线：彩绘提取改为后台并发处理，提交接口快速返回订单；取消镂空模式和 Coze 去背景分支；图库订单结果只展示成功结果图；订单记录下载改为 `/api/image/download` 同源代理；删除订单不再自动滚到失败订单；订单记录大图按比例完整显示；本地和服务器清理 `.DS_Store`、`.next`、日志和旧 release，生产只保留最近 1 个回滚目录。当前基线 commit：`c2150ac`。
 
 ## 已完成清理
 
@@ -395,6 +413,9 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 - `src/app/api/image-to-image/run/route.ts`：生成、上传、尺寸读取失败不再继续替代链路
 - `src/app/api/material-editor/route.ts`：智能改图上传失败直接失败，不再写本地替代结果
 - `src/app/api/color-extraction/run/handler.ts`：不再换模式、不再改传 URL、不再保留临时结果 URL
+- `src/app/api/color-extraction/run/handler.ts`：取消镂空模式，只保留 Psydo 图生图 full 主链路
+- `src/app/api/color-extraction/generate-psd/handler.ts`：PSD 不再读取镂空额外图层
+- `src/app/api/image/download/route.ts`：新增订单记录同源下载代理
 - `src/lib/materialEditorPrompt.ts`：Prompt Agent 失败直接失败，不再返回模板提示词
 - `src/app/api/smart-edit/identify/handler.ts`：识别失败直接失败，不再返回兜底区域
 - `src/app/admin/generations/page.tsx`：移除备用目标展示字段
@@ -408,6 +429,7 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 - 删除 `scripts/replace_prod_users.py`，该脚本包含历史用户邮箱和明文密码
 - 删除项目 `tmp/` 临时脚本、探针截图、旧 smoke 产物和 `/tmp/opencode` 归档
 - 删除 `tsconfig.tsbuildinfo` 并在 `.gitignore` 中加入 `*.tsbuildinfo`
+- 2026-05-28 清理本地 `.next`、`.DS_Store` 和空日志；服务器只保留当前 `/home/ubuntu/zaomeng` 与最近一个 `/home/ubuntu/zaomeng-prev-*` 回滚目录
 - 将可复用验收脚本整理到 `scripts/verification/`
 - 将大运行日志保留最近片段到 `archive/log-snapshots/` 后清空原日志文件
 
@@ -421,6 +443,8 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 - `browser-extension/zaomeng-capture/taobao-content.js`
 - `package.json`
 - `public/plugin-capture/`
+
+当前正式生产基线要求本地和生产代码保持一致。后续修改前先看 `git status --short`；如只剩本次要改的文件，才开始开发。不要把本地临时调试文件、构建产物或旧运行素材混进备份提交。
 
 除非用户明确要求，不要执行破坏性命令，例如 `git reset --hard`、`git checkout -- <file>`。
 
@@ -475,6 +499,9 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 - 保留 `/profile?tab=recharge` 和现有 `RechargePanel` 充值链路
 - 订单记录面板必须适配笔记本高度：展开后避开顶部导航，内部滚动，不让卡片或底部按钮溢出视口。
 - 订单记录缩略图不直接拉 OSS 原图，使用 `/api/image/thumbnail-url` 生成带 OSS 图片处理参数的签名小图，降低 88px 缩略图加载体积。
+- 订单记录下载必须走 `/api/image/download`，不要恢复成前端直接 `fetch(OSS URL)`。
+- 删除或清空订单记录时，刷新事件必须带 `{ highlight: false }`，避免自动滚动到其它失败订单。
+- 订单记录大图预览必须完整按比例展示，不要用裁切式 `object-cover`。
 - 用户侧和管理员侧工具筛选只保留当前主工具：彩绘提取、AI生图、智能改图、高清+扩图；旧的 AI扩图、高清放大、去水印记录统一显示/归类为高清+扩图。
 - 高清+扩图当前价格为 30 积分，前端按钮和后端扣费都应通过 `getOutpaintUpsamplingPoints()` 读取，不要写死数字。
 
@@ -482,7 +509,7 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 
 1. 补齐真实支付商户参数并做微信/支付宝回调验收
 2. 全站认证改造，替换 raw `user` cookie
-3. 继续观察并最终删除 `color-extraction2` 兼容路径
+3. 继续观察并最终删除 `color-extraction2` 兼容路径和已失效 Coze 去背景历史代码
 4. 对 AI生图、智能改图、彩绘提取、高清+扩图建立固定真实接口验收脚本
 5. 优化智能改图 mask 提交方式，降低大请求体风险
 6. 保持主工作台轻量化，不恢复旧多页面工具集合

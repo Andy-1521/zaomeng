@@ -43,6 +43,7 @@ ssh_cmd "mkdir -p '$REMOTE_RELEASE'"
 echo "[deploy] sync source"
 rsync -az --delete \
   --exclude ".git/" \
+  --exclude ".DS_Store" \
   --exclude "node_modules/" \
   --exclude ".next/" \
   --exclude ".vercel/" \
@@ -95,5 +96,13 @@ ssh_cmd "set -Eeuo pipefail
 echo "[deploy] public smoke"
 curl -fsSI "${PUBLIC_BASE_URL}/login" >/dev/null
 curl -fsS "${PUBLIC_BASE_URL}/api/plugin/version" >/dev/null
+
+echo "[deploy] prune old remote releases"
+ssh_cmd "set -Eeuo pipefail
+  find '${REMOTE_HOME}' -maxdepth 1 -type d -name 'zaomeng-prev-*' -printf '%T@ %p\n' \
+    | sort -nr \
+    | awk 'NR>1 {print \$2}' \
+    | xargs -r rm -rf
+  find '${REMOTE_APP}' -name '.DS_Store' -type f -delete"
 
 echo "[deploy] production deploy completed: ${SHA}"

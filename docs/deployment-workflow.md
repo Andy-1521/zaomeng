@@ -1,6 +1,6 @@
 # 造梦 AI 部署验收流程
 
-最后更新：2026-05-27
+最后更新：2026-05-28
 
 ## 固定原则
 
@@ -10,6 +10,8 @@
 - 用户明确确认本地预览没问题后，才能部署生产给真实用户使用。
 - 每次生产发布前都要备份到 GitHub，提交信息使用 `backup: YYYY-MM-DD 摘要`。
 - 当前生产部署在腾讯云香港服务器，不再走 Vercel Preview / Production。
+- 生产数据优先保护：不直接改生产数据库、不清空生产素材、不覆盖 `/home/ubuntu/zaomeng/.env.local`。
+- 当前正式生产基线：Git commit `c2150ac`，生产地址 `https://zaomengai.icu`。
 
 ## 网站作用
 
@@ -24,6 +26,9 @@
 - 上传或插件采集成功后，页面必须立即插入返回的素材记录；列表刷新只用于校准。
 - 图库页面通过 `/api/plugin/captured-images` 分页加载，上传中显示占位卡片；刷新中断后会根据 sessionStorage 中的 OSS key 自动补完成入库。
 - 订单记录缩略图通过 `/api/image/thumbnail-url` 获取 OSS 处理后的小图签名 URL，不应直接加载原始大图。
+- 订单结果页只展示成功或部分成功且有真实结果图的订单；失败、超时、处理中和无结果图订单不显示为图片卡片。
+- 右侧订单记录面板保留失败/超时记录，用于查看失败原因、删除、重新提交和退款排查。
+- 订单记录下载按钮走同源 `/api/image/download`，由服务器读取 OSS 图片并作为附件返回，避免浏览器跨域下载失败。
 
 ## 智能改图主链路
 
@@ -34,6 +39,22 @@
 - AI 生图和智能改图结果只显示在订单记录，不自动加入图库。
 - 失败、超时、上传失败或结果缺失时，订单失败并按积分规则退款。
 
+## 彩绘提取和 PSD 主链路
+
+- 彩绘提取入口是 `/api/color-extraction/run`，前端从 `/home` 选中素材后提交。
+- 接口只负责校验用户、创建订单、原子预扣积分并快速返回订单号；真实图片处理在后台并发执行。
+- 当前只保留 Psydo 图生图彩绘提取模式，不再保留镂空模式，不再走 Coze 去背景分支。
+- 彩绘结果只保存到 OSS，并写入订单 `resultData`；不会自动加入图库。
+- 彩绘提取成功后 PSD 状态为 `pending`，用户在右侧订单记录中手动点击生成 PSD。
+- PSD 入口是 `/api/color-extraction/generate-psd`，单独预扣积分，失败只退 PSD 积分，不影响已成功彩绘结果。
+
+## 其他功能流程
+
+- AI 生图：`/api/image-to-image/run` 创建订单、预扣积分、调用 Psydo 图像接口、结果上传 OSS、订单成功；失败或超时退款。
+- 高清+扩图：`/api/outpaint-upsampling/run` 创建后台订单、预扣积分、执行扩图和放大、结果上传 OSS；当前价格通过 `getOutpaintUpsamplingPoints()` 读取，不写死。
+- 素材下载/订单下载：图库下载和订单记录下载均应优先通过同源站点处理，不依赖 OSS 跨域能力。
+- 插件更新：用户只看到“下载最新版插件”，不要向用户暴露服务器、域名、迁移细节。
+
 ## 标准步骤
 
 1. 本地修改代码。
@@ -43,7 +64,7 @@
 5. 执行 `git diff --check`。
 6. 执行 `pnpm build`。
 7. 用 `backup: YYYY-MM-DD summary` 提交并推送 GitHub。
-8. 用户确认可上线后，部署到 `ubuntu@43.129.173.9:/home/ubuntu/zaomeng`。
+8. 用户确认可上线后，运行 `scripts/deploy-production.sh` 部署到 `ubuntu@43.129.173.9:/home/ubuntu/zaomeng`。
 9. 发布后检查 `https://zaomengai.icu`、`/login`、`/home`、`/profile`、`/plugin`、`/admin/generations`。
 
 ## 生产环境
@@ -66,6 +87,7 @@
 - 发布时保留 `/home/ubuntu/zaomeng/.coze-logs`。
 - 不同步 `.git`、`node_modules`、`.next`、`.vercel`、日志、构建产物和运行生成素材。
 - 生产发布失败时优先恢复 `/home/ubuntu/zaomeng-prev-*` 上一个目录，并重启 `zaomeng-web`。
+- 发布脚本部署后只保留最近 1 个 `/home/ubuntu/zaomeng-prev-*` 回滚目录，避免服务器堆积旧版本。
 - 禁止执行空变量拼出的远程路径，例如 `/home/ubuntu/$name` 在 `$name` 为空时会变成 `/home/ubuntu/`，这是生产事故级风险。
 
 ## 当前充值方式
@@ -90,3 +112,4 @@
 - 不要把测试账号、测试兑换码或临时数据留到生产数据库。
 - 不要在用户未确认前影响生产线上用户。
 - 不要恢复本地 public 作为 OSS 上传失败后的替代存储。
+- 不要为了调试直接改生产数据；需要排查时先只读查询，确认方案后再让用户授权。
