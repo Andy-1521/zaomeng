@@ -1113,6 +1113,7 @@ export default function QuickCreatePage() {
   const dragDepthRef = useRef(0);
   const trackedProcessingOrdersRef = useRef<Record<string, number>>({});
   const materialRequestIdRef = useRef(0);
+  const hasLoadedMaterialsRef = useRef(false);
   const locallyInsertedMaterialIdsRef = useRef<Set<string>>(new Set());
   const requestedLatestCaptureRef = useRef(false);
   const isPageLeavingRef = useRef(false);
@@ -1212,8 +1213,14 @@ export default function QuickCreatePage() {
   }, [materialFolders]);
 
   const filteredCapturedImages = useMemo(() => {
-    return capturedImages;
-  }, [capturedImages]);
+    return capturedImages.filter((image) => {
+      if (materialFilter !== 'all' && getMaterialDateGroup(image.createdAt) !== materialFilter) return false;
+      if (materialScope === 'favorite') return Boolean(image.isFavorite);
+      if (materialScope === 'uncategorized') return !image.folderId;
+      if (activeFolderId) return image.folderId === activeFolderId;
+      return true;
+    });
+  }, [activeFolderId, capturedImages, materialFilter, materialScope]);
 
   const groupedMaterials = useMemo(() => {
     const groupMap = new Map<'today' | 'yesterday' | 'earlier', CapturedImageRecord[]>();
@@ -1420,13 +1427,11 @@ export default function QuickCreatePage() {
     const offset = options?.offset ?? 0;
     const append = options?.append === true;
     const preserveCurrent = options?.preserveCurrent === true;
-    const requestScope = materialScope;
-    const requestDateFilter = materialFilter;
-    const requestFolderId = requestScope.startsWith('folder:') ? requestScope.slice('folder:'.length) : null;
     const requestId = materialRequestIdRef.current + 1;
     materialRequestIdRef.current = requestId;
 
     if (!user?.id) {
+      hasLoadedMaterialsRef.current = false;
       setCapturedImages([]);
       setMaterialsPagination(EMPTY_CAPTURED_IMAGES_PAGINATION);
       setIsLoadingMaterials(false);
@@ -1467,6 +1472,7 @@ export default function QuickCreatePage() {
         nextOffset: Number(pagination?.nextOffset ?? offset + data.data.length),
       };
 
+      hasLoadedMaterialsRef.current = true;
       setMaterialsPagination(nextPagination);
       setCapturedImages((prev) => {
         const nextData = data.data || [];
@@ -1475,17 +1481,12 @@ export default function QuickCreatePage() {
             return nextData;
           }
 
-          const nextIds = new Set(nextData.map((image) => image.id));
-          const stillVisibleLocalItems = prev.filter((image) => {
-            if (nextIds.has(image.id)) return false;
-            if (requestDateFilter !== 'all' && getMaterialDateGroup(image.createdAt) !== requestDateFilter) return false;
-            if (requestScope === 'favorite') return Boolean(image.isFavorite);
-            if (requestScope === 'uncategorized') return !image.folderId;
-            if (requestFolderId) return image.folderId === requestFolderId;
-            return true;
-          });
+          const nextById = new Map(prev.map((image) => [image.id, image]));
+          for (const image of nextData) {
+            nextById.set(image.id, image);
+          }
 
-          return [...stillVisibleLocalItems, ...nextData].sort(
+          return Array.from(nextById.values()).sort(
             (left, right) => parseMaterialDate(right.createdAt).getTime() - parseMaterialDate(left.createdAt).getTime()
           );
         }
@@ -3083,7 +3084,7 @@ export default function QuickCreatePage() {
 
   useEffect(() => {
     clearSelectionState();
-    void loadCapturedImages();
+    void loadCapturedImages({ preserveCurrent: hasLoadedMaterialsRef.current });
   }, [clearSelectionState, loadCapturedImages]);
 
   useEffect(() => {
@@ -3607,7 +3608,7 @@ export default function QuickCreatePage() {
           className="hidden"
         />
 
-        {libraryView === 'gallery' && isLoadingMaterials ? (
+        {libraryView === 'gallery' && isLoadingMaterials && capturedImages.length === 0 ? (
           <div className="rounded-[2rem] border border-white/[0.08] bg-white/[0.025] p-14 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
             <div className="mx-auto mb-5 h-10 w-10 animate-spin rounded-full border-2 border-white/10 border-t-purple-300/80" />
             <p className="text-base font-medium text-white/70">素材加载中...</p>
