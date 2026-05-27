@@ -1,44 +1,99 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PROJECT_ROOT="/home/ubuntu/Downloads/zaomeng/project/projects"
+LOCAL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REMOTE_HOST="${ZAOMENG_REMOTE_HOST:-ubuntu@43.129.173.9}"
+SSH_KEY="${ZAOMENG_SSH_KEY:-$HOME/.ssh/id_ed25519_tencent_zaomeng}"
+REMOTE_HOME="/home/ubuntu"
+REMOTE_APP="${REMOTE_HOME}/zaomeng"
 SERVICE_NAME="zaomeng-web"
 PUBLIC_BASE_URL="https://zaomengai.icu"
+SHA="$(cd "$LOCAL_ROOT" && git rev-parse --short HEAD)"
+STAMP="$(date +%Y%m%d%H%M%S)"
+RELEASE_NAME="zaomeng-build-${STAMP}-${SHA}"
+PREVIOUS_NAME="zaomeng-prev-${STAMP}-${SHA}"
+REMOTE_RELEASE="${REMOTE_HOME}/${RELEASE_NAME}"
+REMOTE_PREVIOUS="${REMOTE_HOME}/${PREVIOUS_NAME}"
 
-cd "$PROJECT_ROOT"
+ssh_cmd() {
+  ssh -i "$SSH_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new "$REMOTE_HOST" "$@"
+}
 
-echo "[deploy] stopping service: ${SERVICE_NAME}"
-sudo systemctl stop "$SERVICE_NAME"
+remote_path_guard() {
+  local path="$1"
+  local pattern="$2"
+  if [[ -z "$path" || "$path" != ${REMOTE_HOME}/${pattern} ]]; then
+    echo "[deploy] refused unsafe remote path: ${path:-<empty>}" >&2
+    exit 1
+  fi
+}
 
-echo "[deploy] removing old .next build artifacts"
-rm -rf .next
+remote_path_guard "$REMOTE_RELEASE" "zaomeng-build-*"
+remote_path_guard "$REMOTE_PREVIOUS" "zaomeng-prev-*"
 
-echo "[deploy] building production assets"
-pnpm build
+cd "$LOCAL_ROOT"
 
-echo "[deploy] starting service: ${SERVICE_NAME}"
-sudo systemctl start "$SERVICE_NAME"
+echo "[deploy] local checks"
+pnpm exec tsc --noEmit --pretty false --incremental false
+git diff --check
 
-echo "[deploy] waiting for service warmup"
-sleep 5
+echo "[deploy] create remote release: ${REMOTE_RELEASE}"
+ssh_cmd "mkdir -p '$REMOTE_RELEASE'"
 
-echo "[deploy] checking key public pages"
+echo "[deploy] sync source"
+rsync -az --delete \
+  --exclude ".git/" \
+  --exclude "node_modules/" \
+  --exclude ".next/" \
+  --exclude ".vercel/" \
+  --exclude ".env.local" \
+  --exclude ".coze-logs/" \
+  --exclude "public/uploads/" \
+  --exclude "public/plugin-capture/" \
+  --exclude "public/ai-generate/" \
+  --exclude "public/material-editor/" \
+  --exclude "public/color-extraction/" \
+  --exclude "public/avatars/" \
+  -e "ssh -i $SSH_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+  ./ "${REMOTE_HOST}:${REMOTE_RELEASE}/"
+
+echo "[deploy] build remote release"
+ssh_cmd "set -Eeuo pipefail
+  test -f '${REMOTE_APP}/.env.local'
+  cp '${REMOTE_APP}/.env.local' '${REMOTE_RELEASE}/.env.local'
+  mkdir -p '${REMOTE_RELEASE}/.coze-logs'
+  for dir in public/uploads public/plugin-capture public/ai-generate public/material-editor public/color-extraction public/avatars; do
+    mkdir -p '${REMOTE_RELEASE}/'\$dir
+    if [ -d '${REMOTE_APP}/'\$dir ]; then
+      rsync -a '${REMOTE_APP}/'\$dir/ '${REMOTE_RELEASE}/'\$dir/
+    fi
+  done
+  cd '${REMOTE_RELEASE}'
+  pnpm install --frozen-lockfile
+  pnpm exec tsc --noEmit --pretty false --incremental false
+  pnpm build"
+
+echo "[deploy] switch production"
+ssh_cmd "set -Eeuo pipefail
+  test -d '${REMOTE_RELEASE}'
+  test -f '${REMOTE_RELEASE}/.env.local'
+  mkdir -p '${REMOTE_RELEASE}/.coze-logs'
+  sudo systemctl stop '${SERVICE_NAME}'
+  if [ -e '${REMOTE_PREVIOUS}' ]; then
+    echo 'previous target already exists' >&2
+    exit 1
+  fi
+  mv '${REMOTE_APP}' '${REMOTE_PREVIOUS}'
+  mv '${REMOTE_RELEASE}' '${REMOTE_APP}'
+  sudo systemctl start '${SERVICE_NAME}'
+  sleep 3
+  systemctl is-active '${SERVICE_NAME}'
+  curl -fsS 'http://127.0.0.1:5000/api/plugin/version' >/dev/null
+  curl -fsSI 'http://127.0.0.1:5000/login' >/dev/null
+  curl -fsSI 'http://127.0.0.1:5000/home' >/dev/null"
+
+echo "[deploy] public smoke"
 curl -fsSI "${PUBLIC_BASE_URL}/login" >/dev/null
-curl -fsSI "${PUBLIC_BASE_URL}/" >/dev/null
-curl -fsSI "${PUBLIC_BASE_URL}/home" >/dev/null
+curl -fsS "${PUBLIC_BASE_URL}/api/plugin/version" >/dev/null
 
-echo "[deploy] running browser smoke check"
-pnpm exec node tmp/check-pages.js >/tmp/zaomeng-deploy-check.log
-cat /tmp/zaomeng-deploy-check.log
-
-if grep -E "HTTPERR: (404|500) https://zaomengai\.icu/_next/static/chunks/" /tmp/zaomeng-deploy-check.log >/dev/null; then
-  echo "[deploy] chunk validation failed"
-  exit 1
-fi
-
-if grep -E "PAGEERROR:" /tmp/zaomeng-deploy-check.log >/dev/null; then
-  echo "[deploy] browser page error detected"
-  exit 1
-fi
-
-echo "[deploy] production deploy completed successfully"
+echo "[deploy] production deploy completed: ${SHA}"

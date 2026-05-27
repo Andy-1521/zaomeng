@@ -41,10 +41,13 @@
 
 ## 生产发布要点
 
+- 生产发布统一使用 `scripts/deploy-production.sh`，不要手写 `rm` / `mv` 拼路径发布。
+- 发布脚本必须先在远程临时目录构建成功，再短暂停服务切换到 `/home/ubuntu/zaomeng`。
 - 发布时保留生产服务器上的 `/home/ubuntu/zaomeng/.env.local`。
 - 发布时保留 `/home/ubuntu/zaomeng/.coze-logs`。
 - 不同步 `.git`、`node_modules`、`.next`、`.vercel`、日志、构建产物和运行生成素材。
 - 生产发布失败时优先恢复 `/home/ubuntu/zaomeng-prev-*` 上一个目录，并重启 `zaomeng-web`。
+- 禁止执行空变量拼出的远程路径，例如 `/home/ubuntu/$name` 在 `$name` 为空时会变成 `/home/ubuntu/`，这是生产事故级风险。
 
 ## 当前充值方式
 

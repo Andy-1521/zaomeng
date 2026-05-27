@@ -257,7 +257,9 @@ pnpm build
 - 公网域名：`https://zaomengai.icu`
 - Nginx：80/443 反代到本机 5000
 
-发布时从本地 rsync 到服务器临时构建目录，排除 `.git`、`node_modules`、`.next`、`.vercel`、`.env.local`、日志和运行生成素材。服务器上的 `/home/ubuntu/zaomeng/.env.local` 必须保留并复制到新版本目录。
+发布时使用 `scripts/deploy-production.sh` 从本地 rsync 到服务器临时构建目录，排除 `.git`、`node_modules`、`.next`、`.vercel`、`.env.local`、日志和运行生成素材。服务器上的 `/home/ubuntu/zaomeng/.env.local` 必须保留并复制到新版本目录。
+
+不要手写远程 `rm` / `mv` 拼路径发布。所有远程发布路径必须先通过脚本里的 guard 检查，避免空变量把 `/home/ubuntu/$name` 拼成 `/home/ubuntu/`。
 
 生产检查命令：
 
@@ -321,6 +323,7 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 - 彩绘提取：`CE_REAL_1779549053077`
 - 高清+扩图退款验证：`HDO-1779436077389_5588`
 - 2026-05-26 本地新增验证：登录、注册接口、用户资料刷新、素材上传到阿里云 OSS、插件采图、插件版本接口、兑换码生成和兑换、管理员兑换码记录均通过
+- 2026-05-27 修复插件采图和素材上传状态同步：采图接口返回完整素材记录，前端收到插件保存成功后立即插入图库并保留慢列表同步结果；图库可显示过滤补充 AVIF；上传刷新导致的中断不再记录为真实失败。生产 smoke 已验证插件采图、本地上传、图库列表可查、插件包 v0.1.7 域名配置正确。
 
 ## 已完成清理
 
