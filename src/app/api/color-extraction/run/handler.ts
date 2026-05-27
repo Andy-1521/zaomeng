@@ -16,7 +16,7 @@ import { getColorExtractionPoints, getGeneratePsdPoints } from '@/lib/pricing';
 
 const COLOR_EXTRACTION_POINTS = getColorExtractionPoints();
 const PSD_POINTS = getGeneratePsdPoints();
-const COLOR_EXTRACTION_IMAGE_EDIT_TIMEOUT_MS = 120000;
+const COLOR_EXTRACTION_IMAGE_EDIT_TIMEOUT_MS = 280000;
 
 type ExtractionTaskResult = {
   success: boolean;

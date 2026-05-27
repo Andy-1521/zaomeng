@@ -2653,8 +2653,8 @@ export default function QuickCreatePage() {
     return ensureEnoughPoints(getColorExtractionPoints() * imageCount);
   }, [ensureEnoughPoints]);
 
-  const startColorExtraction = useCallback((imageUrl: string) => {
-    if (!user?.id) return;
+  const startColorExtraction = useCallback(async (imageUrl: string) => {
+    if (!user?.id) return false;
     const tempOrderId = `ORD${Date.now()}_${Math.floor(Math.random() * 10000)}`;
     const processingImageUrl = getProcessingImageUrl(imageUrl);
 
@@ -2669,34 +2669,34 @@ export default function QuickCreatePage() {
       '处理中'
     );
 
-    void (async () => {
-      try {
-        const response = await fetch('/api/color-extraction/run', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: user.id, imageUrl: processingImageUrl, orderId: tempOrderId }),
-        });
+    try {
+      const response = await fetch('/api/color-extraction/run', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, imageUrl: processingImageUrl, orderId: tempOrderId }),
+      });
 
-        const data = await response.json() as {
-          success?: boolean;
-          message?: string;
-          data?: { imageUrl?: string; remainingPoints?: number };
-        };
+      const data = await response.json() as {
+        success?: boolean;
+        message?: string;
+        data?: { imageUrl?: string; remainingPoints?: number };
+      };
 
-        if (!response.ok || !data.success) {
-          throw new Error(toUserFacingErrorMessage(data.message, '彩绘提取失败，请重试'));
-        }
-
-        updateTaskRecordStatus(tempOrderId, '成功', data.data?.imageUrl);
-        if (typeof data.data?.remainingPoints === 'number') syncPoints(data.data.remainingPoints);
-        dispatchTaskHistoryUpdated();
-      } catch (error) {
-        console.error('[素材库] 彩绘提取执行失败:', error);
-        updateTaskRecordStatus(tempOrderId, '失败');
-        dispatchTaskHistoryUpdated();
+      if (!response.ok || !data.success) {
+        throw new Error(toUserFacingErrorMessage(data.message, '彩绘提取失败，请重试'));
       }
-    })();
+
+      updateTaskRecordStatus(tempOrderId, '成功', data.data?.imageUrl);
+      if (typeof data.data?.remainingPoints === 'number') syncPoints(data.data.remainingPoints);
+      dispatchTaskHistoryUpdated();
+      return true;
+    } catch (error) {
+      console.error('[素材库] 彩绘提取执行失败:', error);
+      updateTaskRecordStatus(tempOrderId, '失败');
+      dispatchTaskHistoryUpdated();
+      return false;
+    }
   }, [dispatchTaskHistoryUpdated, syncPoints, user?.id]);
 
   const startOutpaintUpsampling = useCallback(async (imageUrl: string) => {
@@ -2815,11 +2815,11 @@ export default function QuickCreatePage() {
             showToast('剩余积分不足，后续图片未继续提交', 'warning');
             break;
           }
-          startColorExtraction(imageUrl);
           submittedCount += 1;
-          await new Promise((resolve) => window.setTimeout(resolve, 300));
+          showToast(`彩绘提取排队处理中：${submittedCount}/${selectedImageList.length}`, 'info');
+          await startColorExtraction(imageUrl);
         }
-        showToast(`已提交 ${submittedCount} 张图片到彩绘提取`, 'info');
+        showToast(`彩绘提取已处理 ${submittedCount} 张`, 'info');
       }
 
       if (actionId === 'outpaint-upsampling') {
