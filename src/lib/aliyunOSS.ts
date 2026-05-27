@@ -4,6 +4,7 @@
  */
 
 import OSS from 'ali-oss';
+import { createHmac } from 'crypto';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '阿里云 OSS 操作失败';
@@ -70,6 +71,54 @@ export async function uploadToAliyunOSS(
   } catch (error: unknown) {
     console.error('[阿里云OSS] 上传失败:', error);
     throw new Error(`上传到阿里云OSS失败: ${getErrorMessage(error)}`);
+  }
+}
+
+export function createAliyunOSSPostPolicy(options: {
+  key: string;
+  contentType: string;
+  maxBytes: number;
+  expiresInSeconds?: number;
+}) {
+  if (!HAS_ALIYUN_OSS_CONFIG) {
+    throw new Error('[阿里云OSS] 未配置或已禁用');
+  }
+
+  const expiresInSeconds = options.expiresInSeconds ?? 600;
+  const expiration = new Date(Date.now() + expiresInSeconds * 1000).toISOString();
+  const policy = {
+    expiration,
+    conditions: [
+      ['eq', '$key', options.key],
+      ['content-length-range', 1, options.maxBytes],
+      ['starts-with', '$Content-Type', options.contentType.split('/')[0] ? `${options.contentType.split('/')[0]}/` : ''],
+      ['eq', '$success_action_status', '200'],
+    ],
+  };
+  const encodedPolicy = Buffer.from(JSON.stringify(policy)).toString('base64');
+  const signature = createHmac('sha1', accessKeySecret).update(encodedPolicy).digest('base64');
+
+  return {
+    host: `https://${bucketName}.${region}.aliyuncs.com`,
+    key: options.key,
+    accessId: accessKeyId,
+    policy: encodedPolicy,
+    signature,
+    successActionStatus: '200',
+    expiresAt: expiration,
+  };
+}
+
+export async function assertAliyunOSSObjectExists(key: string) {
+  if (!HAS_ALIYUN_OSS_CONFIG || !ossClient) {
+    throw new Error('[阿里云OSS] 未配置或已禁用');
+  }
+
+  try {
+    await (ossClient as OSS & { head: (name: string) => Promise<unknown> }).head(key);
+  } catch (error: unknown) {
+    console.error('[阿里云OSS] 对象不存在或不可访问:', key, error);
+    throw new Error(`阿里云OSS对象不可访问: ${getErrorMessage(error)}`);
   }
 }
 

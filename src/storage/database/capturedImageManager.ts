@@ -95,6 +95,20 @@ export class CapturedImageManager {
       .offset(offset)
   }
 
+  async getUserCapturedImageByStorageKey(userId: string, storageKey: string): Promise<CapturedImage | null> {
+    const db = await getDb()
+    const [record] = await db
+      .select()
+      .from(capturedImages)
+      .where(and(
+        eq(capturedImages.userId, userId),
+        sql`${capturedImages.imageUrl} like ${`%${storageKey}%`}`,
+      ))
+      .limit(1)
+
+    return record || null
+  }
+
   async countUserCapturedImages(userId: string, filters?: CapturedImageFilters): Promise<number> {
     const db = await getDb()
     const conditions = buildCapturedImageConditions(userId, filters)
