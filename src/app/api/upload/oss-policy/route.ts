@@ -3,7 +3,7 @@ import { createAliyunOSSPostPolicy } from '@/lib/aliyunOSS';
 import { normalizeFileExtension, normalizeFolder } from '@/lib/localUploadStorage';
 
 const DIRECT_UPLOAD_MAX_BYTES = 40 * 1024 * 1024;
-const DIRECT_UPLOAD_FOLDERS = new Set(['uploads']);
+const DIRECT_UPLOAD_FOLDERS = new Set(['uploads', 'plugin-capture']);
 
 type DirectUploadPolicyRequest = {
   fileName?: string;

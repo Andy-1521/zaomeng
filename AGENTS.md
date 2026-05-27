@@ -7,6 +7,7 @@
 Current active capabilities:
 
 - Material library and browser-extension image capture
+- Direct-to-OSS material upload and plugin capture
 - AI生图 / image-to-image generation
 - 智能改图 / local smart editing
 - 彩绘提取
@@ -96,6 +97,9 @@ Use these paths for current frontend work:
 - `POST /api/color-extraction/run`
 - `POST /api/color-extraction/generate-psd`
 - `POST /api/outpaint-upsampling/run`
+- `POST /api/upload/oss-policy`
+- `POST /api/upload/complete-material`
+- `POST /api/plugin/complete-capture`
 - `POST /api/plugin/capture-image`
 - `GET /api/plugin/captured-images`
 - `GET /api/task/orders`
@@ -118,6 +122,8 @@ Do not reintroduce:
 - Returning generic selected-area labels when smart identify fails
 - Continuing with default aspect ratio when source size parsing fails
 - Keeping temporary upstream model URLs as final persisted results
+
+Material upload and plugin capture must persist images through Aliyun OSS URLs plus database metadata. A server-side plugin relay is allowed only as a compatibility transport for protected remote images, and it must still upload to OSS before writing `captured_images`.
 
 Expected behavior:
 

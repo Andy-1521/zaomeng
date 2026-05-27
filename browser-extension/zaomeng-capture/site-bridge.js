@@ -19,6 +19,11 @@
 
     if (message?.type === 'ZAOMENG_CAPTURE_IMAGE_SAVED') {
       postToPage('ZAOMENG_CAPTURE_IMAGE_SAVED', message.payload)
+      return
+    }
+
+    if (message?.type === 'ZAOMENG_CAPTURE_IMAGE_FAILED') {
+      postToPage('ZAOMENG_CAPTURE_IMAGE_FAILED', message.payload)
     }
   })
 

@@ -144,10 +144,10 @@ function transformBackground(text: string, config: WebsiteConfig) {
     originChecksLiteral,
     '}',
     '',
-    'const showTabTip = (tabId, message) => {',
+    "const showTabTip = (tabId, message, status = 'info', durationMs = 2600) => {",
   ].join('\n');
 
-  return text.replace(/const WEBSITE_ORIGIN = [\s\S]*?const showTabTip = \(tabId, message\) => \{/, replacement);
+  return text.replace(/const WEBSITE_ORIGIN = [\s\S]*?const showTabTip = \(tabId, message(?:,[^)]*)?\) => \{/, replacement);
 }
 
 function transformContentScript(text: string, config: WebsiteConfig) {

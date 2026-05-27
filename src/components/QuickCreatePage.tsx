@@ -300,6 +300,7 @@ const MATERIAL_UPLOAD_TIMEOUT_MS = 180_000;
 const MATERIAL_UPLOAD_RECOVERY_TTL_MS = 10 * 60 * 1000;
 const MATERIAL_UPLOAD_COMPRESS_THRESHOLD_BYTES = 8 * 1024 * 1024;
 const MATERIAL_UPLOAD_HARD_LIMIT_BYTES = 40 * 1024 * 1024;
+const IMAGE_LOAD_RETRY_DELAYS_MS = [500, 1200, 2500, 5000];
 
 const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
 
@@ -990,6 +991,8 @@ export default function QuickCreatePage() {
   const locallyInsertedMaterialIdsRef = useRef<Set<string>>(new Set());
   const requestedLatestCaptureRef = useRef(false);
   const isPageLeavingRef = useRef(false);
+  const imageRetryAttemptsRef = useRef<Record<string, number>>({});
+  const imageRetryTimersRef = useRef<Record<string, number>>({});
   const [capturedImages, setCapturedImages] = useState<CapturedImageRecord[]>([]);
   const [materialFolders, setMaterialFolders] = useState<MaterialFolder[]>([]);
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
@@ -1011,6 +1014,7 @@ export default function QuickCreatePage() {
   const [imageAspectRatios, setImageAspectRatios] = useState<Record<string, number>>({});
   const [imageSourceSizes, setImageSourceSizes] = useState<Record<string, ImageSourceSize>>({});
   const [failedImageUrls, setFailedImageUrls] = useState<Set<string>>(new Set());
+  const [imageRetryTokens, setImageRetryTokens] = useState<Record<string, number>>({});
   const [processingAction, setProcessingAction] = useState<GalleryActionId | null>(null);
   const [actionBarPosition, setActionBarPosition] = useState<{ top: number; left: number } | null>(null);
   const [showAiPromptPanel, setShowAiPromptPanel] = useState(false);
@@ -1150,6 +1154,14 @@ export default function QuickCreatePage() {
     };
   }, []);
 
+  useEffect(() => {
+    const timers = imageRetryTimersRef.current;
+    return () => {
+      Object.values(timers).forEach((timerId) => window.clearTimeout(timerId));
+      imageRetryTimersRef.current = {};
+    };
+  }, []);
+
   const dispatchTaskHistoryUpdated = useCallback((delay = 0) => {
     const dispatch = () => window.dispatchEvent(new Event('taskHistoryUpdated'));
     if (delay > 0) {
@@ -1185,6 +1197,44 @@ export default function QuickCreatePage() {
       if (current?.width === width && current.height === height) return prev;
       return { ...prev, [imageUrl]: { width, height } };
     });
+  }, []);
+
+  const clearImageRetryState = useCallback((imageUrl: string) => {
+    const timerId = imageRetryTimersRef.current[imageUrl];
+    if (timerId) {
+      window.clearTimeout(timerId);
+      delete imageRetryTimersRef.current[imageUrl];
+    }
+    delete imageRetryAttemptsRef.current[imageUrl];
+    setFailedImageUrls((prev) => {
+      if (!prev.has(imageUrl)) return prev;
+      const next = new Set(prev);
+      next.delete(imageUrl);
+      return next;
+    });
+  }, []);
+
+  const scheduleImageRetry = useCallback((imageUrl: string) => {
+    if (imageRetryTimersRef.current[imageUrl]) return;
+
+    const attempt = imageRetryAttemptsRef.current[imageUrl] || 0;
+    const delay = IMAGE_LOAD_RETRY_DELAYS_MS[attempt];
+    if (typeof delay !== 'number') {
+      setFailedImageUrls((prev) => {
+        if (prev.has(imageUrl)) return prev;
+        return new Set(prev).add(imageUrl);
+      });
+      return;
+    }
+
+    imageRetryAttemptsRef.current[imageUrl] = attempt + 1;
+    imageRetryTimersRef.current[imageUrl] = window.setTimeout(() => {
+      delete imageRetryTimersRef.current[imageUrl];
+      setImageRetryTokens((prev) => ({
+        ...prev,
+        [imageUrl]: (prev[imageUrl] || 0) + 1,
+      }));
+    }, delay);
   }, []);
 
   const loadCapturedImages = useCallback(async (options?: { offset?: number; append?: boolean; preserveCurrent?: boolean }) => {
@@ -1306,6 +1356,9 @@ export default function QuickCreatePage() {
     for (const material of newVisibleMaterials) {
       locallyInsertedMaterialIdsRef.current.add(material.id);
     }
+    for (const material of visibleMaterials) {
+      clearImageRetryState(material.imageUrl);
+    }
 
     materialRequestIdRef.current += 1;
     setIsLoadingMaterials(false);
@@ -1335,7 +1388,7 @@ export default function QuickCreatePage() {
         nextOffset: prev.nextOffset + newVisibleMaterials.length,
       };
     });
-  }, [materialMatchesCurrentView]);
+  }, [clearImageRetryState, materialMatchesCurrentView]);
 
   const reduceMaterialsPagination = useCallback((deletedCount: number) => {
     if (deletedCount <= 0) return;
@@ -2526,7 +2579,11 @@ export default function QuickCreatePage() {
   useEffect(() => {
     const handlePluginMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
-      const data = event.data as { source?: string; type?: string; payload?: PluginCaptureSavedPayload | null };
+      const data = event.data as {
+        source?: string;
+        type?: string;
+        payload?: (PluginCaptureSavedPayload & { error?: string }) | null;
+      };
       if (data?.source !== 'zaomeng-extension') return;
       if (data.type === 'ZAOMENG_EXTENSION_READY' && !requestedLatestCaptureRef.current) {
         requestedLatestCaptureRef.current = true;
@@ -2543,8 +2600,17 @@ export default function QuickCreatePage() {
         const material = getMaterialFromPluginPayload(data.payload);
         if (material) {
           prependUploadedMaterials([material]);
+          if (data.type === 'ZAOMENG_CAPTURE_IMAGE_SAVED') {
+            showToast('插件采图成功，图片已加入素材库', 'success');
+          }
         }
         void loadCapturedImages({ preserveCurrent: true });
+        return;
+      }
+
+      if (data.type === 'ZAOMENG_CAPTURE_IMAGE_FAILED') {
+        const message = data.payload?.error || '插件采图失败，请确认已登录后重试';
+        showToast(toUserFacingErrorMessage(message, '插件采图失败，请重试'), 'error');
       }
     };
 
@@ -3342,16 +3408,18 @@ export default function QuickCreatePage() {
                                     style={{ aspectRatio: `${1 / imageRatio}` }}
                                   >
                                     <SafeImage
+                                      key={`${image.imageUrl}-${imageRetryTokens[image.imageUrl] || 0}`}
                                       src={displayImageUrl}
                                       alt={`素材图片 ${cardIndex + 1}`}
                                       fill
                                       sizes={`(max-width: 768px) 50vw, ${thumbnailSize}px`}
                                       className="object-cover transition-transform duration-300 group-hover:scale-[1.02]"
                                       onLoad={(event) => {
+                                        clearImageRetryState(image.imageUrl);
                                         recordImageMetrics(image.imageUrl, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight);
                                       }}
                                       onError={() => {
-                                        setFailedImageUrls((prev) => new Set(prev).add(image.imageUrl));
+                                        scheduleImageRetry(image.imageUrl);
                                       }}
                                     />
                                   </div>
@@ -3569,13 +3637,18 @@ export default function QuickCreatePage() {
                               {selectedImageList.slice(0, 6).map((imageUrl, index) => (
                                 <div key={`${imageUrl}-${index}`} className="relative h-14 w-14 overflow-hidden rounded-xl border border-white/10 bg-black/20">
                                   <SafeImage
+                                    key={`${imageUrl}-${imageRetryTokens[imageUrl] || 0}`}
                                     src={getDisplayImageUrl(imageUrl)}
                                     alt={`已选素材 ${index + 1}`}
                                     fill
                                     sizes="56px"
                                     className="object-cover"
                                     onLoad={(event) => {
+                                      clearImageRetryState(imageUrl);
                                       recordImageMetrics(imageUrl, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight);
+                                    }}
+                                    onError={() => {
+                                      scheduleImageRetry(imageUrl);
                                     }}
                                   />
                                 </div>

@@ -29,6 +29,18 @@
 - 在任务中心查看处理进度、失败原因、退款结果和下载入口
 - 用积分计费高成本功能；自动支付暂时隐藏，当前使用管理员生成的一次性兑换码充值
 
+## 图库和插件存储原则
+
+图库是本项目的核心能力。当前约定必须保持：
+
+- 新上传素材默认由浏览器直传阿里云 OSS，服务端只签发上传凭证、校验对象存在、写入 `captured_images` 元数据。
+- 插件采图默认由插件读取图片并直传阿里云 OSS，再调用服务端完成入库。
+- 插件遇到跨站图片读取限制时，可走服务端兼容保存，但服务端也只能下载远程图片后上传 OSS，再写入数据库 URL；不得改成本地 `public/` 持久存储。
+- 数据库只保存素材 URL、来源页面、分组、收藏等元数据，不保存图片二进制。
+- 前端收到上传或插件采集成功返回的 `material` 后必须立即插入图库；慢列表刷新只作为校准，不应要求用户手动刷新才能看到图片。
+- OSS 图片首次读取偶发失败时前端会自动短间隔重试，不应立刻显示“图片不可用”。
+- 上传刷新中断后，前端会用 sessionStorage 记录未完成 OSS key，并在重新进入页面后尝试补完成入库。
+
 ## 目录交接
 
 `/Users/andy/Documents/zaomeng/zaomeng` 是本地造梦项目交接根目录。生产服务器只运行 `/home/ubuntu/zaomeng`。
@@ -185,9 +197,12 @@ PSD 当前要点：
 上传与插件：
 
 - `src/app/api/upload/file/route.ts`：文件上传
+- `src/app/api/upload/oss-policy/route.ts`：浏览器/插件 OSS 直传凭证
+- `src/app/api/upload/complete-material/route.ts`：本地素材直传后入库
 - `src/app/api/upload/image/route.ts`：data URL 图片上传
 - `src/app/api/upload/buffer/route.ts`：buffer 上传
-- `src/app/api/plugin/capture-image/route.ts`：插件采图入库
+- `src/app/api/plugin/complete-capture/route.ts`：插件 OSS 直传后入库
+- `src/app/api/plugin/capture-image/route.ts`：插件服务端兼容保存，仍上传 OSS 后入库
 - `src/app/api/plugin/download/route.ts`：动态打包插件 zip
 - `browser-extension/zaomeng-capture/`：插件模板
 
@@ -209,6 +224,9 @@ PSD 当前要点：
 - `POST /api/color-extraction/run`
 - `POST /api/color-extraction/generate-psd`
 - `POST /api/outpaint-upsampling/run`
+- `POST /api/upload/oss-policy`
+- `POST /api/upload/complete-material`
+- `POST /api/plugin/complete-capture`
 - `POST /api/plugin/capture-image`
 - `GET /api/plugin/captured-images`
 - `GET /api/task/orders`
@@ -324,6 +342,7 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 - 高清+扩图退款验证：`HDO-1779436077389_5588`
 - 2026-05-26 本地新增验证：登录、注册接口、用户资料刷新、素材上传到阿里云 OSS、插件采图、插件版本接口、兑换码生成和兑换、管理员兑换码记录均通过
 - 2026-05-27 修复插件采图和素材上传状态同步：采图接口返回完整素材记录，前端收到插件保存成功后立即插入图库并保留慢列表同步结果；图库可显示过滤补充 AVIF；上传刷新导致的中断不再记录为真实失败。生产 smoke 已验证插件采图、本地上传、图库列表可查、插件包 v0.1.7 域名配置正确。
+- 2026-05-27 进一步恢复图库主链路：本地素材上传和插件采图均优先浏览器/插件直传阿里云 OSS，服务端只签名、校验和写数据库；插件包升级到 v0.1.9，补充插件采集成功/失败进度提示，修复 OSS 图片首次加载失败后必须刷新才显示的问题。本地真实验证通过：本地素材直传入库、插件直传入库、重复完成入库幂等、图库 API 可见、真实浏览器上传后即时插入、首次 OSS GET 被拦截后自动恢复、插件失败提示可见、插件下载包生产域名正确。
 
 ## 已完成清理
 
@@ -369,7 +388,7 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 - 全站认证仍以客户端 `user` JSON cookie 为核心，存在伪造身份和越权风险；后续应迁移到服务端可信 session/JWT
 - 管理员接口依赖同一 cookie 模型，认证改造时要一起处理
 - 部分 API 仍混用 body/header/cookie 的用户标识，后续应统一 `getAuthenticatedUser(request)`
-- 插件采图和远程图片读取必须继续复用 `src/lib/safeRemoteImage.ts`
+- 插件服务端兼容采图和远程图片读取必须继续复用 `src/lib/safeRemoteImage.ts`
 - 智能改图 mask 仍以 base64 JSON 提交，Nginx 已放宽 `/api/material-editor` 请求体，但长期建议改 multipart 或先上传 mask
 - 支付宝/微信真实支付商户参数、签名、证书、回调密钥仍未完整提供，真实商户回调验收仍阻塞
 

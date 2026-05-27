@@ -59,19 +59,52 @@
   tip.style.padding = '10px 14px'
   tip.style.borderRadius = '999px'
   tip.style.background = 'rgba(15, 23, 42, 0.92)'
+  tip.style.border = '1px solid rgba(255,255,255,0.16)'
   tip.style.color = '#fff'
   tip.style.fontSize = '12px'
+  tip.style.fontWeight = '600'
   tip.style.display = 'none'
   tip.style.boxShadow = '0 8px 24px rgba(0,0,0,0.22)'
   document.documentElement.appendChild(tip)
 
-  const showTip = (message) => {
+  const getTipStyle = (status) => {
+    if (status === 'success') {
+      return {
+        background: 'rgba(6, 95, 70, 0.94)',
+        borderColor: 'rgba(110, 231, 183, 0.42)',
+      }
+    }
+
+    if (status === 'error') {
+      return {
+        background: 'rgba(127, 29, 29, 0.94)',
+        borderColor: 'rgba(252, 165, 165, 0.45)',
+      }
+    }
+
+    if (status === 'warning') {
+      return {
+        background: 'rgba(120, 53, 15, 0.94)',
+        borderColor: 'rgba(253, 230, 138, 0.42)',
+      }
+    }
+
+    return {
+      background: 'rgba(15, 23, 42, 0.92)',
+      borderColor: 'rgba(255,255,255,0.16)',
+    }
+  }
+
+  const showTip = (message, status = 'info', durationMs = 2600) => {
+    const style = getTipStyle(status)
     tip.textContent = message
+    tip.style.background = style.background
+    tip.style.borderColor = style.borderColor
     tip.style.display = 'block'
     clearTimeout(showTip.timer)
     showTip.timer = setTimeout(() => {
       tip.style.display = 'none'
-    }, 2200)
+    }, durationMs)
   }
 
   button.addEventListener('mouseenter', () => {
@@ -264,7 +297,7 @@
     }
 
     if (message?.type === 'ZAOMENG_SHOW_TIP') {
-      showTip(message.message || '未识别到图片')
+      showTip(message.message || '未识别到图片', message.status || 'info', message.durationMs || 2600)
       sendResponse({ success: true })
       return true
     }
@@ -287,11 +320,11 @@
     showTip('正在采集到造梦AI...')
     chrome.runtime.sendMessage({ type: 'ZAOMENG_CAPTURE_IMAGE', payload }, () => {
       if (chrome.runtime.lastError) {
-        showTip('采集失败，请打开造梦AI网站后重试')
+      showTip('采集失败：请打开造梦AI网站后重试', 'error', 3600)
         return
       }
 
-      showTip('已发送至造梦AI，正在保存...')
+      showTip('已发送至造梦AI，正在保存...', 'info', 2600)
       hideButton()
     })
   })
