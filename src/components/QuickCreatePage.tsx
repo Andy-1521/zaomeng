@@ -1011,42 +1011,6 @@ function getOrderStatusClass(statusLabel: string): string {
   return 'border-emerald-300/30 bg-emerald-400/18 text-emerald-50';
 }
 
-function createOrderPlaceholderImage(orderNumber: string, statusLabel: string): string {
-  const palette = statusLabel === '处理中'
-    ? { start: '#082032', end: '#0ea5e9', accent: '#7dd3fc', ring: 'rgba(125,211,252,0.34)' }
-    : statusLabel === '失败' || statusLabel === '超时'
-      ? { start: '#22070a', end: '#ef4444', accent: '#fecaca', ring: 'rgba(252,165,165,0.34)' }
-      : statusLabel === '部分成功'
-        ? { start: '#231507', end: '#f59e0b', accent: '#fde68a', ring: 'rgba(251,191,36,0.34)' }
-        : { start: '#052016', end: '#10b981', accent: '#a7f3d0', ring: 'rgba(52,211,153,0.34)' };
-
-  const glyph = statusLabel === '处理中'
-    ? '<circle cx="64" cy="64" r="18" fill="none" stroke="#7dd3fc" stroke-width="4.5" stroke-linecap="round" stroke-dasharray="62 42" transform="rotate(-40 64 64)" />'
-    : statusLabel === '失败' || statusLabel === '超时'
-      ? '<path d="M52 52l24 24M76 52L52 76" fill="none" stroke="#fecaca" stroke-width="4.5" stroke-linecap="round" />'
-      : '<path d="M49 64l10 10 20-22" fill="none" stroke="#a7f3d0" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />';
-
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-      <title>${orderNumber}</title>
-      <defs>
-        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="${palette.start}" />
-          <stop offset="100%" stop-color="${palette.end}" />
-        </linearGradient>
-      </defs>
-      <rect width="128" height="128" rx="28" fill="url(#bg)" />
-      <circle cx="64" cy="64" r="34" fill="rgba(255,255,255,0.08)" stroke="${palette.ring}" stroke-width="2" />
-      ${glyph}
-      <rect x="24" y="92" width="80" height="7" rx="3.5" fill="rgba(255,255,255,0.14)" />
-      <rect x="36" y="106" width="56" height="5" rx="2.5" fill="rgba(255,255,255,0.12)" />
-      <circle cx="32" cy="32" r="4" fill="${palette.accent}" fill-opacity="0.9" />
-    </svg>
-  `;
-
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
-}
-
 function parseMaterialDate(value: string | number | Date): Date {
   if (value instanceof Date) {
     return value;
@@ -1690,21 +1654,8 @@ export default function QuickCreatePage() {
         const createdAt = item.createdAt || item.time || new Date().toISOString();
         const orderNumber = item.orderNumber || item.id;
 
-        if (statusLabel === '处理中' || statusLabel === '失败' || statusLabel === '超时' || resultImages.length === 0) {
-          const placeholderImageUrl = resultImages[0] || sourceImages[0] || createOrderPlaceholderImage(orderNumber, statusLabel);
-          return [{
-            id: `${item.id}-status`,
-            orderId: orderNumber,
-            imageUrl: placeholderImageUrl,
-            createdAt,
-            toolLabel,
-            statusLabel,
-            description: `${toolLabel}${statusLabel === '成功' ? '暂无结果' : statusLabel}`,
-            orderNumber,
-            sourceImageUrl: sourceImages[0] || null,
-            isResultImage: false,
-            downloadFileName: getOrderDownloadFileName(orderNumber, toolLabel, placeholderImageUrl, 0),
-          }];
+        if ((statusLabel !== '成功' && statusLabel !== '部分成功') || resultImages.length === 0) {
+          return [];
         }
 
         const description = `${toolLabel}结果`;
