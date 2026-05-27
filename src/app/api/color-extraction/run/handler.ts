@@ -39,7 +39,6 @@ type ColorExtractionJob = {
   userId: string;
   imageUrl: string;
   finalOrderId: string;
-  workflowInputImageUrl: string;
   extractionMode: 'full' | 'hollow';
   chargedRemainingPoints: number;
   localMaterialOrigin: string;
@@ -256,7 +255,6 @@ async function processColorExtractionJob(params: ColorExtractionJob) {
     userId,
     imageUrl,
     finalOrderId,
-    workflowInputImageUrl,
     extractionMode,
     chargedRemainingPoints,
     localMaterialOrigin,
@@ -275,10 +273,11 @@ async function processColorExtractionJob(params: ColorExtractionJob) {
 
     if (extractionMode === 'hollow') {
       console.log(`[彩绘提取2工作流] 使用镂空图模式（去除背景API）`);
+      const workflowInputImageUrl = await normalizeWorkflowSourceImage(imageUrl, finalOrderId, localMaterialOrigin);
       extractionResult = await submitCozeRemoveBgWorkflowTask(workflowInputImageUrl);
     } else {
       console.log(`[彩绘提取2工作流] 使用全屏图模式（Psydo 图生图彩绘提取API）`);
-      extractionResult = await extractColorExtraction(workflowInputImageUrl, localMaterialOrigin);
+      extractionResult = await extractColorExtraction(imageUrl, localMaterialOrigin);
     }
 
     console.log(`[彩绘提取2工作流] ========== 提取函数返回结果 ==========`);
@@ -499,12 +498,9 @@ export async function POST(request: NextRequest) {
     }
 
     finalOrderId = orderId || `ORD${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-    const workflowInputImageUrl = await normalizeWorkflowSourceImage(imageUrl, finalOrderId, request.nextUrl.origin);
-
     console.log(`[彩绘提取2工作流] 开始处理订单: ${finalOrderId}`);
     console.log(`[彩绘提取2工作流] 用户: ${userId}, 积分: ${currentPoints}`);
     console.log(`[彩绘提取2工作流] 图片URL: ${imageUrl.substring(0, 80)}...`);
-    console.log(`[彩绘提取2工作流] 工作流输入URL: ${workflowInputImageUrl.substring(0, 80)}...`);
 
     await transactionManager.createTransaction({
       userId: userId,
@@ -559,7 +555,6 @@ export async function POST(request: NextRequest) {
         userId,
         imageUrl,
         finalOrderId,
-        workflowInputImageUrl,
         extractionMode,
         chargedRemainingPoints,
         localMaterialOrigin: request.nextUrl.origin,
