@@ -11,7 +11,7 @@
 - 每次生产发布前都要备份到 GitHub，提交信息使用 `backup: YYYY-MM-DD 摘要`。
 - 当前生产部署在腾讯云香港服务器，不再走 Vercel Preview / Production。
 - 生产数据优先保护：不直接改生产数据库、不清空生产素材、不覆盖 `/home/ubuntu/zaomeng/.env.local`。
-- 当前正式生产基线：Git commit `c2150ac`，生产地址 `https://zaomengai.icu`。
+- 当前正式生产基线：生产地址 `https://zaomengai.icu`，服务器 `/home/ubuntu/zaomeng/.deploy-sha` 记录当前发布的 Git commit。
 
 ## 网站作用
 

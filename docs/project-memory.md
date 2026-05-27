@@ -16,7 +16,7 @@
 - 应用日志：`/home/ubuntu/zaomeng/.coze-logs/systemd-web.log`
 - 错误日志：`/home/ubuntu/zaomeng/.coze-logs/systemd-web-error.log`
 - 当前服务状态：已完成构建和重启验证，`zaomeng-web.service` 为 `active`
-- 当前正式生产基线：Git commit `c2150ac`，公网入口 `https://zaomengai.icu`
+- 当前正式生产基线：公网入口 `https://zaomengai.icu`，服务器 `/home/ubuntu/zaomeng/.deploy-sha` 记录当前发布的 Git commit
 - 当前核心原则：只有主链路；没有备用、没有降级、没有失败后换路；失败要明确失败并按积分规则补偿
 - 当前发布原则：先本地预览给用户验收，再备份 GitHub，最后部署腾讯云香港生产服务器
 - 当前数据原则：后续优化尽量不动生产数据；排查生产问题先只读查询，任何修复性写入必须先得到用户确认
@@ -329,7 +329,7 @@ pnpm build
 发布脚本部署成功后只保留最近 1 个 `/home/ubuntu/zaomeng-prev-*` 回滚目录。当前服务器已清理为：
 
 - 当前生产：`/home/ubuntu/zaomeng`
-- 最近回滚：`/home/ubuntu/zaomeng-prev-20260528003948-c2150ac`
+- 最近回滚：服务器只保留最近 1 个 `/home/ubuntu/zaomeng-prev-*` 目录，用 `ls -dt /home/ubuntu/zaomeng-prev-* | head -1` 查看
 
 不要手动删除当前生产目录、`.env.local`、数据库文件、Redis 数据或 OSS 素材。确实需要清理时，只清理旧 release、`.DS_Store`、`.next`、日志和可重新生成的构建产物。
 
@@ -401,7 +401,7 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 - 2026-05-27 进一步恢复图库主链路：本地素材上传和插件采图均优先浏览器/插件直传阿里云 OSS，服务端只签名、校验和写数据库；插件包升级到 v0.1.9，补充插件采集成功/失败进度提示，修复 OSS 图片首次加载失败后必须刷新才显示的问题。本地真实验证通过：本地素材直传入库、插件直传入库、重复完成入库幂等、图库 API 可见、真实浏览器上传后即时插入、首次 OSS GET 被拦截后自动恢复、插件失败提示可见、插件下载包生产域名正确。
 - 2026-05-27 生产对象存储从阿里云上海切到香港桶 `zaomengai-hk-20260527`：上海 OSS 在腾讯云香港服务器上多次 `ECONNRESET` / 90s timeout，香港 OSS 验证通过。生产真实 smoke 通过：本地素材直传 OSS 126ms、素材入库 118ms、插件直传 OSS 28ms、插件入库 20ms、旧插件服务端兼容采集 452ms；AI 生图成功写入香港 OSS；智能改图成功写入香港 OSS，最终订单状态“成功”。
 - 2026-05-27 本地预览修复：AI 生图和智能改图结果只保留在订单记录，不再自动写入图库；PSD 生成中的状态超过 12 分钟可重新生成，避免旧请求中断后永久卡住；右侧选图浮层改为视口定位并上下左右夹紧；AI 生图和智能改图输入区支持 Enter 提交、Shift+Enter 换行；标记识别仍保留预识别 `prewarm`，实际识别请求改用更小 JPEG 裁切图和 16 秒超时以减少等待。验证：`pnpm exec tsc --noEmit --pretty false --incremental false`、`git diff --check`、`pnpm build`、本地 5011 Playwright 浮层/Enter 检查通过。
-- 2026-05-28 正式生产基线：彩绘提取改为后台并发处理，提交接口快速返回订单；取消镂空模式和 Coze 去背景分支；图库订单结果只展示成功结果图；订单记录下载改为 `/api/image/download` 同源代理；删除订单不再自动滚到失败订单；订单记录大图按比例完整显示；本地和服务器清理 `.DS_Store`、`.next`、日志和旧 release，生产只保留最近 1 个回滚目录。当前基线 commit：`c2150ac`。
+- 2026-05-28 正式生产基线：彩绘提取改为后台并发处理，提交接口快速返回订单；取消镂空模式和 Coze 去背景分支；图库订单结果只展示成功结果图；订单记录下载改为 `/api/image/download` 同源代理；删除订单不再自动滚到失败订单；订单记录大图按比例完整显示；本地和服务器清理 `.DS_Store`、`.next`、日志和旧 release，生产只保留最近 1 个回滚目录。当前生产 commit 以服务器 `/home/ubuntu/zaomeng/.deploy-sha` 为准。
 
 ## 已完成清理
 
