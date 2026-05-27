@@ -1114,6 +1114,8 @@ export default function QuickCreatePage() {
   const trackedProcessingOrdersRef = useRef<Record<string, number>>({});
   const materialRequestIdRef = useRef(0);
   const hasLoadedMaterialsRef = useRef(false);
+  const prefetchedMaterialKeysRef = useRef<Set<string>>(new Set());
+  const prefetchingMaterialKeysRef = useRef<Set<string>>(new Set());
   const locallyInsertedMaterialIdsRef = useRef<Set<string>>(new Set());
   const requestedLatestCaptureRef = useRef(false);
   const isPageLeavingRef = useRef(false);
@@ -1432,6 +1434,8 @@ export default function QuickCreatePage() {
 
     if (!user?.id) {
       hasLoadedMaterialsRef.current = false;
+      prefetchedMaterialKeysRef.current.clear();
+      prefetchingMaterialKeysRef.current.clear();
       setCapturedImages([]);
       setMaterialsPagination(EMPTY_CAPTURED_IMAGES_PAGINATION);
       setIsLoadingMaterials(false);
@@ -1473,6 +1477,7 @@ export default function QuickCreatePage() {
       };
 
       hasLoadedMaterialsRef.current = true;
+      prefetchedMaterialKeysRef.current.add(`${materialScope}:${materialFilter}`);
       setMaterialsPagination(nextPagination);
       setCapturedImages((prev) => {
         const nextData = data.data || [];
@@ -1528,6 +1533,55 @@ export default function QuickCreatePage() {
 
     return true;
   }, [activeFolderId, materialFilter, materialScope]);
+
+  const mergeCapturedImages = useCallback((materials: CapturedImageRecord[]) => {
+    if (materials.length === 0) return;
+    setCapturedImages((prev) => {
+      const nextById = new Map(prev.map((image) => [image.id, image]));
+      for (const material of materials) {
+        nextById.set(material.id, material);
+      }
+
+      return Array.from(nextById.values()).sort(
+        (left, right) => parseMaterialDate(right.createdAt).getTime() - parseMaterialDate(left.createdAt).getTime()
+      );
+    });
+  }, []);
+
+  const prefetchMaterialScope = useCallback(async (scope: MaterialScope) => {
+    if (!user?.id) return;
+
+    const key = `${scope}:${materialFilter}`;
+    if (prefetchedMaterialKeysRef.current.has(key) || prefetchingMaterialKeysRef.current.has(key)) return;
+    prefetchingMaterialKeysRef.current.add(key);
+
+    try {
+      const params = new URLSearchParams({
+        limit: String(MATERIAL_PAGE_SIZE),
+        offset: '0',
+        scope,
+        date: materialFilter,
+        timezoneOffset: String(new Date().getTimezoneOffset()),
+      });
+      const response = await fetch(`/api/plugin/captured-images?${params.toString()}`, { credentials: 'include' });
+      const data = await response.json() as CapturedImagesResponse;
+      if (!response.ok || !data.success || !Array.isArray(data.data)) return;
+      prefetchedMaterialKeysRef.current.add(key);
+      mergeCapturedImages(data.data);
+    } catch (error) {
+      console.warn('[素材库] 预取素材失败:', error);
+    } finally {
+      prefetchingMaterialKeysRef.current.delete(key);
+    }
+  }, [materialFilter, mergeCapturedImages, user?.id]);
+
+  const handleMaterialScopeChange = useCallback((scope: MaterialScope) => {
+    if (scope === materialScope) return;
+    setMaterialScope(scope);
+    if (scope === 'favorite') {
+      void prefetchMaterialScope(scope);
+    }
+  }, [materialScope, prefetchMaterialScope]);
 
   const prependUploadedMaterials = useCallback((materials: CapturedImageRecord[]) => {
     const visibleMaterials = materials.filter(materialMatchesCurrentView);
@@ -3088,6 +3142,11 @@ export default function QuickCreatePage() {
   }, [clearSelectionState, loadCapturedImages]);
 
   useEffect(() => {
+    if (!user?.id || materialFilter !== 'all' || !hasLoadedMaterialsRef.current) return;
+    void prefetchMaterialScope('favorite');
+  }, [capturedImages.length, materialFilter, prefetchMaterialScope, user?.id]);
+
+  useEffect(() => {
     const handleTaskUpdate = () => {
       void loadOrderResults();
     };
@@ -3389,8 +3448,9 @@ export default function QuickCreatePage() {
                     ['uncategorized', '未分类'],
                   ] as Array<[MaterialScope, string]>).map(([scope, label]) => (
                     <button
+                      type="button"
                       key={scope}
-                      onClick={() => setMaterialScope(scope)}
+                      onClick={() => handleMaterialScopeChange(scope)}
                       className={`shrink-0 rounded-full border px-3.5 py-2 text-xs transition-all ${materialScope === scope ? 'border-white/18 bg-white/16 text-white shadow-[0_8px_22px_rgba(255,255,255,0.06)]' : 'border-white/[0.07] bg-white/[0.045] text-white/48 hover:bg-white/[0.08] hover:text-white/78'}`}
                     >
                       {label}{materialScope === scope && galleryTotalCount > 0 ? <span className="ml-1 text-white/32">{galleryTotalCount}</span> : null}
@@ -3401,8 +3461,9 @@ export default function QuickCreatePage() {
                     const scope = `folder:${folder.id}` as MaterialScope;
                     return (
                       <button
+                        type="button"
                         key={folder.id}
-                        onClick={() => setMaterialScope(scope)}
+                        onClick={() => handleMaterialScopeChange(scope)}
                         className={`shrink-0 rounded-full border px-3.5 py-2 text-xs transition-all ${materialScope === scope ? 'border-blue-300/28 bg-blue-400/18 text-blue-50 shadow-[0_10px_26px_rgba(59,130,246,0.12)]' : 'border-white/[0.07] bg-white/[0.045] text-white/48 hover:bg-white/[0.08] hover:text-white/78'}`}
                       >
                         {folder.name}{materialScope === scope && galleryTotalCount > 0 ? <span className="ml-1 text-white/32">{galleryTotalCount}</span> : null}
