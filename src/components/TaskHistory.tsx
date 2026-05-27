@@ -94,6 +94,7 @@ type TaskRecordApiResponse = {
 };
 
 const taskRecordCacheByUser = new Map<string, TaskRecord[]>();
+const TASK_CACHE_STORAGE_PREFIX = 'zaomeng:task-history-cache:';
 
 const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
 
@@ -193,12 +194,48 @@ function getTaskCacheKey(userId?: string): string {
   return userId || getStoredUserId() || 'anonymous';
 }
 
+function getTaskCacheStorageKey(userId?: string): string {
+  return `${TASK_CACHE_STORAGE_PREFIX}${getTaskCacheKey(userId)}`;
+}
+
+function readStoredTaskCache(userId?: string): TaskRecord[] {
+  if (typeof window === 'undefined') return [];
+
+  try {
+    const raw = window.localStorage.getItem(getTaskCacheStorageKey(userId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is TaskRecord => {
+      return !!item && typeof item.id === 'string' && typeof item.time === 'number';
+    });
+  } catch (error) {
+    console.warn('[TaskHistory] 读取本地任务缓存失败:', error);
+    return [];
+  }
+}
+
 function getTaskCache(userId?: string): TaskRecord[] {
-  return taskRecordCacheByUser.get(getTaskCacheKey(userId)) ?? [];
+  const cacheKey = getTaskCacheKey(userId);
+  const cached = taskRecordCacheByUser.get(cacheKey);
+  if (cached) return cached;
+
+  const stored = readStoredTaskCache(userId);
+  taskRecordCacheByUser.set(cacheKey, stored);
+  return stored;
 }
 
 function setTaskCache(records: TaskRecord[], userId?: string) {
-  taskRecordCacheByUser.set(getTaskCacheKey(userId), records);
+  const cacheKey = getTaskCacheKey(userId);
+  taskRecordCacheByUser.set(cacheKey, records);
+  if (typeof window === 'undefined') return;
+
+  try {
+    const compactRecords = records.slice(0, 80);
+    window.localStorage.setItem(getTaskCacheStorageKey(userId), JSON.stringify(compactRecords));
+  } catch (error) {
+    console.warn('[TaskHistory] 写入本地任务缓存失败:', error);
+  }
 }
 
 function updateTaskCache(

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import Image, { type ImageLoaderProps, type ImageProps } from 'next/image';
-import { addTaskRecord, updateTaskRecordStatus } from '@/components/TaskHistory';
+import { addTaskRecord, getCachedTasks, updateTaskRecordStatus } from '@/components/TaskHistory';
 import CropEditorPanel from '@/components/CropEditorPanel';
 import LocalEditPanel from '@/components/LocalEditPanel';
 import PointsIconLabel from '@/components/PointsIconLabel';
@@ -102,8 +102,24 @@ type UploadFileResponse = {
 };
 
 type MaterialUploadResult =
-  | { success: true; fileName: string; url: string; material?: CapturedImageRecord | null }
+  | { success: true; fileName: string; url: string; material?: CapturedImageRecord | null; compressed: boolean; originalSize: number; finalSize: number }
   | { success: false; fileName: string; message: string };
+
+type PreparedUploadFile = {
+  file: File;
+  compressed: boolean;
+  originalSize: number;
+  finalSize: number;
+};
+
+type StoredMaterialUploadSession = {
+  id: string;
+  userId: string;
+  total: number;
+  completed: number;
+  startedAt: number;
+  updatedAt: number;
+};
 
 type GalleryAction = {
   id: GalleryActionId;
@@ -236,6 +252,9 @@ const UNCATEGORIZED_FOLDER_VALUE = '__uncategorized__';
 const PROCESSING_ORDER_POLL_TTL_MS = 20 * 60 * 1000;
 const MATERIAL_UPLOAD_CONCURRENCY = 3;
 const MATERIAL_UPLOAD_TIMEOUT_MS = 75_000;
+const MATERIAL_UPLOAD_RECOVERY_TTL_MS = 10 * 60 * 1000;
+const MATERIAL_UPLOAD_COMPRESS_THRESHOLD_BYTES = 900 * 1024;
+const MATERIAL_UPLOAD_HARD_LIMIT_BYTES = 40 * 1024 * 1024;
 
 const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
 
@@ -278,6 +297,106 @@ async function runWithConcurrency<T, R>(
   }));
 
   return results;
+}
+
+function getMaterialUploadSessionKey(userId?: string) {
+  return `zaomeng:material-upload:${userId || 'anonymous'}`;
+}
+
+function readMaterialUploadSession(userId?: string): StoredMaterialUploadSession | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(getMaterialUploadSessionKey(userId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredMaterialUploadSession;
+    if (!parsed || typeof parsed.startedAt !== 'number') return null;
+    if (Date.now() - parsed.startedAt > MATERIAL_UPLOAD_RECOVERY_TTL_MS) {
+      window.sessionStorage.removeItem(getMaterialUploadSessionKey(userId));
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeMaterialUploadSession(session: StoredMaterialUploadSession) {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.setItem(getMaterialUploadSessionKey(session.userId), JSON.stringify(session));
+}
+
+function clearMaterialUploadSession(userId?: string) {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.removeItem(getMaterialUploadSessionKey(userId));
+}
+
+function getCompressedFileName(fileName: string, mimeType: string) {
+  const extension = mimeType === 'image/jpeg' ? 'jpg' : mimeType === 'image/webp' ? 'webp' : 'png';
+  const baseName = fileName.replace(/\.[^.]+$/, '');
+  return `${baseName}.${extension}`;
+}
+
+async function canvasToBlob(canvas: HTMLCanvasElement, mimeType: string, quality: number) {
+  return new Promise<Blob | null>((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), mimeType, quality);
+  });
+}
+
+async function prepareImageFileForUpload(file: File): Promise<PreparedUploadFile> {
+  if (
+    file.size < MATERIAL_UPLOAD_COMPRESS_THRESHOLD_BYTES ||
+    file.type === 'image/gif' ||
+    !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)
+  ) {
+    return { file, compressed: false, originalSize: file.size, finalSize: file.size };
+  }
+
+  let objectUrl = '';
+  try {
+    objectUrl = URL.createObjectURL(file);
+    const image = new window.Image();
+    image.decoding = 'async';
+    const loaded = new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('图片读取失败'));
+    });
+    image.src = objectUrl;
+    await loaded;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext('2d', { alpha: true });
+    if (!context || canvas.width === 0 || canvas.height === 0) {
+      return { file, compressed: false, originalSize: file.size, finalSize: file.size };
+    }
+
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const targetType = file.type === 'image/jpeg' ? 'image/jpeg' : 'image/webp';
+    const quality = file.type === 'image/jpeg' ? 0.82 : 0.86;
+    const compressedBlob = await canvasToBlob(canvas, targetType, quality);
+    if (!compressedBlob || compressedBlob.size >= file.size * 0.95) {
+      return { file, compressed: false, originalSize: file.size, finalSize: file.size };
+    }
+
+    const compressedFile = new File([compressedBlob], getCompressedFileName(file.name, targetType), {
+      type: targetType,
+      lastModified: file.lastModified,
+    });
+
+    return {
+      file: compressedFile,
+      compressed: true,
+      originalSize: file.size,
+      finalSize: compressedFile.size,
+    };
+  } catch (error) {
+    console.warn('[素材上传] 图片压缩失败，使用原图上传:', error);
+    return { file, compressed: false, originalSize: file.size, finalSize: file.size };
+  } finally {
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+  }
 }
 
 type QuickCreateDropdownProps = {
@@ -666,6 +785,7 @@ export default function QuickCreatePage() {
   const [materialsPagination, setMaterialsPagination] = useState<CapturedImagesPagination>(EMPTY_CAPTURED_IMAGES_PAGINATION);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgressText, setUploadProgressText] = useState('');
+  const [uploadRecoveryText, setUploadRecoveryText] = useState('');
   const [isAiReferenceUploading, setIsAiReferenceUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [canHoverCardControls, setCanHoverCardControls] = useState(true);
@@ -1007,15 +1127,24 @@ export default function QuickCreatePage() {
         const createdAt = item.createdAt || item.time || new Date().toISOString();
         const orderNumber = item.orderNumber || item.id;
 
-        if (statusLabel === '处理中' || statusLabel === '失败' || statusLabel === '超时') {
-          return [];
+        if (statusLabel === '处理中' || statusLabel === '失败' || statusLabel === '超时' || resultImages.length === 0) {
+          const placeholderImageUrl = resultImages[0] || sourceImages[0] || createOrderPlaceholderImage(orderNumber, statusLabel);
+          return [{
+            id: `${item.id}-status`,
+            orderId: orderNumber,
+            imageUrl: placeholderImageUrl,
+            createdAt,
+            toolLabel,
+            statusLabel,
+            description: `${toolLabel}${statusLabel === '成功' ? '暂无结果' : statusLabel}`,
+            orderNumber,
+            sourceImageUrl: sourceImages[0] || null,
+            isResultImage: false,
+            downloadFileName: getOrderDownloadFileName(orderNumber, toolLabel, placeholderImageUrl, 0),
+          }];
         }
 
-        if (resultImages.length === 0) {
-          return [];
-        }
-
-        const description = `${toolLabel}${statusLabel === '处理中' ? '处理中' : '结果'}`;
+        const description = `${toolLabel}结果`;
 
         return resultImages.map((imageUrl, index) => ({
           id: `${item.id}-${index}`,
@@ -1186,10 +1315,10 @@ export default function QuickCreatePage() {
       return false;
     }
 
-    const maxSize = 10 * 1024 * 1024;
+    const maxSize = MATERIAL_UPLOAD_HARD_LIMIT_BYTES;
     const oversizedFiles = files.filter((file) => file.size > maxSize);
     if (oversizedFiles.length > 0) {
-      showToast('单张图片大小不能超过 10MB', 'error');
+      showToast('单张图片大小不能超过 40MB', 'error');
       return false;
     }
 
@@ -1201,13 +1330,26 @@ export default function QuickCreatePage() {
     if (!validateImageFiles(files)) return;
 
     let completedCount = 0;
+    const sessionUserId = user?.id || 'anonymous';
+    const uploadSession: StoredMaterialUploadSession = {
+      id: `${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+      userId: sessionUserId,
+      total: files.length,
+      completed: 0,
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    writeMaterialUploadSession(uploadSession);
     setIsUploading(true);
     setUploadProgressText(files.length === 1 ? '正在上传 1 张素材...' : `正在上传 0/${files.length} 张素材...`);
 
     try {
       const uploadOne = async (file: File): Promise<MaterialUploadResult> => {
+        const prepared = await prepareImageFileForUpload(file);
         const formData = new FormData();
-        formData.append('file', file);
+        formData.append('file', prepared.file);
+        formData.append('originalFileName', file.name);
         formData.append('createMaterial', 'true');
         if (activeFolderId) {
           formData.append('materialFolderId', activeFolderId);
@@ -1229,6 +1371,9 @@ export default function QuickCreatePage() {
             fileName: file.name,
             url: data.data.url,
             material: data.data.material ?? null,
+            compressed: prepared.compressed,
+            originalSize: prepared.originalSize,
+            finalSize: prepared.finalSize,
           };
 
           if (data.data.material) {
@@ -1245,6 +1390,11 @@ export default function QuickCreatePage() {
           };
         } finally {
           completedCount += 1;
+          writeMaterialUploadSession({
+            ...uploadSession,
+            completed: completedCount,
+            updatedAt: Date.now(),
+          });
           setUploadProgressText(files.length === 1 ? '正在整理素材...' : `正在上传 ${completedCount}/${files.length} 张素材...`);
         }
       };
@@ -1257,7 +1407,11 @@ export default function QuickCreatePage() {
         if (successfulUploads.some((result) => result.success && !result.material)) {
           void loadCapturedImages();
         }
+        const compressedCount = successfulUploads.filter((result) => result.success && result.compressed).length;
         showToast(`成功加入 ${successfulUploads.length} 张图片到素材库`, 'success');
+        if (compressedCount > 0) {
+          showToast(`${compressedCount} 张大图已在不改变尺寸的情况下压缩后上传`, 'info');
+        }
         if (failedUploads.length > 0) {
           showToast(`${failedUploads.length} 张上传失败：${failedUploads[0].message}`, 'error');
         }
@@ -1267,9 +1421,10 @@ export default function QuickCreatePage() {
     } finally {
       setIsUploading(false);
       setUploadProgressText('');
+      clearMaterialUploadSession(sessionUserId);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
-  }, [activeFolderId, loadCapturedImages, prependUploadedMaterials, validateImageFiles]);
+  }, [activeFolderId, loadCapturedImages, prependUploadedMaterials, user?.id, validateImageFiles]);
 
   const uploadAiReferenceFiles = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
@@ -1279,8 +1434,10 @@ export default function QuickCreatePage() {
     try {
       const uploadedUrls: string[] = [];
       for (const file of files) {
+        const prepared = await prepareImageFileForUpload(file);
         const formData = new FormData();
-        formData.append('file', file);
+        formData.append('file', prepared.file);
+        formData.append('originalFileName', file.name);
         formData.append('folder', 'ai-reference');
         const response = await fetch('/api/upload/file', { method: 'POST', credentials: 'include', body: formData });
         const data = await response.json();
@@ -2088,6 +2245,58 @@ export default function QuickCreatePage() {
   }, [loadMaterialFolders, loadOrderResults, user?.id]);
 
   useEffect(() => {
+    if (!user?.id) return;
+
+    const session = readMaterialUploadSession(user.id);
+    if (!session) return;
+
+    setUploadRecoveryText(`检测到上次上传可能被刷新中断，正在同步已完成的素材 ${session.completed}/${session.total}`);
+    void loadCapturedImages();
+
+    let attempts = 0;
+    const intervalId = window.setInterval(() => {
+      attempts += 1;
+      void loadCapturedImages();
+      setUploadRecoveryText(`正在同步上次上传结果 ${Math.min(session.completed, session.total)}/${session.total}`);
+      if (attempts >= 10) {
+        window.clearInterval(intervalId);
+        clearMaterialUploadSession(user.id);
+        setUploadRecoveryText('');
+      }
+    }, 3000);
+
+    return () => window.clearInterval(intervalId);
+  }, [loadCapturedImages, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const cachedProcessingTasks = getCachedTasks()
+      .filter((task) => task.status === '处理中' && task.orderId)
+      .slice(0, 20);
+    if (cachedProcessingTasks.length === 0) return;
+
+    trackedProcessingOrdersRef.current = {
+      ...trackedProcessingOrdersRef.current,
+      ...Object.fromEntries(cachedProcessingTasks.map((task) => [task.orderId as string, task.time || Date.now()])),
+    };
+    setHasProcessingOrders(true);
+    void loadOrderResults({ silent: true });
+  }, [loadOrderResults, user?.id]);
+
+  useEffect(() => {
+    if (!isUploading) return;
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isUploading]);
+
+  useEffect(() => {
     clearSelectionState();
     void loadCapturedImages();
   }, [clearSelectionState, loadCapturedImages]);
@@ -2604,6 +2813,13 @@ export default function QuickCreatePage() {
           <div className="mb-6 rounded-3xl border border-white/10 bg-white/[0.03] p-5 text-center text-white/60">
             <p className="text-sm font-medium text-white/72">{uploadProgressText || '素材上传中...'}</p>
             <p className="mt-1 text-xs text-white/38">已成功的图片会先加入素材库，失败的图片会单独提示。</p>
+          </div>
+        )}
+
+        {!isUploading && uploadRecoveryText && (
+          <div className="mb-6 rounded-3xl border border-amber-300/16 bg-amber-400/[0.065] p-5 text-center text-amber-50/70">
+            <p className="text-sm font-medium text-amber-50/82">{uploadRecoveryText}</p>
+            <p className="mt-1 text-xs text-amber-50/45">如果刷新发生在上传过程中，浏览器会中断本次上传；已完成的素材会自动同步回来。</p>
           </div>
         )}
 

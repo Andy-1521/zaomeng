@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
     const folder = normalizeFolder((formData.get('folder') as string) || 'uploads');
     const createMaterial = formData.get('createMaterial') === 'true';
     const materialFolderId = formData.get('materialFolderId') as string | null;
+    const originalFileName = (formData.get('originalFileName') as string | null)?.trim();
 
     // 参数验证
     if (!file) {
@@ -82,7 +83,7 @@ export async function POST(request: NextRequest) {
           imageUrl: storageUrl,
           originalUrl: null,
           pageUrl: null,
-          pageTitle: file.name,
+          pageTitle: originalFileName || file.name,
           sourceHost: 'local-upload',
           imageType: 'main',
           folderId: targetFolderId,
