@@ -1835,6 +1835,16 @@ export default function QuickCreatePage() {
 
   const updateMaterials = useCallback(async (ids: string[], updates: { folderId?: string | null; isFavorite?: boolean }) => {
     if (ids.length === 0) return false;
+    const idSet = new Set(ids);
+    const affectedMaterials = capturedImages.filter((image) => idSet.has(image.id));
+    const visibleDelta = affectedMaterials.reduce((delta, image) => {
+      const nextImage = { ...image, ...updates };
+      const wasVisible = materialMatchesCurrentView(image);
+      const willBeVisible = materialMatchesCurrentView(nextImage);
+      if (wasVisible === willBeVisible) return delta;
+      return delta + (willBeVisible ? 1 : -1);
+    }, 0);
+
     try {
       const response = await fetch('/api/materials/update', {
         method: 'POST',
@@ -1844,13 +1854,27 @@ export default function QuickCreatePage() {
       });
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(toUserFacingErrorMessage(data.error, '更新素材失败，请重试'));
-      await loadCapturedImages();
+
+      setCapturedImages((prev) => prev.map((image) => {
+        if (!idSet.has(image.id)) return image;
+        return { ...image, ...updates };
+      }));
+      if (visibleDelta !== 0) {
+        setMaterialsPagination((prev) => ({
+          ...prev,
+          total: Math.max(0, prev.total + visibleDelta),
+        }));
+      }
+      if (typeof updates.isFavorite === 'boolean') {
+        prefetchedMaterialKeysRef.current.delete(`favorite:${materialFilter}`);
+        prefetchedMaterialPaginationRef.current.delete(`favorite:${materialFilter}`);
+      }
       return true;
     } catch (error) {
       showToast(toUserFacingErrorFromUnknown(error, '更新素材失败，请重试'), 'error');
       return false;
     }
-  }, [loadCapturedImages]);
+  }, [capturedImages, materialFilter, materialMatchesCurrentView]);
 
   const toggleMaterialFavorite = useCallback(async (image: CapturedImageRecord) => {
     const success = await updateMaterials([image.id], { isFavorite: !image.isFavorite });
