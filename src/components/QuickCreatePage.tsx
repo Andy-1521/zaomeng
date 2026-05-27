@@ -2395,6 +2395,7 @@ export default function QuickCreatePage() {
               <svg className="h-3.5 w-3.5 text-white/32" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v4H4zM14 15h6v4h-6z" />
               </svg>
+              <span className="select-none text-white/34">小</span>
               <input
                 type="range"
                 min="170"
@@ -2404,6 +2405,7 @@ export default function QuickCreatePage() {
                 onChange={(event) => setThumbnailSize(Number(event.target.value))}
                 className="zaomeng-subtle-range w-20"
               />
+              <span className="select-none text-white/34">大</span>
             </label>
 
             {libraryView === 'gallery' && duplicateImageCount > 0 && (

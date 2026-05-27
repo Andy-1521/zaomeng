@@ -26,175 +26,139 @@ const browserDownloads = [
   { label: '360 极速', browser: '360' },
 ];
 
-const installPages = [
-  { browser: 'Chrome / Brave / Arc', url: 'chrome://extensions/' },
-  { browser: 'Edge', url: 'edge://extensions/' },
-  { browser: '360 极速', url: 'chrome://extensions/' },
+const installSteps = [
+  {
+    title: '下载最新版插件',
+    description: '点击下载后解压 zip，得到 zaomeng-capture 文件夹。',
+  },
+  {
+    title: '打开扩展管理页',
+    description: 'Chrome / Brave / Arc / 360 打开 chrome://extensions/，Edge 打开 edge://extensions/。',
+  },
+  {
+    title: '加载文件夹并刷新造梦AI',
+    description: '开启开发者模式，选择“加载已解压的扩展程序”，安装后刷新造梦AI页面。',
+  },
+];
+
+const faqItems = [
+  {
+    question: '导航栏一直显示“插件未连接”',
+    answer: '先确认扩展已启用，再刷新造梦AI页面。仍未连接时，删除旧插件后重新安装最新版。',
+  },
+  {
+    question: '保存时报未登录',
+    answer: '先回到造梦AI确认账号已经登录，再刷新页面后重试采集。',
+  },
+  {
+    question: '右键没有识别到正确图片',
+    answer: '部分网页会使用背景图、懒加载或遮罩。先把鼠标移到大图区域，再使用右键或悬浮采集按钮。',
+  },
 ];
 
 export default async function PluginPage() {
   const version = await readExtensionVersion();
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute inset-0 bg-gradient-to-b from-black via-neutral-950 to-black" />
-        <div className="absolute top-24 left-[-8rem] h-[28rem] w-[28rem] rounded-full bg-fuchsia-600/16 blur-[120px]" />
-        <div className="absolute right-[-10rem] top-1/3 h-[30rem] w-[30rem] rounded-full bg-sky-600/14 blur-[140px]" />
-      </div>
+    <div className="min-h-screen bg-[#050506] text-white">
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.045)_0%,rgba(255,255,255,0)_34rem),linear-gradient(90deg,rgba(14,165,233,0.08),rgba(168,85,247,0.06)_45%,rgba(255,255,255,0)_78%)]" />
 
       <div className="relative z-10">
         <Navbar />
 
-        <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10 lg:px-10">
-          <section className="overflow-hidden rounded-[32px] border border-white/10 bg-white/[0.04] p-8 shadow-[0_24px_80px_rgba(0,0,0,0.32)] backdrop-blur-xl lg:p-10">
-            <div className="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
-              <div className="max-w-3xl space-y-4">
-                <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-200">
-                  <span className="h-2 w-2 rounded-full bg-cyan-300" />
-                  浏览器插件下载
-                </div>
-                <div className="space-y-3">
-                  <h1 className="text-3xl font-semibold tracking-tight text-white lg:text-5xl">一键下载造梦AI采图插件</h1>
-                  <p className="max-w-2xl text-sm leading-7 text-white/70 lg:text-base">
-                    安装后，你可以在任意网页的图片上右键保存到造梦AI素材库，也可以在较大的图片上使用悬浮采集按钮。网站会自动识别插件版本，提醒你保持最新版。
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-3 text-xs text-white/52">
-                  <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">最新版 v{version}</span>
-                  <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">支持主流浏览器</span>
-                  <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">支持右键采图和悬浮采图</span>
-                  <span className="rounded-full border border-amber-300/18 bg-amber-400/[0.08] px-3 py-1.5 text-amber-100">看到更新提醒时请安装最新版</span>
-                </div>
+        <main className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-5 py-7 sm:px-6 lg:px-8">
+          <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-stretch">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-6 shadow-[0_18px_60px_rgba(0,0,0,0.24)] backdrop-blur-xl sm:p-8">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-white/52">
+                <span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1 text-emerald-100">最新版 v{version}</span>
+                <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1">支持主流浏览器</span>
+                <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1">右键采图</span>
+                <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1">悬浮采集</span>
               </div>
 
-              <div className="flex w-full max-w-md flex-col gap-3 lg:items-end">
+              <div className="mt-7 max-w-2xl">
+                <p className="text-sm font-medium text-cyan-100/78">浏览器插件下载</p>
+                <h1 className="mt-3 text-3xl font-semibold leading-tight tracking-normal text-white sm:text-4xl">
+                  造梦AI采图插件
+                </h1>
+                <p className="mt-4 text-sm leading-7 text-white/64 sm:text-base">
+                  安装后，可以把网页图片直接保存到当前账号素材库。适合采集商品图、参考图和需要后续 AI 处理的图片素材。
+                </p>
+              </div>
+
+              <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
                 <a
                   href="/api/plugin/download?browser=chromium"
-                  className="inline-flex items-center justify-center rounded-2xl bg-gradient-to-r from-fuchsia-600 via-violet-600 to-sky-600 px-5 py-3 text-sm font-medium text-white shadow-[0_18px_40px_rgba(92,70,255,0.32)] transition hover:scale-[1.01] hover:from-fuchsia-500 hover:via-violet-500 hover:to-sky-500"
+                  className="inline-flex min-h-12 items-center justify-center rounded-xl bg-white px-5 text-sm font-semibold text-black transition hover:bg-cyan-100"
                 >
                   下载最新版插件
                 </a>
-                <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3">
-                  {browserDownloads.map((item) => (
-                    <a
-                      key={item.browser}
-                      href={`/api/plugin/download?browser=${item.browser}`}
-                      className="rounded-xl border border-white/10 bg-white/[0.035] px-3 py-2 text-center text-xs text-white/68 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-white"
-                    >
-                      {item.label}
-                    </a>
-                  ))}
-                </div>
-                <p className="text-xs leading-6 text-white/50 lg:text-right">
-                  下载后解压文件夹，在浏览器扩展管理页选择“加载已解压的扩展程序”。不同按钮只是为了方便你按常用浏览器下载。
-                </p>
                 <Link
                   href="/home"
-                  className="inline-flex items-center justify-center rounded-2xl border border-white/12 bg-white/[0.03] px-5 py-3 text-sm text-white/78 transition hover:bg-white/[0.07] hover:text-white"
+                  className="inline-flex min-h-12 items-center justify-center rounded-xl border border-white/12 bg-white/[0.035] px-5 text-sm text-white/72 transition hover:bg-white/[0.08] hover:text-white"
                 >
                   返回工作台
                 </Link>
               </div>
-            </div>
-          </section>
 
-          <section className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-            <div className="rounded-[28px] border border-white/10 bg-white/[0.035] p-6 backdrop-blur-xl">
-              <h2 className="text-xl font-semibold text-white">当前支持</h2>
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
-                  <p className="text-sm font-medium text-emerald-200">Chrome / Edge / Brave</p>
-                  <p className="mt-2 text-xs leading-6 text-emerald-100/70">可直接使用当前下载包安装。</p>
-                </div>
-                <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
-                  <p className="text-sm font-medium text-emerald-200">Arc / 360 极速</p>
-                  <p className="mt-2 text-xs leading-6 text-emerald-100/70">同样可以使用当前下载包安装。</p>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <p className="text-sm font-medium text-white/78">Firefox</p>
-                  <p className="mt-2 text-xs leading-6 text-white/52">暂未提供单独安装包，后续按需求补充。</p>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <p className="text-sm font-medium text-white/78">Safari</p>
-                  <p className="mt-2 text-xs leading-6 text-white/52">暂未支持，后续如果需要会单独适配。</p>
-                </div>
+              <div className="mt-5 flex flex-wrap items-center gap-2 text-xs text-white/44">
+                <span>按浏览器下载：</span>
+                {browserDownloads.map((item) => (
+                  <a
+                    key={item.browser}
+                    href={`/api/plugin/download?browser=${item.browser}`}
+                    className="rounded-full border border-white/10 bg-black/20 px-3 py-1.5 text-white/58 transition hover:border-white/22 hover:bg-white/[0.06] hover:text-white"
+                  >
+                    {item.label}
+                  </a>
+                ))}
               </div>
             </div>
 
-            <div className="rounded-[28px] border border-white/10 bg-white/[0.035] p-6 backdrop-blur-xl">
-              <h2 className="text-xl font-semibold text-white">安装前确认</h2>
-              <div className="mt-5 space-y-3 text-sm leading-7 text-white/68">
-                <p>先登录造梦AI网站，插件保存图片时会直接写入当前账号的素材库。</p>
-                <p>如果你曾经装过旧版本，建议先删除旧插件，再安装这里下载的最新版。</p>
-                <p>导航栏显示“插件需更新”时，请下载最新版插件并重新加载。</p>
-                <p>安装完成后刷新造梦AI页面，导航栏状态会从“插件未连接”变成“插件已连接”。</p>
-                <p>点击浏览器工具栏里的插件图标，会自动打开或聚焦造梦AI工作台。</p>
+            <aside className="rounded-2xl border border-white/10 bg-[#0b0b0e]/86 p-5 shadow-[0_18px_60px_rgba(0,0,0,0.22)] backdrop-blur-xl">
+              <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
+                <div>
+                  <h2 className="text-base font-semibold text-white">安装只需三步</h2>
+                  <p className="mt-1 text-xs text-white/42">下载后按顺序操作即可</p>
+                </div>
+                <span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-2.5 py-1 text-xs text-cyan-100">约 1 分钟</span>
               </div>
-            </div>
-          </section>
 
-          <section className="rounded-[28px] border border-white/10 bg-white/[0.035] p-6 backdrop-blur-xl lg:p-8">
-            <h2 className="text-xl font-semibold text-white">安装步骤</h2>
-            <div className="mt-4 flex flex-wrap gap-2 text-xs text-white/54">
-              {installPages.map((item) => (
-                <span key={item.browser} className="rounded-full border border-white/10 bg-black/20 px-3 py-1.5">
-                  {item.browser}：{item.url}
-                </span>
-              ))}
-            </div>
-            <div className="mt-6 grid gap-4 lg:grid-cols-4">
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                <p className="text-xs text-white/38">STEP 1</p>
-                <p className="mt-2 text-sm font-medium text-white">下载并解压插件包</p>
-                <p className="mt-2 text-xs leading-6 text-white/52">点击上方下载按钮，解压得到 `zaomeng-capture` 目录。</p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                <p className="text-xs text-white/38">STEP 2</p>
-                <p className="mt-2 text-sm font-medium text-white">打开扩展管理页</p>
-                <p className="mt-2 text-xs leading-6 text-white/52">在 Chrome、Brave、Arc 打开 `chrome://extensions/`；Edge 打开 `edge://extensions/`。</p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                <p className="text-xs text-white/38">STEP 3</p>
-                <p className="mt-2 text-sm font-medium text-white">加载已解压扩展</p>
-                <p className="mt-2 text-xs leading-6 text-white/52">开启开发者模式，然后点击“加载已解压的扩展程序”。</p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                <p className="text-xs text-white/38">STEP 4</p>
-                <p className="mt-2 text-sm font-medium text-white">选择插件目录并刷新网站</p>
-                <p className="mt-2 text-xs leading-6 text-white/52">选择解压后的 `zaomeng-capture` 目录，安装后刷新造梦AI页面即可连接。</p>
-              </div>
-            </div>
-          </section>
-
-          <section className="grid gap-6 lg:grid-cols-2">
-            <div className="rounded-[28px] border border-white/10 bg-white/[0.035] p-6 backdrop-blur-xl">
-              <h2 className="text-xl font-semibold text-white">使用方式</h2>
-              <ol className="mt-5 list-decimal space-y-3 pl-5 text-sm leading-7 text-white/68">
-                <li>保持造梦AI页面已登录并已刷新到最新状态。</li>
-                <li>打开任意商品页、图库页或你想采图的网站页面。</li>
-                <li>在目标图片上右键，点击“保存至造梦AI”。</li>
-                <li>如果网站用背景图、懒加载或遮罩承载主图，先把鼠标移到大图区域，再使用右键或悬浮“采集”按钮。</li>
-                <li>点击浏览器工具栏插件图标，可以快速回到造梦AI工作台。</li>
-                <li>回到造梦AI素材库或项目页，刷新后查看采集结果。</li>
+              <ol className="mt-4 space-y-3">
+                {installSteps.map((step, index) => (
+                  <li key={step.title} className="grid grid-cols-[2rem_1fr] gap-3 rounded-xl border border-white/8 bg-white/[0.035] p-3">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-sm font-semibold text-black">
+                      {index + 1}
+                    </span>
+                    <span>
+                      <span className="block text-sm font-medium text-white/88">{step.title}</span>
+                      <span className="mt-1 block text-xs leading-5 text-white/48">{step.description}</span>
+                    </span>
+                  </li>
+                ))}
               </ol>
+            </aside>
+          </section>
+
+          <section className="grid gap-5 lg:grid-cols-[0.88fr_1.12fr]">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 backdrop-blur-xl">
+              <h2 className="text-base font-semibold text-white">使用方式</h2>
+              <div className="mt-4 space-y-3 text-sm leading-7 text-white/62">
+                <p>先保持造梦AI页面已登录，再打开想采图的网页。</p>
+                <p>在目标图片上右键选择“保存至造梦AI”，或把鼠标移到大图区域后使用悬浮采集按钮。</p>
+                <p>采集完成后回到素材库刷新，即可继续做 AI 生图、智能改图、彩绘提取等处理。</p>
+              </div>
             </div>
 
-            <div className="rounded-[28px] border border-white/10 bg-white/[0.035] p-6 backdrop-blur-xl">
-              <h2 className="text-xl font-semibold text-white">常见问题</h2>
-              <div className="mt-5 space-y-4 text-sm leading-7 text-white/68">
-                <div>
-                  <p className="font-medium text-white">导航栏一直显示“插件未连接”</p>
-                  <p className="mt-1 text-white/56">先确认插件已启用，再刷新一次造梦AI页面。仍未连接时，删除旧插件后重新安装最新版。</p>
-                </div>
-                <div>
-                  <p className="font-medium text-white">右键时没有出现正确图片</p>
-                  <p className="mt-1 text-white/56">部分网站会把主图做成背景图、srcset 或懒加载结构。当前插件会向上查找图片元素和背景图，仍不稳定时先悬停在大图区域再采集。</p>
-                </div>
-                <div>
-                  <p className="font-medium text-white">保存时报未登录</p>
-                  <p className="mt-1 text-white/56">插件需要读取你当前网站登录态，请先回到造梦AI确认已经登录，再刷新页面重试。</p>
-                </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 backdrop-blur-xl">
+              <h2 className="text-base font-semibold text-white">常见问题</h2>
+              <div className="mt-4 divide-y divide-white/8">
+                {faqItems.map((item) => (
+                  <div key={item.question} className="py-3 first:pt-0 last:pb-0">
+                    <p className="text-sm font-medium text-white/84">{item.question}</p>
+                    <p className="mt-1 text-xs leading-6 text-white/50">{item.answer}</p>
+                  </div>
+                ))}
               </div>
             </div>
           </section>
