@@ -117,6 +117,11 @@ type StoredMaterialUploadSession = {
   userId: string;
   total: number;
   completed: number;
+  settled?: number;
+  successful?: number;
+  failed?: number;
+  status?: 'running' | 'settled';
+  materials?: CapturedImageRecord[];
   startedAt: number;
   updatedAt: number;
 };
@@ -315,7 +320,16 @@ function readMaterialUploadSession(userId?: string): StoredMaterialUploadSession
       window.sessionStorage.removeItem(getMaterialUploadSessionKey(userId));
       return null;
     }
-    return parsed;
+
+    return {
+      ...parsed,
+      completed: Number(parsed.completed ?? parsed.settled ?? 0),
+      settled: Number(parsed.settled ?? parsed.completed ?? 0),
+      successful: Number(parsed.successful ?? 0),
+      failed: Number(parsed.failed ?? 0),
+      materials: Array.isArray(parsed.materials) ? parsed.materials : [],
+      status: parsed.status || 'running',
+    };
   } catch {
     return null;
   }
@@ -329,6 +343,19 @@ function writeMaterialUploadSession(session: StoredMaterialUploadSession) {
 function clearMaterialUploadSession(userId?: string) {
   if (typeof window === 'undefined') return;
   window.sessionStorage.removeItem(getMaterialUploadSessionKey(userId));
+}
+
+function readStoredUserId() {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const raw = window.localStorage.getItem('user');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { id?: unknown };
+    return typeof parsed.id === 'string' && parsed.id ? parsed.id : null;
+  } catch {
+    return null;
+  }
 }
 
 function getCompressedFileName(fileName: string, mimeType: string) {
@@ -774,6 +801,7 @@ export default function QuickCreatePage() {
   const dragDepthRef = useRef(0);
   const trackedProcessingOrdersRef = useRef<Record<string, number>>({});
   const materialRequestIdRef = useRef(0);
+  const locallyInsertedMaterialIdsRef = useRef<Set<string>>(new Set());
   const [capturedImages, setCapturedImages] = useState<CapturedImageRecord[]>([]);
   const [materialFolders, setMaterialFolders] = useState<MaterialFolder[]>([]);
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
@@ -953,9 +981,13 @@ export default function QuickCreatePage() {
     });
   }, []);
 
-  const loadCapturedImages = useCallback(async (options?: { offset?: number; append?: boolean }) => {
+  const loadCapturedImages = useCallback(async (options?: { offset?: number; append?: boolean; preserveCurrent?: boolean }) => {
     const offset = options?.offset ?? 0;
     const append = options?.append === true;
+    const preserveCurrent = options?.preserveCurrent === true;
+    const requestScope = materialScope;
+    const requestDateFilter = materialFilter;
+    const requestFolderId = requestScope.startsWith('folder:') ? requestScope.slice('folder:'.length) : null;
     const requestId = materialRequestIdRef.current + 1;
     materialRequestIdRef.current = requestId;
 
@@ -969,7 +1001,7 @@ export default function QuickCreatePage() {
 
     if (append) {
       setIsLoadingMoreMaterials(true);
-    } else {
+    } else if (!preserveCurrent) {
       setIsLoadingMaterials(true);
       setCapturedImages([]);
       setMaterialsPagination(EMPTY_CAPTURED_IMAGES_PAGINATION);
@@ -1002,9 +1034,29 @@ export default function QuickCreatePage() {
 
       setMaterialsPagination(nextPagination);
       setCapturedImages((prev) => {
-        if (!append) return data.data || [];
+        const nextData = data.data || [];
+        if (!append) {
+          if (!preserveCurrent) {
+            return nextData;
+          }
+
+          const nextIds = new Set(nextData.map((image) => image.id));
+          const stillVisibleLocalItems = prev.filter((image) => {
+            if (nextIds.has(image.id)) return false;
+            if (requestDateFilter !== 'all' && getMaterialDateGroup(image.createdAt) !== requestDateFilter) return false;
+            if (requestScope === 'favorite') return Boolean(image.isFavorite);
+            if (requestScope === 'uncategorized') return !image.folderId;
+            if (requestFolderId) return image.folderId === requestFolderId;
+            return true;
+          });
+
+          return [...stillVisibleLocalItems, ...nextData].sort(
+            (left, right) => parseMaterialDate(right.createdAt).getTime() - parseMaterialDate(left.createdAt).getTime()
+          );
+        }
+
         const existingIds = new Set(prev.map((image) => image.id));
-        return [...prev, ...(data.data || []).filter((image) => !existingIds.has(image.id))];
+        return [...prev, ...nextData.filter((image) => !existingIds.has(image.id))];
       });
     } catch (error) {
       console.error('[素材库] 加载失败:', error);
@@ -1044,6 +1096,14 @@ export default function QuickCreatePage() {
   const prependUploadedMaterials = useCallback((materials: CapturedImageRecord[]) => {
     const visibleMaterials = materials.filter(materialMatchesCurrentView);
     if (visibleMaterials.length === 0) return;
+    const newVisibleMaterials = visibleMaterials.filter((material) => !locallyInsertedMaterialIdsRef.current.has(material.id));
+    for (const material of newVisibleMaterials) {
+      locallyInsertedMaterialIdsRef.current.add(material.id);
+    }
+
+    materialRequestIdRef.current += 1;
+    setIsLoadingMaterials(false);
+    setIsLoadingMoreMaterials(false);
 
     setCapturedImages((prev) => {
       const nextById = new Map<string, CapturedImageRecord>();
@@ -1062,16 +1122,14 @@ export default function QuickCreatePage() {
     });
 
     setMaterialsPagination((prev) => {
-      const existingIds = new Set(capturedImages.map((material) => material.id));
-      const newVisibleCount = visibleMaterials.filter((material) => !existingIds.has(material.id)).length;
-      if (newVisibleCount === 0) return prev;
+      if (newVisibleMaterials.length === 0) return prev;
       return {
         ...prev,
-        total: prev.total + newVisibleCount,
-        nextOffset: prev.nextOffset + newVisibleCount,
+        total: prev.total + newVisibleMaterials.length,
+        nextOffset: prev.nextOffset + newVisibleMaterials.length,
       };
     });
-  }, [capturedImages, materialMatchesCurrentView]);
+  }, [materialMatchesCurrentView]);
 
   const reduceMaterialsPagination = useCallback((deletedCount: number) => {
     if (deletedCount <= 0) return;
@@ -1329,18 +1387,38 @@ export default function QuickCreatePage() {
     if (files.length === 0) return;
     if (!validateImageFiles(files)) return;
 
-    let completedCount = 0;
-    const sessionUserId = user?.id || 'anonymous';
+    let settledCount = 0;
+    let successfulCount = 0;
+    let failedCount = 0;
+    const uploadedMaterials: CapturedImageRecord[] = [];
+    const sessionUserId = user?.id || readStoredUserId() || 'anonymous';
     const uploadSession: StoredMaterialUploadSession = {
       id: `${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       userId: sessionUserId,
       total: files.length,
       completed: 0,
+      settled: 0,
+      successful: 0,
+      failed: 0,
+      status: 'running',
+      materials: [],
       startedAt: Date.now(),
       updatedAt: Date.now(),
     };
+    const writeCurrentUploadSession = (status: StoredMaterialUploadSession['status'] = 'running') => {
+      writeMaterialUploadSession({
+        ...uploadSession,
+        completed: settledCount,
+        settled: settledCount,
+        successful: successfulCount,
+        failed: failedCount,
+        status,
+        materials: uploadedMaterials.slice(0, 80),
+        updatedAt: Date.now(),
+      });
+    };
 
-    writeMaterialUploadSession(uploadSession);
+    writeCurrentUploadSession();
     setIsUploading(true);
     setUploadProgressText(files.length === 1 ? '正在上传 1 张素材...' : `正在上传 0/${files.length} 张素材...`);
 
@@ -1377,25 +1455,28 @@ export default function QuickCreatePage() {
           };
 
           if (data.data.material) {
+            uploadedMaterials.unshift(data.data.material);
             prependUploadedMaterials([data.data.material]);
           }
 
+          successfulCount += 1;
           return result;
         } catch (error) {
           const isAbortError = error instanceof DOMException && error.name === 'AbortError';
+          failedCount += 1;
           return {
             success: false,
             fileName: file.name,
             message: isAbortError ? '上传超时，请稍后重试' : toUserFacingErrorFromUnknown(error, '上传失败，请重试'),
           };
         } finally {
-          completedCount += 1;
-          writeMaterialUploadSession({
-            ...uploadSession,
-            completed: completedCount,
-            updatedAt: Date.now(),
-          });
-          setUploadProgressText(files.length === 1 ? '正在整理素材...' : `正在上传 ${completedCount}/${files.length} 张素材...`);
+          settledCount += 1;
+          writeCurrentUploadSession();
+          setUploadProgressText(
+            files.length === 1
+              ? '正在整理素材...'
+              : `正在上传 ${settledCount}/${files.length} 张素材，已成功 ${successfulCount} 张`
+          );
         }
       };
 
@@ -1404,9 +1485,7 @@ export default function QuickCreatePage() {
       const failedUploads = results.filter((result) => !result.success);
 
       if (successfulUploads.length > 0) {
-        if (successfulUploads.some((result) => result.success && !result.material)) {
-          void loadCapturedImages();
-        }
+        await loadCapturedImages({ preserveCurrent: true });
         const compressedCount = successfulUploads.filter((result) => result.success && result.compressed).length;
         showToast(`成功加入 ${successfulUploads.length} 张图片到素材库`, 'success');
         if (compressedCount > 0) {
@@ -1421,7 +1500,8 @@ export default function QuickCreatePage() {
     } finally {
       setIsUploading(false);
       setUploadProgressText('');
-      clearMaterialUploadSession(sessionUserId);
+      writeCurrentUploadSession('settled');
+      window.setTimeout(() => clearMaterialUploadSession(sessionUserId), 15000);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }, [activeFolderId, loadCapturedImages, prependUploadedMaterials, user?.id, validateImageFiles]);
@@ -2247,26 +2327,43 @@ export default function QuickCreatePage() {
   useEffect(() => {
     if (!user?.id) return;
 
-    const session = readMaterialUploadSession(user.id);
+    const storedUserId = readStoredUserId();
+    const session = readMaterialUploadSession(user.id)
+      || (storedUserId && storedUserId !== user.id ? readMaterialUploadSession(storedUserId) : null)
+      || readMaterialUploadSession('anonymous');
     if (!session) return;
+    const sessionUserId = session.userId || user.id;
 
-    setUploadRecoveryText(`检测到上次上传可能被刷新中断，正在同步已完成的素材 ${session.completed}/${session.total}`);
-    void loadCapturedImages();
+    const settled = Number(session.settled ?? session.completed ?? 0);
+    const successful = Number(session.successful ?? 0);
+    const failed = Number(session.failed ?? 0);
+    const unfinished = Math.max(0, session.total - settled);
+    const recoveredMaterials = Array.isArray(session.materials) ? session.materials : [];
+
+    if (recoveredMaterials.length > 0) {
+      prependUploadedMaterials(recoveredMaterials);
+    }
+
+    setUploadRecoveryText(
+      session.status === 'settled' || settled >= session.total
+        ? `上传结果已同步：成功 ${successful} 张${failed > 0 ? `，失败 ${failed} 张` : ''}`
+        : `正在恢复上次上传结果：成功 ${successful} 张，未完成 ${unfinished} 张`
+    );
+    void loadCapturedImages({ preserveCurrent: true });
 
     let attempts = 0;
     const intervalId = window.setInterval(() => {
       attempts += 1;
-      void loadCapturedImages();
-      setUploadRecoveryText(`正在同步上次上传结果 ${Math.min(session.completed, session.total)}/${session.total}`);
-      if (attempts >= 10) {
+      void loadCapturedImages({ preserveCurrent: true });
+      if (attempts >= 5 || session.status === 'settled' || settled >= session.total) {
         window.clearInterval(intervalId);
-        clearMaterialUploadSession(user.id);
+        clearMaterialUploadSession(sessionUserId);
         setUploadRecoveryText('');
       }
     }, 3000);
 
     return () => window.clearInterval(intervalId);
-  }, [loadCapturedImages, user?.id]);
+  }, [loadCapturedImages, prependUploadedMaterials, user?.id]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -2283,18 +2380,6 @@ export default function QuickCreatePage() {
     setHasProcessingOrders(true);
     void loadOrderResults({ silent: true });
   }, [loadOrderResults, user?.id]);
-
-  useEffect(() => {
-    if (!isUploading) return;
-
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = '';
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [isUploading]);
 
   useEffect(() => {
     clearSelectionState();
