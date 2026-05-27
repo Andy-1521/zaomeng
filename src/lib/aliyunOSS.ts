@@ -214,3 +214,47 @@ export async function getAliyunOSSUrl(key: string, expireSeconds: number = 365 *
     throw new Error(`生成阿里云OSS签名URL失败: ${getErrorMessage(error)}`);
   }
 }
+
+export function isConfiguredAliyunOSSUrl(url: string) {
+  if (!HAS_ALIYUN_OSS_CONFIG) return false;
+
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname === `${bucketName}.${region}.aliyuncs.com`;
+  } catch {
+    return false;
+  }
+}
+
+export function getAliyunOSSKeyFromUrl(url: string) {
+  if (!isConfiguredAliyunOSSUrl(url)) return null;
+
+  try {
+    const parsed = new URL(url);
+    const key = decodeURIComponent(parsed.pathname.replace(/^\/+/, ''));
+    return key && !key.includes('..') ? key : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getAliyunOSSProcessedUrl(
+  key: string,
+  processRule: string,
+  expireSeconds: number = 24 * 60 * 60
+): Promise<string> {
+  if (!HAS_ALIYUN_OSS_CONFIG || !ossClient) {
+    throw new Error('[阿里云OSS] 未配置或已禁用');
+  }
+
+  try {
+    return ossClient.signatureUrl(key, {
+      expires: expireSeconds,
+      method: 'GET',
+      process: processRule,
+    } as Parameters<OSS['signatureUrl']>[1] & { process: string });
+  } catch (error: unknown) {
+    console.error('[阿里云OSS] 生成处理后签名URL失败:', error);
+    throw new Error(`生成阿里云OSS缩略图签名失败: ${getErrorMessage(error)}`);
+  }
+}

@@ -18,7 +18,7 @@ export type TaskStatus = '处理中' | '成功' | '失败' | '超时' | '部分�
 type PsdGenerationStatus = 'pending' | 'processing' | 'success' | 'failed';
 const PSD_PROCESSING_STALE_MS = 12 * 60 * 1000;
 
-const TASK_FILTER_VALUES: FilterType[] = ['all', 'color-extraction', 'ai-generate', 'smart-edit', 'watermark', 'custom'];
+const TASK_FILTER_VALUES: FilterType[] = ['all', 'color-extraction', 'ai-generate', 'smart-edit', 'watermark'];
 
 export interface TaskRecord {
   id: string;
@@ -98,11 +98,18 @@ type TaskRecordApiResponse = {
 
 const taskRecordCacheByUser = new Map<string, TaskRecord[]>();
 const TASK_CACHE_STORAGE_PREFIX = 'zaomeng:task-history-cache:';
+const DEBUG_TASK_HISTORY = false;
 
 const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
 
 function SafeImage({ alt, ...props }: Omit<ImageProps, 'loader'>) {
   return <Image {...props} alt={alt} loader={passthroughImageLoader} unoptimized />;
+}
+
+function debugTaskHistory(...args: unknown[]) {
+  if (DEBUG_TASK_HISTORY) {
+    console.log(...args);
+  }
 }
 
 function getFirstImage(value?: string | string[]): string | null {
@@ -213,7 +220,7 @@ function readStoredTaskCache(userId?: string): TaskRecord[] {
       return !!item && typeof item.id === 'string' && typeof item.time === 'number';
     });
   } catch (error) {
-    console.warn('[TaskHistory] 读取本地任务缓存失败:', error);
+    debugTaskHistory('[TaskHistory] 读取本地任务缓存失败:', error);
     return [];
   }
 }
@@ -237,7 +244,7 @@ function setTaskCache(records: TaskRecord[], userId?: string) {
     const compactRecords = records.slice(0, 80);
     window.localStorage.setItem(getTaskCacheStorageKey(userId), JSON.stringify(compactRecords));
   } catch (error) {
-    console.warn('[TaskHistory] 写入本地任务缓存失败:', error);
+    debugTaskHistory('[TaskHistory] 写入本地任务缓存失败:', error);
   }
 }
 
@@ -274,7 +281,7 @@ const cleanExpiredCache = (userId?: string) => {
   setTaskCache(filteredRecords, userId);
 
   if (filteredRecords.length < currentRecords.length) {
-    console.log('[TaskHistory] 清理过期缓存记录:', currentRecords.length - filteredRecords.length, '条');
+    debugTaskHistory('[TaskHistory] 清理过期缓存记录:', currentRecords.length - filteredRecords.length, '条');
   }
 };
 
@@ -326,7 +333,7 @@ export const updateTaskRecordOrderId = (tempOrderId: string, realOrderId: string
           : task
       )
     );
-    console.log('[TaskHistory] 更新任务记录orderId:', tempOrderId, '->', realOrderId);
+    debugTaskHistory('[TaskHistory] 更新任务记录orderId:', tempOrderId, '->', realOrderId);
     window.dispatchEvent(new Event('taskHistoryUpdated'));
   }
 };
@@ -346,15 +353,15 @@ export const updateTaskRecordStatus = (orderId: string, status: TaskStatus, imag
           : task
       )
     );
-    console.log('[TaskHistory] 更新任务记录状态:', orderId, status);
+    debugTaskHistory('[TaskHistory] 更新任务记录状态:', orderId, status);
     window.dispatchEvent(new Event('taskHistoryUpdated'));
   }
 };
 
 // 从数据库加载历史记录（带缓存优化）
 const loadTasksFromDatabase = async (userId?: string): Promise<TaskRecord[]> => {
-  console.log('[TaskHistory] loadTasksFromDatabase ========== 开始 ==========');
-  console.log('[TaskHistory] loadTasksFromDatabase - userId:', userId);
+  debugTaskHistory('[TaskHistory] loadTasksFromDatabase ========== 开始 ==========');
+  debugTaskHistory('[TaskHistory] loadTasksFromDatabase - userId:', userId);
 
   try {
     // 优先使用传入的userId，否则从 localStorage 获取
@@ -362,13 +369,13 @@ const loadTasksFromDatabase = async (userId?: string): Promise<TaskRecord[]> => 
 
     if (userId) {
       userData = { id: userId };
-      console.log('[TaskHistory] loadTasksFromDatabase - 使用传入的userId:', userId);
-      console.log('[TaskHistory] 使用传入的userId:', userId);
+      debugTaskHistory('[TaskHistory] loadTasksFromDatabase - 使用传入的userId:', userId);
+      debugTaskHistory('[TaskHistory] 使用传入的userId:', userId);
     } else {
       // 从 localStorage 获取用户信息
       const userFromLocalStorage = localStorage.getItem('user');
       if (!userFromLocalStorage) {
-        console.log('[TaskHistory] 未找到用户信息，请先登录');
+        debugTaskHistory('[TaskHistory] 未找到用户信息，请先登录');
         return [];
       }
 
@@ -408,7 +415,7 @@ const loadTasksFromDatabase = async (userId?: string): Promise<TaskRecord[]> => 
     }
 
     const result = await response.json() as TaskRecordApiResponse;
-    console.log('[TaskHistory] loadTasksFromDatabase - API返回数据:', {
+    debugTaskHistory('[TaskHistory] loadTasksFromDatabase - API返回数据:', {
       success: result.success,
       dataLength: result.data?.length,
       firstOrderNumber: result.data?.[0]?.orderNumber,
@@ -421,7 +428,7 @@ const loadTasksFromDatabase = async (userId?: string): Promise<TaskRecord[]> => 
     }
 
     const transformed = transformDatabaseData(result.data);
-    console.log('[TaskHistory] loadTasksFromDatabase ========== 完成，返回', transformed.length, '条记录 ==========');
+    debugTaskHistory('[TaskHistory] loadTasksFromDatabase ========== 完成，返回', transformed.length, '条记录 ==========');
     return transformed;
   } catch (error) {
     console.error('[TaskHistory] 从数据库加载历史记录异常:', error);
@@ -438,23 +445,23 @@ export const forceRefreshCache = (userId?: string) => {
 
   // 转换数据库数据到 TaskRecord 格式
   const transformDatabaseData = (data: TaskRecordApiItem[]): TaskRecord[] => {
-    console.log('[TaskHistory] transformDatabaseData ========== 开始 ==========');
-    console.log('[TaskHistory] transformDatabaseData - 输入数据数量:', data.length);
+    debugTaskHistory('[TaskHistory] transformDatabaseData ========== 开始 ==========');
+    debugTaskHistory('[TaskHistory] transformDatabaseData - 输入数据数量:', data.length);
     if (data.length > 0) {
       const firstItem = data[0];
       const lastItem = data[data.length - 1];
-      console.log('[TaskHistory] transformDatabaseData - 第一条数据:', {
+      debugTaskHistory('[TaskHistory] transformDatabaseData - 第一条数据:', {
         orderNumber: firstItem.orderNumber,
         resultData: firstItem.resultData ? (typeof firstItem.resultData === 'string' ? firstItem.resultData.substring(0, 100) + '...' : JSON.stringify(firstItem.resultData).substring(0, 100) + '...') : null,
         createdAt: firstItem.createdAt,
       });
-      console.log('[TaskHistory] transformDatabaseData - 最后一条数据:', {
+      debugTaskHistory('[TaskHistory] transformDatabaseData - 最后一条数据:', {
         orderNumber: lastItem.orderNumber,
         resultData: lastItem.resultData ? (typeof lastItem.resultData === 'string' ? lastItem.resultData.substring(0, 100) + '...' : JSON.stringify(lastItem.resultData).substring(0, 100) + '...') : null,
         createdAt: lastItem.createdAt,
       });
     } else {
-      console.warn('[TaskHistory] transformDatabaseData - 输入数据为空！');
+      debugTaskHistory('[TaskHistory] transformDatabaseData - 输入数据为空！');
     }
 
     // 映射数据库数据到 TaskRecord 格式
@@ -462,7 +469,7 @@ export const forceRefreshCache = (userId?: string) => {
       .filter((item) => item.orderNumber && (item.prompt || item.description) && item.toolPage !== '积分充值') // 过滤没有订单号、提示词或描述的记录，以及充值记录
       .map((item) => {
       // 【调试】打印订单的原始数据
-      console.log('[TaskHistory] 解析订单:', {
+      debugTaskHistory('[TaskHistory] 解析订单:', {
         orderNumber: item.orderNumber,
         toolPage: item.toolPage,
         resultData: item.resultData ? (typeof item.resultData === 'string' ? item.resultData.substring(0, 100) + '...' : JSON.stringify(item.resultData)) : null,
@@ -475,7 +482,7 @@ export const forceRefreshCache = (userId?: string) => {
         if (Array.isArray(item.resultData)) {
           // 【新增】如果resultData已经是数组（多图片），直接使用
           imageUrl = item.resultData;
-          console.log('[TaskHistory] resultData是数组，图片数量:', item.resultData.length);
+          debugTaskHistory('[TaskHistory] resultData是数组，图片数量:', item.resultData.length);
         } else if (typeof item.resultData === 'object') {
           // 如果resultData是对象，尝试获取imageUrl字段
           const resultDataObject = item.resultData as ResultDataObject;
@@ -484,16 +491,16 @@ export const forceRefreshCache = (userId?: string) => {
           if (typeof errorValue === 'string' && errorValue.trim()) {
             errorMessage = toUserFacingErrorMessage(errorValue, '暂时未能完成处理，请稍后重试');
           }
-          console.log('[TaskHistory] resultData是对象，提取imageUrl');
+          debugTaskHistory('[TaskHistory] resultData是对象，提取imageUrl');
         } else if (typeof item.resultData === 'string') {
           // 如果resultData是字符串，可能是单个URL或JSON数组
-          console.log('[TaskHistory] resultData是字符串，尝试解析:', item.resultData.substring(0, 80) + '...');
+          debugTaskHistory('[TaskHistory] resultData是字符串，尝试解析:', item.resultData.substring(0, 80) + '...');
           try {
             // 尝试解析为JSON数组
             const parsed = JSON.parse(item.resultData);
             if (Array.isArray(parsed) && parsed.length > 0) {
               imageUrl = parsed;
-              console.log('[TaskHistory] resultData解析为数组，图片数量:', parsed.length);
+              debugTaskHistory('[TaskHistory] resultData解析为数组，图片数量:', parsed.length);
             } else if (parsed && typeof parsed === 'object') {
               const parsedObject = parsed as ResultDataObject;
               imageUrl = parsedObject.imageUrl || parsedObject.image_url || parsedObject.result_image_url || '';
@@ -501,10 +508,10 @@ export const forceRefreshCache = (userId?: string) => {
               if (typeof errorValue === 'string' && errorValue.trim()) {
                 errorMessage = toUserFacingErrorMessage(errorValue, '暂时未能完成处理，请稍后重试');
               }
-              console.log('[TaskHistory] resultData解析为对象，提取图片或失败原因');
+              debugTaskHistory('[TaskHistory] resultData解析为对象，提取图片或失败原因');
             } else {
               imageUrl = item.resultData;
-              console.log('[TaskHistory] 解析结果不是有效数组，使用原始字符串');
+              debugTaskHistory('[TaskHistory] 解析结果不是有效数组，使用原始字符串');
             }
           } catch {
             // 不是JSON格式，直接使用字符串
@@ -512,11 +519,11 @@ export const forceRefreshCache = (userId?: string) => {
             if (!item.resultData.startsWith('http://') && !item.resultData.startsWith('https://') && !item.resultData.startsWith('/')) {
               errorMessage = toUserFacingErrorMessage(item.resultData, '暂时未能完成处理，请稍后重试');
             }
-            console.log('[TaskHistory] resultData无法解析为JSON，使用原始字符串');
+            debugTaskHistory('[TaskHistory] resultData无法解析为JSON，使用原始字符串');
           }
         }
       }
-      console.log('[TaskHistory] 解析后imageUrl:', {
+      debugTaskHistory('[TaskHistory] 解析后imageUrl:', {
         type: typeof imageUrl,
         isArray: Array.isArray(imageUrl),
         length: Array.isArray(imageUrl) ? imageUrl.length : 0,
@@ -614,7 +621,7 @@ export const forceRefreshCache = (userId?: string) => {
         status = '超时';
       } else if (item.status !== '成功' && item.status !== 'success') {
         // 如果状态不是预期的任何值，标记为失败（修复状态异常的情况）
-        console.warn('[TaskHistory] 订单状态异常:', item.orderNumber, 'status:', item.status, '将标记为失败');
+        debugTaskHistory('[TaskHistory] 订单状态异常:', item.orderNumber, 'status:', item.status, '将标记为失败');
         status = '失败';
       }
 
@@ -624,7 +631,7 @@ export const forceRefreshCache = (userId?: string) => {
         if (actualCount > 0 && actualCount < generateCount) {
           status = '部分成功';
           description += `（生成${actualCount}/${generateCount}张）`;
-          console.log('[TaskHistory] 订单部分成功:', item.orderNumber, '预期:', generateCount, '实际:', actualCount);
+          debugTaskHistory('[TaskHistory] 订单部分成功:', item.orderNumber, '预期:', generateCount, '实际:', actualCount);
         }
       }
 
@@ -671,23 +678,23 @@ export const forceRefreshCache = (userId?: string) => {
         tabName = '彩绘提取';
       } else if (item.toolPage === '高清+扩图2' || item.description?.includes('高清+扩图2') || item.orderNumber?.startsWith('HDO2-')) {
         tab = 'watermark';
-        tabName = '高清+扩图2';
+        tabName = '高清+扩图';
       } else if (item.toolPage === '高清+扩图' || item.description?.includes('高清+扩图') || item.orderNumber?.startsWith('HDO-')) {
         tab = 'watermark';
         tabName = '高清+扩图';
       } else if (item.toolPage === 'AI扩图' || item.toolPage === '去除水印' || item.description?.includes('去除水印') || item.description?.includes('AI扩图') || item.orderNumber?.startsWith('RW-')) {
         tab = 'watermark';
-        tabName = 'AI扩图';
+        tabName = '高清+扩图';
       } else if (isSmartEditOrder) {
         tab = 'smart-edit';
         tabName = '智能改图';
       } else if (item.toolPage === '高清放大' || item.description?.includes('高清放大') || item.orderNumber?.startsWith('HD-')) {
-        tab = 'custom';
-        tabName = '高清放大';
+        tab = 'watermark';
+        tabName = '高清+扩图';
       } else if (item.toolPage === '去水印') {
         // 兼容性处理：旧数据可能使用'去水印'
         tab = 'watermark';
-        tabName = 'AI扩图';
+        tabName = '高清+扩图';
       } else if (item.toolPage === '快速制作') {
         // Keep legacy history visible without restoring the old page mode.
         tab = 'custom';
@@ -696,7 +703,7 @@ export const forceRefreshCache = (userId?: string) => {
 
       // 调试日志：记录toolPage映射
       if (process.env.NODE_ENV === 'development') {
-        console.log('[TaskHistory] 订单映射:', {
+        debugTaskHistory('[TaskHistory] 订单映射:', {
           orderNumber: item.orderNumber,
           toolPage: item.toolPage,
           description: item.description,
@@ -765,9 +772,9 @@ export const updateTaskStatus = async (orderId: string, status: TaskStatus, imag
 
     if (response.ok) {
       const result = await response.json();
-      console.log('[TaskHistory] 数据库更新成功:', result);
+      debugTaskHistory('[TaskHistory] 数据库更新成功:', result);
     } else {
-      console.warn('[TaskHistory] 数据库更新失败，但继续刷新历史记录');
+      debugTaskHistory('[TaskHistory] 数据库更新失败，但继续刷新历史记录');
     }
   } catch (error) {
     console.error('[TaskHistory] 更新数据库失败:', error);
@@ -858,7 +865,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       // 先从数据库加载历史记录（传入userId以支持用户切换）
       const dbTasks = await loadTasksFromDatabase(userId);
 
-      console.log('[TaskHistory] 从数据库加载到', dbTasks.length, '条记录');
+      debugTaskHistory('[TaskHistory] 从数据库加载到', dbTasks.length, '条记录');
 
       // 获取数据库中所有订单号
       const dbOrderIds = new Set(dbTasks.map(task => task.orderId));
@@ -869,7 +876,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
         return !shouldRemove;
       });
 
-      console.log('[TaskHistory] 过滤后的缓存记录数:', filteredCache.length);
+      debugTaskHistory('[TaskHistory] 过滤后的缓存记录数:', filteredCache.length);
 
       setTaskCache(filteredCache, userId);
 
@@ -879,7 +886,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       // 按时间倒序排列
       combinedTasks.sort((a, b) => b.time - a.time);
 
-      console.log('[TaskHistory] 合并后的任务记录数:', combinedTasks.length);
+      debugTaskHistory('[TaskHistory] 合并后的任务记录数:', combinedTasks.length);
 
       setTasks(combinedTasks);
     } catch (error) {
@@ -903,7 +910,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   // 监听 localStorage 变化（用于自动刷新）
   useEffect(() => {
     const handleStorageChange = () => {
-      console.log('[TaskHistory] 检测到 localStorage 变化，重新加载历史记录');
+      debugTaskHistory('[TaskHistory] 检测到 localStorage 变化，重新加载历史记录');
       void loadTasks();
     };
 
@@ -951,6 +958,12 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       setIsToolFilterOpen(false);
     }
   }, [isCollapsed]);
+
+  useEffect(() => {
+    if (!isCollapsed && !hasLoadedDatabaseRef.current) {
+      void loadTasks(userId);
+    }
+  }, [isCollapsed, loadTasks, userId]);
 
   useEffect(() => {
     const hasProcessingTask = tasks.some((task) => task.status === '处理中');
@@ -1297,7 +1310,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       }
 
       const userData = JSON.parse(userFromLocalStorage);
-      console.log('[TaskHistory] 清空历史记录，用户ID:', userData.id, '筛选:', filterTab);
+      debugTaskHistory('[TaskHistory] 清空历史记录，用户ID:', userData.id, '筛选:', filterTab);
 
       if (filterTab === 'all') {
         // 清空所有记录
@@ -1328,7 +1341,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
         await loadTasks(userData.id);
 
         // 【关键修复】触发 taskHistoryUpdated 事件，通知其他组件（如彩绘提取页面）刷新订单记录
-        console.log('[TaskHistory] 清空历史记录成功，触发 taskHistoryUpdated 事件');
+        debugTaskHistory('[TaskHistory] 清空历史记录成功，触发 taskHistoryUpdated 事件');
         window.dispatchEvent(new Event('taskHistoryUpdated'));
 
         // 显示成功提示
@@ -1359,7 +1372,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
         await loadTasks(userData.id);
 
         // 【关键修复】触发 taskHistoryUpdated 事件，通知其他组件（如彩绘提取页面）刷新订单记录
-        console.log('[TaskHistory] 清空筛选历史记录成功，触发 taskHistoryUpdated 事件');
+        debugTaskHistory('[TaskHistory] 清空筛选历史记录成功，触发 taskHistoryUpdated 事件');
         window.dispatchEvent(new Event('taskHistoryUpdated'));
 
         // 显示成功提示
@@ -1378,8 +1391,8 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       'color-extraction': '彩绘提取',
       'ai-generate': 'AI生图',
       'smart-edit': '智能改图',
-      'watermark': '高清+扩图/AI扩图',
-      'custom': '高清放大/其他',
+      'watermark': '高清+扩图',
+      'custom': '其他历史',
     };
     return labels[filter] || filter;
   };
@@ -1422,7 +1435,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       await loadTasks(userId);
 
       // 【关键修复】触发 taskHistoryUpdated 事件，通知其他组件（如彩绘提取页面）刷新订单记录
-      console.log('[TaskHistory] 删除历史记录成功，触发 taskHistoryUpdated 事件');
+      debugTaskHistory('[TaskHistory] 删除历史记录成功，触发 taskHistoryUpdated 事件');
       window.dispatchEvent(new Event('taskHistoryUpdated'));
 
       // 显示成功提示
@@ -1437,14 +1450,14 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
   return (
     <div
-      className="fixed right-5 top-1/2 -translate-y-1/2 z-[70]"
+      className="fixed bottom-3 right-3 top-24 z-[70] flex items-center sm:bottom-4 sm:right-5 sm:top-[5.5rem]"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
       <div
         className={`
-          overflow-hidden border border-white/15 bg-[#050509]/82 shadow-[0_24px_80px_rgba(0,0,0,0.42)] backdrop-blur-2xl transition-all duration-300
-          ${isCollapsed ? 'w-[58px] rounded-[1.35rem]' : 'w-[390px] rounded-[1.7rem]'}
+          flex max-h-full overflow-hidden border border-white/15 bg-[#050509]/82 shadow-[0_24px_80px_rgba(0,0,0,0.42)] backdrop-blur-2xl transition-all duration-300
+          ${isCollapsed ? 'w-[58px] rounded-[1.35rem]' : 'w-[min(390px,calc(100vw-1.5rem))] flex-col rounded-[1.7rem]'}
         `}
       >
         <button
@@ -1562,7 +1575,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
               </div>
             </div>
 
-            <div className="max-h-[680px] overflow-y-auto px-3 py-3 history-scrollbar">
+            <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 history-scrollbar">
                 {visibleTasks.length === 0 ? (
                   <div className="rounded-2xl border border-white/8 bg-white/[0.035] px-5 py-10 text-center">
                   <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-white/8 text-white/36">
@@ -1610,7 +1623,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                               <div className="w-[88px] shrink-0 overflow-hidden rounded-xl border border-white/8 bg-black/30 self-start transition-colors group-hover:border-white/16">
                                 <button type="button" onClick={(e) => { e.stopPropagation(); if (hasResult) setPreviewImageUrl(resultImage); }} className="block w-full text-left">
                                   {hasResult ? (
-                                    <ImageThumbnail src={resultImage} alt="结果图" width={88} height={88} thumbnailSize="small" className="h-[88px] w-[88px] object-cover transition duration-200 group-hover:scale-[1.02] group-hover:opacity-90" />
+                                    <ImageThumbnail src={resultImage} alt="结果图" width={88} height={88} thumbnailSize="small" useProcessedThumbnail className="h-[88px] w-[88px] object-cover transition duration-200 group-hover:scale-[1.02] group-hover:opacity-90" />
                                   ) : (
                                     <div className="flex h-[88px] w-[88px] items-center justify-center text-[11px] text-white/32 text-center leading-tight px-2">
                                       {task.status === '处理中' ? '处理中' : '暂无结果'}

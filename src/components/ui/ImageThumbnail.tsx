@@ -22,6 +22,7 @@ interface ImageThumbnailProps {
   placeholder?: string;
   thumbnailSize?: 'small' | 'medium' | 'large';
   onLoad?: () => void; // 图片加载成功回调
+  useProcessedThumbnail?: boolean;
 }
 
 const THUMBNAIL_SIZES = {
@@ -31,6 +32,7 @@ const THUMBNAIL_SIZES = {
 };
 
 const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
+const processedThumbnailCache = new Map<string, string>();
 
 function SafeImage({ alt, ...props }: Omit<ImageProps, 'loader'>) {
   return <Image {...props} alt={alt} loader={passthroughImageLoader} unoptimized />;
@@ -46,11 +48,15 @@ export function ImageThumbnail({
   placeholder = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200"%3E%3Crect width="200" height="200" fill="%23f0f0f0"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%23999"%3E加载中...%3C/text%3E%3C/svg%3E',
   thumbnailSize = 'medium',
   onLoad,
+  useProcessedThumbnail = false,
 }: ImageThumbnailProps) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
   const [inView, setInView] = useState(false);
+  const [resolvedThumbnailUrl, setResolvedThumbnailUrl] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const displayWidth = width || THUMBNAIL_SIZES[thumbnailSize].width;
+  const displayHeight = height || THUMBNAIL_SIZES[thumbnailSize].height;
 
   // 使用Intersection Observer实现懒加载
   useEffect(() => {
@@ -75,25 +81,63 @@ export function ImageThumbnail({
     };
   }, []);
 
-  // 超时检测：如果图片超过10秒没有加载完成，显示错误状态
   useEffect(() => {
-    if (inView && !loaded && !error && src) {
+    setLoaded(false);
+    setError(false);
+    setResolvedThumbnailUrl(null);
+  }, [src]);
+
+  useEffect(() => {
+    if (!inView || !src) return;
+    if (!useProcessedThumbnail) {
+      setResolvedThumbnailUrl(src);
+      return;
+    }
+
+    const cacheKey = `${src}|${displayWidth}x${displayHeight}`;
+    const cached = processedThumbnailCache.get(cacheKey);
+    if (cached) {
+      setResolvedThumbnailUrl(cached);
+      return;
+    }
+
+    const controller = new AbortController();
+    const size = Math.max(displayWidth, displayHeight);
+
+    fetch(`/api/image/thumbnail-url?url=${encodeURIComponent(src)}&size=${size}`, {
+      credentials: 'include',
+      signal: controller.signal,
+    })
+      .then((response) => response.json())
+      .then((result: { success?: boolean; data?: { thumbnailUrl?: string } }) => {
+        const thumbnailUrl = result.success && result.data?.thumbnailUrl ? result.data.thumbnailUrl : src;
+        processedThumbnailCache.set(cacheKey, thumbnailUrl);
+        setResolvedThumbnailUrl(thumbnailUrl);
+      })
+      .catch((fetchError) => {
+        if (controller.signal.aborted) return;
+        console.warn('[ImageThumbnail] 缩略图URL生成失败，回退原图:', fetchError);
+        setResolvedThumbnailUrl(src);
+      });
+
+    return () => controller.abort();
+  }, [displayHeight, displayWidth, inView, src, useProcessedThumbnail]);
+
+  const thumbnailUrl = inView ? (resolvedThumbnailUrl || (!useProcessedThumbnail ? src : null)) : null;
+
+  // 超时检测：等拿到真实图片地址后再计时，避免签名接口稍慢时误判失败。
+  useEffect(() => {
+    if (inView && thumbnailUrl && !loaded && !error) {
         const timeoutId = setTimeout(() => {
-          console.warn('[ImageThumbnail] 图片加载超时:', src.substring(0, 80));
+          console.warn('[ImageThumbnail] 图片加载超时:', thumbnailUrl.substring(0, 80));
           setError(true);
-        }, 10000); // 10秒超时
+        }, 15000);
 
       return () => {
         clearTimeout(timeoutId);
       };
     }
-  }, [inView, loaded, error, src]);
-
-  // 直接使用原图URL
-  // 注意：Coze对象存储不支持图片处理参数，如需缩略图需要后端生成
-  const thumbnailUrl = inView ? src : null;
-  const displayWidth = width || THUMBNAIL_SIZES[thumbnailSize].width;
-  const displayHeight = height || THUMBNAIL_SIZES[thumbnailSize].height;
+  }, [inView, loaded, error, thumbnailUrl]);
 
   if (!src) {
     return (

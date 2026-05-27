@@ -427,6 +427,10 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 - 删除重复性信息，保留必要状态和操作
 - 积分展示继续使用 `PointsIconLabel` 和 `points-icon.png`
 - 保留 `/profile?tab=recharge` 和现有 `RechargePanel` 充值链路
+- 订单记录面板必须适配笔记本高度：展开后避开顶部导航，内部滚动，不让卡片或底部按钮溢出视口。
+- 订单记录缩略图不直接拉 OSS 原图，使用 `/api/image/thumbnail-url` 生成带 OSS 图片处理参数的签名小图，降低 88px 缩略图加载体积。
+- 用户侧和管理员侧工具筛选只保留当前主工具：彩绘提取、AI生图、智能改图、高清+扩图；旧的 AI扩图、高清放大、去水印记录统一显示/归类为高清+扩图。
+- 高清+扩图当前价格为 30 积分，前端按钮和后端扣费都应通过 `getOutpaintUpsamplingPoints()` 读取，不要写死数字。
 
 ## 后续优先级
 

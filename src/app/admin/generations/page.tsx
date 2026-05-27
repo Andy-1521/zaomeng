@@ -158,9 +158,7 @@ const adminToolOptions: ToolOption[] = [
   { label: '彩绘提取', value: '彩绘提取' },
   { label: 'AI生图', value: 'AI生图' },
   { label: '智能改图', value: '智能改图' },
-  { label: 'AI扩图', value: '去除水印' },
   { label: '高清+扩图', value: '高清+扩图' },
-  { label: '高清放大', value: '高清放大' },
 ];
 
 const diagnosticOptions: DiagnosticOption[] = [
@@ -211,16 +209,16 @@ function getNormalizedToolLabel(toolPage: string, description: string, orderNumb
     return '智能改图';
   }
 
-  if (toolPage === '高清+扩图' || description.includes('高清+扩图') || orderNumber.startsWith('HDO-')) {
+  if (toolPage === '高清+扩图' || toolPage === '高清+扩图2' || description.includes('高清+扩图') || orderNumber.startsWith('HDO-') || orderNumber.startsWith('HDO2-')) {
     return '高清+扩图';
   }
 
   if (toolPage === 'AI扩图' || toolPage === '去除水印' || toolPage === '去水印' || description.includes('去除水印') || description.includes('AI扩图') || orderNumber.startsWith('RW-')) {
-    return 'AI扩图';
+    return '高清+扩图';
   }
 
   if (toolPage === '高清放大' || description.includes('高清放大') || orderNumber.startsWith('HD-')) {
-    return '高清放大';
+    return '高清+扩图';
   }
 
   return toolPage || '其他工具';
@@ -230,9 +228,7 @@ function getToolBadgeClass(toolLabel: string): string {
   if (toolLabel === '彩绘提取') return 'border-violet-300/25 bg-violet-500/15 text-violet-100';
   if (toolLabel === 'AI生图') return 'border-fuchsia-300/25 bg-fuchsia-500/15 text-fuchsia-100';
   if (toolLabel === '智能改图') return 'border-sky-300/25 bg-sky-500/15 text-sky-100';
-  if (toolLabel === 'AI扩图') return 'border-teal-300/25 bg-teal-500/15 text-teal-100';
   if (toolLabel === '高清+扩图') return 'border-cyan-300/25 bg-cyan-500/15 text-cyan-100';
-  if (toolLabel === '高清放大') return 'border-amber-300/25 bg-amber-500/15 text-amber-100';
   return 'border-white/15 bg-white/10 text-white/72';
 }
 

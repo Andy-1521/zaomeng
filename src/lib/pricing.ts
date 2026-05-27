@@ -13,7 +13,7 @@ const AI_GENERATE_POINTS: Record<StandardResolution, number> = {
   '2k': 20,
   '4k': 40,
 };
-const OUTPAINT_UPSAMPLING_POINTS = 20;
+const OUTPAINT_UPSAMPLING_POINTS = 30;
 const SMART_EDIT_POINTS: Record<StandardResolution, number> = {
   '1k': 30,
   '2k': 30,
