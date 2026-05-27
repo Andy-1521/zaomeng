@@ -20,8 +20,18 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '文件上传失败';
 }
 
-function getErrorStack(error: unknown) {
-  return error instanceof Error ? error.stack : undefined;
+function getUploadErrorMessage(error: unknown) {
+  const message = getErrorMessage(error);
+
+  if (message.includes('UserDisable')) {
+    return '对象存储账号或Bucket当前不可用，请联系管理员检查阿里云OSS状态';
+  }
+
+  if (message.includes('timeout') || message.includes('Timeout')) {
+    return '对象存储响应超时，请稍后重试';
+  }
+
+  return message;
 }
 
 console.log('[文件上传] 使用阿里云OSS对象存储（1年有效期）');
@@ -101,11 +111,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        message: getErrorMessage(error),
-        debug: {
-          error: getErrorMessage(error),
-          stack: getErrorStack(error),
-        },
+        message: getUploadErrorMessage(error),
       },
       { status: 500 }
     );

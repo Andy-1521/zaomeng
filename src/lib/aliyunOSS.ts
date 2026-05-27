@@ -33,7 +33,7 @@ if (HAS_ALIYUN_OSS_CONFIG) {
     accessKeyId,
     accessKeySecret,
     secure: true,
-    timeout: '300s',
+    timeout: '60s',
   });
 }
 

@@ -92,6 +92,19 @@ type CapturedImagesResponse = {
   pagination?: Partial<CapturedImagesPagination>;
 };
 
+type UploadFileResponse = {
+  success?: boolean;
+  message?: string;
+  data?: {
+    url?: string;
+    material?: CapturedImageRecord | null;
+  };
+};
+
+type MaterialUploadResult =
+  | { success: true; fileName: string; url: string; material?: CapturedImageRecord | null }
+  | { success: false; fileName: string; message: string };
+
 type GalleryAction = {
   id: GalleryActionId;
   label: string;
@@ -221,6 +234,8 @@ const AI_RESOLUTION_OPTIONS: Array<{ value: SmartEditResolution; label: string; 
 
 const UNCATEGORIZED_FOLDER_VALUE = '__uncategorized__';
 const PROCESSING_ORDER_POLL_TTL_MS = 20 * 60 * 1000;
+const MATERIAL_UPLOAD_CONCURRENCY = 3;
+const MATERIAL_UPLOAD_TIMEOUT_MS = 75_000;
 
 const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
 
@@ -232,6 +247,37 @@ function getActionTotalPoints(action: GalleryAction, aiResolution: SmartEditReso
   const points = action.id === 'ai-generate' ? getAiGeneratePoints(aiResolution) : action.points;
   if (typeof points !== 'number') return null;
   return points * Math.max(1, imageCount);
+}
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+async function runWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>
+) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(concurrency, items.length);
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await worker(items[currentIndex], currentIndex);
+    }
+  }));
+
+  return results;
 }
 
 type QuickCreateDropdownProps = {
@@ -619,6 +665,7 @@ export default function QuickCreatePage() {
   const [isLoadingMoreMaterials, setIsLoadingMoreMaterials] = useState(false);
   const [materialsPagination, setMaterialsPagination] = useState<CapturedImagesPagination>(EMPTY_CAPTURED_IMAGES_PAGINATION);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgressText, setUploadProgressText] = useState('');
   const [isAiReferenceUploading, setIsAiReferenceUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [canHoverCardControls, setCanHoverCardControls] = useState(true);
@@ -853,6 +900,58 @@ export default function QuickCreatePage() {
     if (isLoadingMaterials || isLoadingMoreMaterials || !materialsPagination.hasMore) return;
     await loadCapturedImages({ offset: materialsPagination.nextOffset, append: true });
   }, [isLoadingMaterials, isLoadingMoreMaterials, loadCapturedImages, materialsPagination.hasMore, materialsPagination.nextOffset]);
+
+  const materialMatchesCurrentView = useCallback((material: CapturedImageRecord) => {
+    if (materialFilter !== 'all' && getMaterialDateGroup(material.createdAt) !== materialFilter) {
+      return false;
+    }
+
+    if (materialScope === 'favorite') {
+      return Boolean(material.isFavorite);
+    }
+
+    if (materialScope === 'uncategorized') {
+      return !material.folderId;
+    }
+
+    if (activeFolderId) {
+      return material.folderId === activeFolderId;
+    }
+
+    return true;
+  }, [activeFolderId, materialFilter, materialScope]);
+
+  const prependUploadedMaterials = useCallback((materials: CapturedImageRecord[]) => {
+    const visibleMaterials = materials.filter(materialMatchesCurrentView);
+    if (visibleMaterials.length === 0) return;
+
+    setCapturedImages((prev) => {
+      const nextById = new Map<string, CapturedImageRecord>();
+      for (const material of visibleMaterials) {
+        nextById.set(material.id, material);
+      }
+      for (const material of prev) {
+        if (!nextById.has(material.id)) {
+          nextById.set(material.id, material);
+        }
+      }
+
+      return Array.from(nextById.values()).sort(
+        (left, right) => parseMaterialDate(right.createdAt).getTime() - parseMaterialDate(left.createdAt).getTime()
+      );
+    });
+
+    setMaterialsPagination((prev) => {
+      const existingIds = new Set(capturedImages.map((material) => material.id));
+      const newVisibleCount = visibleMaterials.filter((material) => !existingIds.has(material.id)).length;
+      if (newVisibleCount === 0) return prev;
+      return {
+        ...prev,
+        total: prev.total + newVisibleCount,
+        nextOffset: prev.nextOffset + newVisibleCount,
+      };
+    });
+  }, [capturedImages, materialMatchesCurrentView]);
 
   const reduceMaterialsPagination = useCallback((deletedCount: number) => {
     if (deletedCount <= 0) return;
@@ -1101,36 +1200,76 @@ export default function QuickCreatePage() {
     if (files.length === 0) return;
     if (!validateImageFiles(files)) return;
 
+    let completedCount = 0;
     setIsUploading(true);
+    setUploadProgressText(files.length === 1 ? '正在上传 1 张素材...' : `正在上传 0/${files.length} 张素材...`);
+
     try {
-      const uploadedUrls: string[] = [];
-      for (const file of files) {
+      const uploadOne = async (file: File): Promise<MaterialUploadResult> => {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('createMaterial', 'true');
         if (activeFolderId) {
           formData.append('materialFolderId', activeFolderId);
         }
-        const response = await fetch('/api/upload/file', { method: 'POST', credentials: 'include', body: formData });
-        const data = await response.json();
-        if (data.success && data.data?.url) {
-          uploadedUrls.push(data.data.url);
-        }
-      }
 
-      if (uploadedUrls.length > 0) {
-        await loadCapturedImages();
-        showToast(`成功加入 ${uploadedUrls.length} 张图片到素材库`, 'success');
+        try {
+          const response = await fetchWithTimeout(
+            '/api/upload/file',
+            { method: 'POST', credentials: 'include', body: formData },
+            MATERIAL_UPLOAD_TIMEOUT_MS
+          );
+          const data = await response.json() as UploadFileResponse;
+          if (!response.ok || !data.success || !data.data?.url) {
+            throw new Error(toUserFacingErrorMessage(data.message, '上传失败，请重试'));
+          }
+
+          const result: MaterialUploadResult = {
+            success: true,
+            fileName: file.name,
+            url: data.data.url,
+            material: data.data.material ?? null,
+          };
+
+          if (data.data.material) {
+            prependUploadedMaterials([data.data.material]);
+          }
+
+          return result;
+        } catch (error) {
+          const isAbortError = error instanceof DOMException && error.name === 'AbortError';
+          return {
+            success: false,
+            fileName: file.name,
+            message: isAbortError ? '上传超时，请稍后重试' : toUserFacingErrorFromUnknown(error, '上传失败，请重试'),
+          };
+        } finally {
+          completedCount += 1;
+          setUploadProgressText(files.length === 1 ? '正在整理素材...' : `正在上传 ${completedCount}/${files.length} 张素材...`);
+        }
+      };
+
+      const results = await runWithConcurrency(files, MATERIAL_UPLOAD_CONCURRENCY, uploadOne);
+      const successfulUploads = results.filter((result) => result.success);
+      const failedUploads = results.filter((result) => !result.success);
+
+      if (successfulUploads.length > 0) {
+        if (successfulUploads.some((result) => result.success && !result.material)) {
+          void loadCapturedImages();
+        }
+        showToast(`成功加入 ${successfulUploads.length} 张图片到素材库`, 'success');
+        if (failedUploads.length > 0) {
+          showToast(`${failedUploads.length} 张上传失败：${failedUploads[0].message}`, 'error');
+        }
       } else {
-        showToast('上传失败，请重试', 'error');
+        showToast(failedUploads[0]?.message || '上传失败，请重试', 'error');
       }
-    } catch {
-      showToast('上传失败，请重试', 'error');
     } finally {
       setIsUploading(false);
+      setUploadProgressText('');
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
-  }, [activeFolderId, loadCapturedImages, validateImageFiles]);
+  }, [activeFolderId, loadCapturedImages, prependUploadedMaterials, validateImageFiles]);
 
   const uploadAiReferenceFiles = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
@@ -2463,7 +2602,8 @@ export default function QuickCreatePage() {
 
         {isUploading && (
           <div className="mb-6 rounded-3xl border border-white/10 bg-white/[0.03] p-5 text-center text-white/60">
-            素材上传中...
+            <p className="text-sm font-medium text-white/72">{uploadProgressText || '素材上传中...'}</p>
+            <p className="mt-1 text-xs text-white/38">已成功的图片会先加入素材库，失败的图片会单独提示。</p>
           </div>
         )}
 
