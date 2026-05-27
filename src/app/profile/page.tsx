@@ -168,7 +168,7 @@ export default function ProfilePage() {
     }
 
     if (user.isAdmin) {
-      window.location.href = '/admin/generations';
+      router.push('/admin/generations');
       return;
     }
 
@@ -201,7 +201,7 @@ export default function ProfilePage() {
         return;
       }
 
-      window.location.href = '/admin/generations';
+      router.push('/admin/generations');
     } catch (error) {
       console.error('[Profile] 打开管理员后台失败:', error);
       showToast('打开管理员后台失败，请稍后重试', 'error');

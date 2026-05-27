@@ -2,6 +2,8 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
+import { useUser } from '@/contexts/UserContext';
 import { showToast } from '@/lib/toast';
 import { toUserFacingErrorMessage } from '@/lib/userFacingError';
 
@@ -12,6 +14,8 @@ function seededRandom(seed: number) {
 }
 
 export default function AuthPage() {
+  const router = useRouter();
+  const { setUser } = useUser();
   const [mode, setMode] = useState<'login' | 'register' | 'reset'>('login');
   const [countdown, setCountdown] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -38,13 +42,14 @@ export default function AuthPage() {
     queueMicrotask(() => {
       setIsClient(true);
     });
-  }, []);
+    router.prefetch('/home');
+  }, [router]);
 
   // 生成一致的粒子样式，避免 hydration 错误
   const particleStyles = useMemo(() => {
     if (!isClient) return [];
 
-    return [...Array(80)].map((_, i) => ({
+    return [...Array(36)].map((_, i) => ({
       top: `${seededRandom(i * 1234) * 100}%`,
       left: `${seededRandom(i * 5678) * 100}%`,
       animation: `float ${4 + seededRandom(i * 9012) * 8}s ease-in-out infinite`,
@@ -61,7 +66,7 @@ export default function AuthPage() {
   const starStyles = useMemo(() => {
     if (!isClient) return [];
 
-    return [...Array(30)].map((_, i) => ({
+    return [...Array(14)].map((_, i) => ({
       top: `${seededRandom(i * 9999) * 100}%`,
       left: `${seededRandom(i * 8888) * 100}%`,
       animation: `twinkle ${2 + seededRandom(i * 7777) * 3}s ease-in-out infinite`,
@@ -177,12 +182,9 @@ export default function AuthPage() {
       const result = await response.json();
 
       if (result.success) {
-        localStorage.setItem('user', JSON.stringify(result.data));
+        setUser(result.data);
         showToast(`注册成功，已获得 ${result.data.points} 积分`, 'success');
-        // 注册成功后跳转到首页
-        window.setTimeout(() => {
-          window.location.href = '/home';
-        }, 500);
+        router.replace('/home');
       } else {
         showToast(toUserFacingErrorMessage(result.message, '注册失败，请稍后重试'), 'error');
       }
@@ -208,12 +210,9 @@ export default function AuthPage() {
       const result = await response.json();
 
       if (result.success) {
-        localStorage.setItem('user', JSON.stringify(result.data));
+        setUser(result.data);
         showToast(`登录成功，欢迎回来，${result.data.username}`, 'success');
-        // 登录成功后跳转到首页
-        window.setTimeout(() => {
-          window.location.href = '/home';
-        }, 500);
+        router.replace('/home');
       } else {
         showToast(toUserFacingErrorMessage(result.message, '登录失败，请稍后重试'), 'error');
       }
@@ -333,7 +332,7 @@ export default function AuthPage() {
           }} />
         </div>
 
-        {/* 更多梦幻粒子 - 增加到80个 */}
+        {/* 梦幻粒子 */}
         {particleStyles.map((style, i) => (
           <div
             key={i}
@@ -349,7 +348,7 @@ export default function AuthPage() {
         <div className="absolute top-1/4 left-2/3 w-3 h-3 bg-indigo-400 rounded-full animate-ping opacity-30" style={{ animationDelay: '1.5s' }} />
         <div className="absolute bottom-1/3 right-1/4 w-3 h-3 bg-cyan-400 rounded-full animate-ping opacity-30" style={{ animationDelay: '2s' }} />
 
-        {/* 星星闪烁效果 - 增加到30个 */}
+        {/* 星星闪烁效果 */}
         {starStyles.map((style, i) => (
           <div
             key={`star-${i}`}

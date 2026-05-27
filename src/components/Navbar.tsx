@@ -42,10 +42,11 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
 
   const handleLogoClick = () => {
     if (pathname === '/home') {
-      window.location.href = '/home';
-    } else {
-      router.push('/home');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
     }
+
+    router.push('/home');
   };
 
   const handleLogout = () => {
@@ -54,6 +55,10 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
   };
 
   useEffect(() => {
+    router.prefetch('/home');
+    router.prefetch('/plugin');
+    router.prefetch('/profile');
+
     const handler = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
       const data = event.data as { source?: string; type?: string; payload?: { version?: string } | null };
@@ -76,7 +81,7 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
     window.addEventListener('message', handler);
     window.postMessage({ source: 'zaomeng-web', type: 'ZAOMENG_EXTENSION_PING' }, window.location.origin);
     return () => window.removeEventListener('message', handler);
-  }, []);
+  }, [router]);
 
   return (
     <nav className="sticky top-0 z-[80] border-b border-white/[0.08] bg-black/72 px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.22)] backdrop-blur-2xl sm:px-6 sm:py-3">
