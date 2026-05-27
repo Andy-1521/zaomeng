@@ -310,8 +310,11 @@ const UNCATEGORIZED_FOLDER_VALUE = '__uncategorized__';
 const PROCESSING_ORDER_POLL_TTL_MS = 20 * 60 * 1000;
 const MATERIAL_UPLOAD_CONCURRENCY = 3;
 const MATERIAL_UPLOAD_TIMEOUT_MS = 180_000;
+const MATERIAL_UPLOAD_COMPLETE_TIMEOUT_MS = 8_000;
+const MATERIAL_UPLOAD_COMPLETE_RETRY_DELAYS_MS = [0, 1200, 2500, 5000];
 const MATERIAL_UPLOAD_RECOVERY_TTL_MS = 10 * 60 * 1000;
-const MATERIAL_UPLOAD_COMPRESS_THRESHOLD_BYTES = 8 * 1024 * 1024;
+const MATERIAL_UPLOAD_RECOVERY_MAX_ATTEMPTS = 12;
+const MATERIAL_UPLOAD_COMPRESS_THRESHOLD_BYTES = 16 * 1024 * 1024;
 const MATERIAL_UPLOAD_HARD_LIMIT_BYTES = 40 * 1024 * 1024;
 const IMAGE_LOAD_RETRY_DELAYS_MS = [500, 1200, 2500, 5000];
 
@@ -342,6 +345,26 @@ function isAbortLikeError(error: unknown) {
   if (error instanceof DOMException && error.name === 'AbortError') return true;
   if (!(error instanceof Error)) return false;
   return /abort|aborted|cancel|cancelled|network|failed to fetch|load failed/i.test(error.message);
+}
+
+class DirectUploadCompletionError extends Error {
+  key: string;
+  originalError: unknown;
+
+  constructor(key: string, originalError: unknown) {
+    super(toUserFacingErrorFromUnknown(originalError, '入库确认失败'));
+    this.name = 'DirectUploadCompletionError';
+    this.key = key;
+    this.originalError = originalError;
+  }
+}
+
+function isDirectUploadCompletionError(error: unknown): error is DirectUploadCompletionError {
+  return error instanceof DirectUploadCompletionError;
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 async function runWithConcurrency<T, R>(
@@ -420,6 +443,23 @@ function writeMaterialUploadSession(session: StoredMaterialUploadSession) {
 function clearMaterialUploadSession(userId?: string) {
   if (typeof window === 'undefined') return;
   window.sessionStorage.removeItem(getMaterialUploadSessionKey(userId));
+}
+
+function removePendingMaterialUploadFromSession(userId: string | undefined, key: string) {
+  const session = readMaterialUploadSession(userId);
+  if (!session) return;
+
+  const pendingDirectUploads = (session.pendingDirectUploads || []).filter((item) => item.key !== key);
+  if (pendingDirectUploads.length === 0) {
+    clearMaterialUploadSession(session.userId);
+    return;
+  }
+
+  writeMaterialUploadSession({
+    ...session,
+    pendingDirectUploads,
+    updatedAt: Date.now(),
+  });
 }
 
 function readStoredUserId() {
@@ -554,7 +594,7 @@ async function completeDirectUploadMaterial(upload: {
   key: string;
   originalFileName: string;
   materialFolderId?: string | null;
-}) {
+}, timeoutMs = MATERIAL_UPLOAD_COMPLETE_TIMEOUT_MS) {
   const completeResponse = await fetchWithTimeout(
     '/api/upload/complete-material',
     {
@@ -567,7 +607,7 @@ async function completeDirectUploadMaterial(upload: {
         materialFolderId: upload.materialFolderId ?? null,
       }),
     },
-    30_000
+    timeoutMs
   );
   const completeData = await completeResponse.json() as UploadFileResponse;
   if (!completeResponse.ok || !completeData.success || !completeData.data?.url) {
@@ -575,6 +615,35 @@ async function completeDirectUploadMaterial(upload: {
   }
 
   return completeData.data;
+}
+
+async function completeDirectUploadMaterialWithRetry(
+  upload: {
+    key: string;
+    originalFileName: string;
+    materialFolderId?: string | null;
+  },
+  options?: {
+    onRetry?: (attempt: number) => void;
+  }
+) {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < MATERIAL_UPLOAD_COMPLETE_RETRY_DELAYS_MS.length; attempt += 1) {
+    const waitMs = MATERIAL_UPLOAD_COMPLETE_RETRY_DELAYS_MS[attempt];
+    if (waitMs > 0) {
+      options?.onRetry?.(attempt + 1);
+      await delay(waitMs);
+    }
+
+    try {
+      return await completeDirectUploadMaterial(upload);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('素材入库失败');
 }
 
 async function uploadMaterialDirectToOSS(file: File, options: {
@@ -605,9 +674,10 @@ async function uploadMaterialDirectToOSS(file: File, options: {
   if (!policyResponse.ok || !policyData.success || !policyData.data) {
     throw new Error(toUserFacingErrorMessage(policyData.message, '生成上传凭证失败'));
   }
+  const uploadPolicy = policyData.data;
   const pendingUpload: StoredDirectMaterialUpload = {
     clientId: options.clientId,
-    key: policyData.data.key,
+    key: uploadPolicy.key,
     originalFileName: options.originalFileName,
     materialFolderId: options.activeFolderId,
     status: 'uploading',
@@ -617,31 +687,44 @@ async function uploadMaterialDirectToOSS(file: File, options: {
   options.onPendingCreated?.(pendingUpload);
 
   const formData = new FormData();
-  formData.append('key', policyData.data.key);
-  formData.append('policy', policyData.data.policy);
-  formData.append('OSSAccessKeyId', policyData.data.accessId);
-  formData.append('Signature', policyData.data.signature);
-  formData.append('success_action_status', policyData.data.successActionStatus || '200');
+  formData.append('key', uploadPolicy.key);
+  formData.append('policy', uploadPolicy.policy);
+  formData.append('OSSAccessKeyId', uploadPolicy.accessId);
+  formData.append('Signature', uploadPolicy.signature);
+  formData.append('success_action_status', uploadPolicy.successActionStatus || '200');
   formData.append('Content-Type', file.type || 'application/octet-stream');
   formData.append('file', file);
 
   const uploadResponse = await fetchWithTimeout(
-    policyData.data.host,
+    uploadPolicy.host,
     { method: 'POST', body: formData },
     MATERIAL_UPLOAD_TIMEOUT_MS
   );
   if (!uploadResponse.ok) {
     throw new Error(`OSS直传失败 (${uploadResponse.status})`);
   }
-  options.onPendingUploaded?.(policyData.data.key);
-  options.onPendingSaving?.(policyData.data.key);
+  options.onPendingUploaded?.(uploadPolicy.key);
+  options.onPendingSaving?.(uploadPolicy.key);
 
-  const completedData = await completeDirectUploadMaterial({
-    key: policyData.data.key,
-    originalFileName: options.originalFileName,
-    materialFolderId: options.activeFolderId,
-  });
-  options.onPendingCompleted?.(policyData.data.key);
+  let completedData: Awaited<ReturnType<typeof completeDirectUploadMaterial>>;
+  try {
+    completedData = await completeDirectUploadMaterialWithRetry(
+      {
+        key: uploadPolicy.key,
+        originalFileName: options.originalFileName,
+        materialFolderId: options.activeFolderId,
+      },
+      {
+        onRetry: (attempt) => {
+          options.onPendingSaving?.(uploadPolicy.key);
+          console.warn(`[素材上传] 入库确认重试 ${attempt}:`, uploadPolicy.key);
+        },
+      }
+    );
+  } catch (error) {
+    throw new DirectUploadCompletionError(uploadPolicy.key, error);
+  }
+  options.onPendingCompleted?.(uploadPolicy.key);
 
   return completedData;
 }
@@ -1036,6 +1119,7 @@ export default function QuickCreatePage() {
   const imageRetryAttemptsRef = useRef<Record<string, number>>({});
   const imageRetryTimersRef = useRef<Record<string, number>>({});
   const uploadPlaceholderObjectUrlsRef = useRef<Record<string, string>>({});
+  const retryUploadFilesRef = useRef<Record<string, File>>({});
   const materialRecoveryInFlightRef = useRef(false);
   const [capturedImages, setCapturedImages] = useState<CapturedImageRecord[]>([]);
   const [materialUploadPlaceholders, setMaterialUploadPlaceholders] = useState<MaterialUploadPlaceholder[]>([]);
@@ -1321,14 +1405,16 @@ export default function QuickCreatePage() {
         URL.revokeObjectURL(item.previewUrl);
         delete uploadPlaceholderObjectUrlsRef.current[item.id];
       }
+      if (shouldRemove) {
+        delete retryUploadFilesRef.current[item.id];
+      }
       return !shouldRemove;
     }));
   }, []);
 
   const markMaterialUploadPlaceholderFailed = useCallback((clientId: string, message: string) => {
     updateMaterialUploadPlaceholder(clientId, { status: 'failed', message });
-    window.setTimeout(() => removeMaterialUploadPlaceholder(clientId), 8000);
-  }, [removeMaterialUploadPlaceholder, updateMaterialUploadPlaceholder]);
+  }, [updateMaterialUploadPlaceholder]);
 
   const loadCapturedImages = useCallback(async (options?: { offset?: number; append?: boolean; preserveCurrent?: boolean }) => {
     const offset = options?.offset ?? 0;
@@ -1803,6 +1889,7 @@ export default function QuickCreatePage() {
         } catch {
           previewUrl = '';
         }
+        retryUploadFilesRef.current[clientId] = file;
         upsertMaterialUploadPlaceholder({
           id: clientId,
           fileName: file.name,
@@ -1846,6 +1933,20 @@ export default function QuickCreatePage() {
           } catch (directError) {
             if (isPageLeavingRef.current) {
               throw directError;
+            }
+
+            if (isDirectUploadCompletionError(directError)) {
+              updatePendingDirectUpload(directError.key, 'saving');
+              markMaterialUploadPlaceholderFailed(
+                clientId,
+                '图片已上传，入库确认暂未完成，可点重试'
+              );
+              failedCount += 1;
+              return {
+                success: false,
+                fileName: file.name,
+                message: '图片已上传，入库确认暂未完成，可点重试',
+              };
             }
 
             console.warn('[素材上传] OSS 直传失败，回退到服务端上传:', directError);
@@ -1929,7 +2030,8 @@ export default function QuickCreatePage() {
         showToast(failedUploads[0]?.message || '上传失败，请重试', 'error');
       }
     } finally {
-      const finalStatus: StoredMaterialUploadSession['status'] = settledCount >= selectedUploadFiles.length ? 'settled' : 'running';
+      const hasPendingDirectUploads = pendingDirectUploads.some((item) => item.status !== 'completed');
+      const finalStatus: StoredMaterialUploadSession['status'] = settledCount >= selectedUploadFiles.length && !hasPendingDirectUploads ? 'settled' : 'running';
       writeCurrentUploadSession(finalStatus);
       if (finalStatus === 'settled') {
         window.setTimeout(() => clearMaterialUploadSession(sessionUserId), 15000);
@@ -1937,6 +2039,56 @@ export default function QuickCreatePage() {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }, [activeFolderId, loadCapturedImages, markMaterialUploadPlaceholderFailed, prependUploadedMaterials, removeMaterialUploadPlaceholder, updateMaterialUploadPlaceholder, upsertMaterialUploadPlaceholder, user?.id, validateImageFiles]);
+
+  const retryMaterialUploadPlaceholder = useCallback(async (placeholder: MaterialUploadPlaceholder) => {
+    if (placeholder.key) {
+      updateMaterialUploadPlaceholder(placeholder.id, {
+        status: 'recovering',
+        message: '正在重新确认入库',
+      });
+
+      try {
+        const completedData = await completeDirectUploadMaterialWithRetry(
+          {
+            key: placeholder.key,
+            originalFileName: placeholder.fileName,
+            materialFolderId: placeholder.materialFolderId,
+          },
+          {
+            onRetry: (attempt) => {
+              updateMaterialUploadPlaceholder(placeholder.id, {
+                status: 'recovering',
+                message: `正在重试入库 ${attempt}`,
+              });
+            },
+          }
+        );
+
+        if (completedData.material) {
+          prependUploadedMaterials([completedData.material]);
+        }
+        removePendingMaterialUploadFromSession(user?.id || readStoredUserId() || 'anonymous', placeholder.key);
+        removeMaterialUploadPlaceholder(placeholder.id);
+        showToast('素材已加入图库', 'success');
+      } catch (error) {
+        markMaterialUploadPlaceholderFailed(
+          placeholder.id,
+          toUserFacingErrorFromUnknown(error, '入库确认仍未完成，可稍后再试')
+        );
+      }
+      return;
+    }
+
+    const retryFile = retryUploadFilesRef.current[placeholder.id];
+    if (retryFile) {
+      removeMaterialUploadPlaceholder(placeholder.id);
+      await uploadFiles([retryFile]);
+      return;
+    }
+
+    showToast('请重新选择这张图片上传', 'info');
+    fileInputRef.current?.click();
+  }, [markMaterialUploadPlaceholderFailed, prependUploadedMaterials, removeMaterialUploadPlaceholder, updateMaterialUploadPlaceholder, uploadFiles, user?.id]);
 
   const uploadAiReferenceFiles = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
@@ -2825,11 +2977,21 @@ export default function QuickCreatePage() {
         const stillPendingUploads: StoredDirectMaterialUpload[] = [];
         for (const pendingUpload of pendingDirectUploads) {
           try {
-            const completedData = await completeDirectUploadMaterial({
-              key: pendingUpload.key,
-              originalFileName: pendingUpload.originalFileName,
-              materialFolderId: pendingUpload.materialFolderId,
-            });
+            const completedData = await completeDirectUploadMaterialWithRetry(
+              {
+                key: pendingUpload.key,
+                originalFileName: pendingUpload.originalFileName,
+                materialFolderId: pendingUpload.materialFolderId,
+              },
+              {
+                onRetry: (attempt) => {
+                  updateMaterialUploadPlaceholder(pendingUpload.clientId || pendingUpload.key, {
+                    status: 'recovering',
+                    message: `正在恢复入库 ${attempt}`,
+                  });
+                },
+              }
+            );
             if (completedData.material) {
               recoveredPendingMaterials.push(completedData.material);
               removeMaterialUploadPlaceholder(pendingUpload.clientId || pendingUpload.key);
@@ -2871,16 +3033,34 @@ export default function QuickCreatePage() {
     const intervalId = window.setInterval(() => {
       attempts += 1;
       void reconcilePendingDirectUploads();
-      if (attempts >= 5 || (pendingDirectUploads.length === 0 && session.status === 'settled')) {
+      if (attempts >= MATERIAL_UPLOAD_RECOVERY_MAX_ATTEMPTS || (pendingDirectUploads.length === 0 && session.status === 'settled')) {
         window.clearInterval(intervalId);
-        clearMaterialUploadSession(sessionUserId);
         if (pendingDirectUploads.length > 0) {
-          for (const pendingUpload of pendingDirectUploads) {
-            markMaterialUploadPlaceholderFailed(pendingUpload.clientId || pendingUpload.key, '刷新前上传未完成，请重新上传');
+          const retryablePendingUploads = pendingDirectUploads.filter((item) => item.status === 'uploaded' || item.status === 'saving');
+          if (retryablePendingUploads.length > 0) {
+            writeMaterialUploadSession({
+              ...session,
+              userId: sessionUserId,
+              pendingDirectUploads: retryablePendingUploads,
+              updatedAt: Date.now(),
+            });
+          } else {
+            clearMaterialUploadSession(sessionUserId);
           }
+
+          for (const pendingUpload of pendingDirectUploads) {
+            markMaterialUploadPlaceholderFailed(
+              pendingUpload.clientId || pendingUpload.key,
+              pendingUpload.status === 'uploaded' || pendingUpload.status === 'saving'
+                ? '入库确认未完成，可点重试'
+                : '刷新中断了上传，请重新上传'
+            );
+          }
+        } else {
+          clearMaterialUploadSession(sessionUserId);
         }
       }
-    }, 3000);
+    }, 5000);
 
     return () => window.clearInterval(intervalId);
   }, [loadCapturedImages, markMaterialUploadPlaceholderFailed, prependUploadedMaterials, removeMaterialUploadPlaceholder, updateMaterialUploadPlaceholder, upsertMaterialUploadPlaceholder, user?.id]);
@@ -3516,6 +3696,18 @@ export default function QuickCreatePage() {
                                 <p className="truncate text-xs text-white/38" title={placeholder.fileName}>
                                   {placeholder.message || placeholder.fileName}
                                 </p>
+                                {isFailed && (
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void retryMaterialUploadPlaceholder(placeholder);
+                                    }}
+                                    className="mt-2 w-full rounded-full border border-white/12 bg-white/[0.07] px-3 py-1.5 text-xs font-medium text-white/76 transition-colors hover:border-white/22 hover:bg-white/[0.12] hover:text-white"
+                                  >
+                                    {placeholder.key ? '重试入库' : '重新上传'}
+                                  </button>
+                                )}
                               </div>
                             </div>
                           );
