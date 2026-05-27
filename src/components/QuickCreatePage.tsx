@@ -2680,11 +2680,20 @@ export default function QuickCreatePage() {
       const data = await response.json() as {
         success?: boolean;
         message?: string;
-        data?: { imageUrl?: string; remainingPoints?: number };
+        data?: { imageUrl?: string; orderId?: string; remainingPoints?: number };
       };
 
       if (!response.ok || !data.success) {
         throw new Error(toUserFacingErrorMessage(data.message, '彩绘提取失败，请重试'));
+      }
+
+      const queuedOrderId = data.data?.orderId?.trim();
+      if (queuedOrderId && !data.data?.imageUrl) {
+        trackedProcessingOrdersRef.current = { ...trackedProcessingOrdersRef.current, [queuedOrderId]: Date.now() };
+        setHasProcessingOrders(true);
+        if (typeof data.data?.remainingPoints === 'number') syncPoints(data.data.remainingPoints);
+        dispatchTaskHistoryUpdated();
+        return true;
       }
 
       updateTaskRecordStatus(tempOrderId, '成功', data.data?.imageUrl);
@@ -2816,10 +2825,10 @@ export default function QuickCreatePage() {
             break;
           }
           submittedCount += 1;
-          showToast(`彩绘提取排队处理中：${submittedCount}/${selectedImageList.length}`, 'info');
-          await startColorExtraction(imageUrl);
+          startColorExtraction(imageUrl);
+          await new Promise((resolve) => window.setTimeout(resolve, 300));
         }
-        showToast(`彩绘提取已处理 ${submittedCount} 张`, 'info');
+        showToast(`已提交 ${submittedCount} 张图片到彩绘提取`, 'info');
       }
 
       if (actionId === 'outpaint-upsampling') {

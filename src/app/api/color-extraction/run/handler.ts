@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { after, NextRequest, NextResponse } from 'next/server';
 import { userManager, transactionManager } from '@/storage/database';
 import {
   runRemoveBgWorkflow,
@@ -33,6 +33,16 @@ type RequestParamsRecord = Record<string, unknown> & {
   psdPoints?: number;
   psdPointsCharged?: boolean;
   psdAdditionalImageUrl?: string;
+};
+
+type ColorExtractionJob = {
+  userId: string;
+  imageUrl: string;
+  finalOrderId: string;
+  workflowInputImageUrl: string;
+  extractionMode: 'full' | 'hollow';
+  chargedRemainingPoints: number;
+  localMaterialOrigin: string;
 };
 
 function getErrorMessage(error: unknown) {
@@ -240,6 +250,177 @@ async function persistExternalResultImage(
   return uploadFromUrlToCozeStorage(sourceUrl, relativeFilePath, 'image/png');
 }
 
+async function processColorExtractionJob(params: ColorExtractionJob) {
+  const workflowStartTime = Date.now();
+  const {
+    userId,
+    imageUrl,
+    finalOrderId,
+    workflowInputImageUrl,
+    extractionMode,
+    chargedRemainingPoints,
+    localMaterialOrigin,
+  } = params;
+  let shouldRefund = true;
+
+  try {
+    if (extractionMode === 'hollow') {
+      console.log(`[彩绘提取2工作流] ========== 开始彩绘提取工作流（Coze去除背景API，PSD手动生成） ==========`);
+    } else {
+      console.log(`[彩绘提取2工作流] ========== 开始彩绘提取工作流（Psydo 图生图彩绘提取API，PSD手动生成） ==========`);
+    }
+
+    let extractionResult: ExtractionTaskResult;
+    const actualExtractionMode = extractionMode;
+
+    if (extractionMode === 'hollow') {
+      console.log(`[彩绘提取2工作流] 使用镂空图模式（去除背景API）`);
+      extractionResult = await submitCozeRemoveBgWorkflowTask(workflowInputImageUrl);
+    } else {
+      console.log(`[彩绘提取2工作流] 使用全屏图模式（Psydo 图生图彩绘提取API）`);
+      extractionResult = await extractColorExtraction(workflowInputImageUrl, localMaterialOrigin);
+    }
+
+    console.log(`[彩绘提取2工作流] ========== 提取函数返回结果 ==========`);
+    console.log(`[彩绘提取2工作流] success: ${extractionResult.success}`);
+
+    let extractionImageUrl = '';
+    let processingImageUrl = '';
+    let errorMsg = '';
+    let success = false;
+    let isTimeout = false;
+
+    if (extractionResult.success) {
+      success = true;
+      if (actualExtractionMode === 'hollow') {
+        extractionImageUrl = extractionResult.removedBgUrl || '';
+        processingImageUrl = extractionResult.processedImageUrl || '';
+        console.log(`[彩绘提取2工作流] 镂空图模式成功:`);
+        console.log(`[彩绘提取2工作流] removedBgUrl: ${extractionImageUrl.substring(0, 80)}...`);
+        console.log(`[彩绘提取2工作流] processedImageUrl: ${processingImageUrl.substring(0, 80)}...`);
+        console.log(`[彩绘提取2工作流] resultUrl: ${extractionResult.resultUrl ? extractionResult.resultUrl.substring(0, 80) : 'none'}...`);
+      } else {
+        extractionImageUrl = extractionResult.resultUrl || '';
+        processingImageUrl = extractionImageUrl;
+        console.log(`[彩绘提取2工作流] 全屏图模式成功:`);
+        console.log(`[彩绘提取2工作流] resultUrl: ${extractionImageUrl.substring(0, 80)}...`);
+      }
+
+      if (!extractionImageUrl || (actualExtractionMode === 'hollow' && !processingImageUrl)) {
+        throw new Error('彩绘提取未返回完整结果图');
+      }
+
+      console.log('[彩绘提取2工作流] 步骤1.5: 持久化生成的图片');
+      const fileName = `color-extraction/${finalOrderId}-result.png`;
+      extractionImageUrl = await persistExternalResultImage(extractionImageUrl, fileName);
+      console.log(`[彩绘提取2工作流] 提取图片已持久化: ${extractionImageUrl.substring(0, 80)}...`);
+
+      if (actualExtractionMode === 'hollow' && processingImageUrl) {
+        const additionalFileName = `color-extraction/${finalOrderId}-additional.png`;
+        processingImageUrl = await persistExternalResultImage(processingImageUrl, additionalFileName);
+        console.log(`[彩绘提取2工作流] 额外图层已持久化: ${processingImageUrl.substring(0, 80)}...`);
+      }
+    } else {
+      errorMsg = extractionResult.errorMsg || '暂时未能完成处理，请稍后重试';
+      isTimeout = extractionResult.isTimeout || false;
+      success = false;
+    }
+
+    console.log(`[彩绘提取2工作流] errorMsg: ${errorMsg || 'none'}`);
+    console.log(`[彩绘提取2工作流] 已用时间: ${((Date.now() - workflowStartTime) / 1000 / 60).toFixed(1)}分钟`);
+
+    if (success && extractionImageUrl) {
+      console.log(`[彩绘提取2工作流] ========== 彩绘提取API成功 ==========`);
+      console.log(`[彩绘提取2工作流] 提取图片URL: ${extractionImageUrl.substring(0, 80)}...`);
+
+      const currentTransaction = await transactionManager.getTransactionByOrderNumber(finalOrderId);
+      if (currentTransaction) {
+        let requestParams: RequestParamsRecord = {};
+        try {
+          requestParams = JSON.parse(currentTransaction.requestParams || '{}') as RequestParamsRecord;
+        } catch {
+          console.warn('[彩绘提取2工作流] 解析requestParams失败，使用空对象');
+        }
+        requestParams.actualExtractionMode = actualExtractionMode;
+        requestParams.psdPoints = PSD_POINTS;
+        requestParams.psdGenerationStatus = 'pending';
+        requestParams.psdPointsCharged = false;
+        if (actualExtractionMode === 'hollow' && processingImageUrl) {
+          requestParams.psdAdditionalImageUrl = processingImageUrl;
+        }
+
+        await transactionManager.updateTransaction(finalOrderId, {
+          status: '成功',
+          resultData: extractionImageUrl,
+          uploadedImage: imageUrl,
+          requestParams: JSON.stringify(requestParams),
+          remainingPoints: chargedRemainingPoints,
+          points: COLOR_EXTRACTION_POINTS,
+          actualPoints: COLOR_EXTRACTION_POINTS,
+        });
+      } else {
+        await transactionManager.updateTransaction(finalOrderId, {
+          status: '成功',
+          resultData: extractionImageUrl,
+          uploadedImage: imageUrl,
+          remainingPoints: chargedRemainingPoints,
+          points: COLOR_EXTRACTION_POINTS,
+          actualPoints: COLOR_EXTRACTION_POINTS,
+        });
+      }
+
+      shouldRefund = false;
+      console.log(`[彩绘提取2工作流] ========== 订单 ${finalOrderId} 提取完成（PSD待手动生成） ==========`);
+      return;
+    }
+
+    const status = isTimeout ? '超时' : '失败';
+    console.error(`[彩绘提取2工作流] ========== 彩绘提取API${status} ==========`);
+    console.error(`[彩绘提取2工作流] 错误:`, errorMsg);
+
+    let refundedPoints: number | undefined;
+    if (shouldRefund) {
+      try {
+        const refundedUser = await userManager.addPointsAtomically(userId, COLOR_EXTRACTION_POINTS);
+        refundedPoints = refundedUser?.points;
+        shouldRefund = false;
+      } catch (refundError) {
+        console.error('[彩绘提取2工作流] 失败退款异常:', refundError);
+      }
+    }
+
+    await transactionManager.updateTransaction(finalOrderId, {
+      status,
+      resultData: JSON.stringify({ error: errorMsg }),
+      remainingPoints: refundedPoints,
+      actualPoints: 0,
+    });
+  } catch (error: unknown) {
+    console.error('[彩绘提取2工作流] ========== 后台工作流异常 ==========');
+    console.error('[彩绘提取2工作流] 异常:', error);
+
+    let refundedPoints: number | undefined;
+    if (shouldRefund) {
+      try {
+        const refundedUser = await userManager.addPointsAtomically(userId, COLOR_EXTRACTION_POINTS);
+        refundedPoints = refundedUser?.points;
+        shouldRefund = false;
+      } catch (refundError) {
+        console.error('[彩绘提取2工作流] 异常退款失败:', refundError);
+      }
+    }
+
+    await transactionManager.updateTransaction(finalOrderId, {
+      status: isTimeoutLikeError(error) ? '超时' : '失败',
+      resultData: JSON.stringify({
+        error: getUserFacingExtractionMessage(error),
+      }),
+      remainingPoints: refundedPoints,
+      actualPoints: 0,
+    });
+  }
+}
+
 // 主API处理逻辑
 export async function POST(request: NextRequest) {
   const workflowStartTime = Date.now();
@@ -372,174 +553,27 @@ export async function POST(request: NextRequest) {
     });
     console.log(`[彩绘提取2工作流] 用户积分已预扣: ${currentPoints} -> ${chargedRemainingPoints}`);
 
-    // ========== 彩绘提取2工作流 ==========
-    if (extractionMode === 'hollow') {
-      console.log(`[彩绘提取2工作流] ========== 开始彩绘提取工作流（Coze去除背景API，PSD手动生成） ==========`);
-    } else {
-      console.log(`[彩绘提取2工作流] ========== 开始彩绘提取工作流（Coze工作流API彩绘提取，PSD手动生成） ==========`);
-    }
-
-    // 步骤1: 调用彩绘提取函数（根据模式选择不同的API）
-    let extractionResult: ExtractionTaskResult;
-    let actualExtractionMode = extractionMode; // 记录实际使用的模式
-
-    if (extractionMode === 'hollow') {
-      console.log(`[彩绘提取2工作流] 使用镂空图模式（去除背景API）`);
-      extractionResult = await submitCozeRemoveBgWorkflowTask(workflowInputImageUrl);
-
-    } else {
-      console.log(`[彩绘提取2工作流] 使用全屏图模式（Psydo 图生图彩绘提取API）`);
-      extractionResult = await extractColorExtraction(workflowInputImageUrl, request.nextUrl.origin);
-    }
-
-    console.log(`[彩绘提取2工作流] ========== 提取函数返回结果 ==========`);
-    console.log(`[彩绘提取2工作流] success: ${extractionResult.success}`);
-
-    let extractionImageUrl = ''; // 用户可见的结果图
-    let processingImageUrl = ''; // 用于分层的图片
-    let errorMsg = '';
-    let success = false;
-    let isTimeout = false; // 是否超时
-
-    if (extractionResult.success) {
-      success = true;
-      if (actualExtractionMode === 'hollow') {
-        // 镂空图模式
-        extractionImageUrl = extractionResult.removedBgUrl || '';
-        processingImageUrl = extractionResult.processedImageUrl || '';
-        console.log(`[彩绘提取2工作流] 镂空图模式成功:`);
-        console.log(`[彩绘提取2工作流] removedBgUrl: ${extractionImageUrl.substring(0, 80)}...`);
-        console.log(`[彩绘提取2工作流] processedImageUrl: ${processingImageUrl.substring(0, 80)}...`);
-        console.log(`[彩绘提取2工作流] resultUrl: ${extractionResult.resultUrl ? extractionResult.resultUrl.substring(0, 80) : 'none'}...`);
-      } else {
-        // 全屏图模式
-        extractionImageUrl = extractionResult.resultUrl || '';
-        processingImageUrl = extractionImageUrl; // 全屏图模式使用同一张图
-        console.log(`[彩绘提取2工作流] 全屏图模式成功:`);
-        console.log(`[彩绘提取2工作流] resultUrl: ${extractionImageUrl.substring(0, 80)}...`);
-      }
-
-      if (!extractionImageUrl || (actualExtractionMode === 'hollow' && !processingImageUrl)) {
-        throw new Error('彩绘提取未返回完整结果图');
-      }
-
-      // 步骤1.5: 持久化结果图片；失败直接进入失败退款流程
-      console.log('[彩绘提取2工作流] 步骤1.5: 持久化生成的图片');
-      const fileName = `color-extraction/${finalOrderId}-result.png`;
-      extractionImageUrl = await persistExternalResultImage(extractionImageUrl, fileName);
-      console.log(`[彩绘提取2工作流] 提取图片已持久化: ${extractionImageUrl.substring(0, 80)}...`);
-
-      // 如果是镂空图模式，也必须持久化额外图层
-      if (actualExtractionMode === 'hollow' && processingImageUrl) {
-        const additionalFileName = `color-extraction/${finalOrderId}-additional.png`;
-        processingImageUrl = await persistExternalResultImage(processingImageUrl, additionalFileName);
-        console.log(`[彩绘提取2工作流] 额外图层已持久化: ${processingImageUrl.substring(0, 80)}...`);
-      }
-    } else {
-      errorMsg = extractionResult.errorMsg || '暂时未能完成处理，请稍后重试';
-      isTimeout = extractionResult.isTimeout || false;
-      success = false;
-    }
-
-    console.log(`[彩绘提取2工作流] errorMsg: ${errorMsg || 'none'}`);
-    console.log(`[彩绘提取2工作流] 已用时间: ${((Date.now() - workflowStartTime) / 1000 / 60).toFixed(1)}分钟`);
-
-    // 更新订单状态
-    if (success && extractionImageUrl) {
-      console.log(`[彩绘提取2工作流] ========== 彩绘提取API成功 ==========`);
-      console.log(`[彩绘提取2工作流] 提取图片URL: ${extractionImageUrl.substring(0, 80)}...`);
-
-      const newPoints = chargedRemainingPoints;
-      console.log(`[彩绘提取2工作流] 使用已预扣积分: ${currentPoints} -> ${newPoints}`);
-
-      // 步骤3: 更新订单状态为"成功"，并保存提取图片URL
-      console.log('[彩绘提取2工作流] ========== 更新订单状态为成功（提取完成） ==========');
-
-      // 更新requestParams，记录实际使用的模式
-      const currentTransaction = await transactionManager.getTransactionByOrderNumber(finalOrderId);
-      if (currentTransaction) {
-        let requestParams: RequestParamsRecord = {};
-        try {
-          requestParams = JSON.parse(currentTransaction.requestParams || '{}') as RequestParamsRecord;
-        } catch {
-          console.warn('[彩绘提取2工作流] 解析requestParams失败，使用空对象');
-        }
-        requestParams.actualExtractionMode = actualExtractionMode;
-        requestParams.psdPoints = PSD_POINTS;
-        requestParams.psdGenerationStatus = 'pending';
-        requestParams.psdPointsCharged = false;
-        if (actualExtractionMode === 'hollow' && processingImageUrl) {
-          requestParams.psdAdditionalImageUrl = processingImageUrl;
-        }
-
-        await transactionManager.updateTransaction(finalOrderId, {
-          status: '成功',
-          resultData: extractionImageUrl, // 保存双存储的URL
-          uploadedImage: imageUrl, // 保存用户上传的原图URL
-          requestParams: JSON.stringify(requestParams),
-          remainingPoints: newPoints,
-          points: COLOR_EXTRACTION_POINTS,
-          actualPoints: COLOR_EXTRACTION_POINTS, // 彩绘提取成功，扣除30积分
-        });
-      } else {
-        await transactionManager.updateTransaction(finalOrderId, {
-          status: '成功',
-          resultData: extractionImageUrl, // 保存双存储的URL
-          uploadedImage: imageUrl, // 保存用户上传的原图URL
-          remainingPoints: newPoints,
-          points: COLOR_EXTRACTION_POINTS,
-          actualPoints: COLOR_EXTRACTION_POINTS, // 彩绘提取成功，扣除30积分
-        });
-      }
-
-      console.log(`[彩绘提取2工作流] ========== 订单 ${finalOrderId} 提取完成（PSD待手动生成） ==========`);
-      console.log(`[彩绘提取2工作流] 已用时间: ${((Date.now() - workflowStartTime) / 1000 / 60).toFixed(1)}分钟`);
-
-      return NextResponse.json({
-        success: true,
-        message: '彩绘提取成功',
-        data: {
-          imageUrl: extractionImageUrl,
-          psdUrl: '',
-          orderId: finalOrderId,
-          remainingPoints: newPoints,
-        },
+    colorExtractionPointsCharged = false;
+    after(async () => {
+      await processColorExtractionJob({
+        userId,
+        imageUrl,
+        finalOrderId,
+        workflowInputImageUrl,
+        extractionMode,
+        chargedRemainingPoints,
+        localMaterialOrigin: request.nextUrl.origin,
       });
+    });
 
-    } else {
-      // 彩绘提取失败或超时
-      const status = isTimeout ? '超时' : '失败';
-      console.error(`[彩绘提取2工作流] ========== 彩绘提取API${status} ==========`);
-      console.error(`[彩绘提取2工作流] 错误:`, errorMsg);
-
-      let refundedPoints: number | undefined;
-      if (colorExtractionPointsCharged) {
-        try {
-          const refundedUser = await userManager.addPointsAtomically(userId, COLOR_EXTRACTION_POINTS);
-          refundedPoints = refundedUser?.points;
-          colorExtractionPointsCharged = false;
-        } catch (refundError) {
-          console.error('[彩绘提取2工作流] 失败退款异常:', refundError);
-        }
-      }
-
-      await transactionManager.updateTransaction(finalOrderId, {
-        status: status,
-        resultData: JSON.stringify({
-          error: errorMsg,
-        }),
-        remainingPoints: refundedPoints,
-        actualPoints: 0, // 失败时不扣积分
-      });
-
-      return NextResponse.json({
-        success: false,
-        message: isTimeout ? '处理时间较长，请稍后重试' : '暂时未能完成处理，请稍后重试',
-        debug: {
-          error: errorMsg,
-        },
-      }, { status: isTimeout ? 504 : 500 });
-    }
+    return NextResponse.json({
+      success: true,
+      message: '彩绘提取任务已提交',
+      data: {
+        orderId: finalOrderId,
+        remainingPoints: chargedRemainingPoints,
+      },
+    });
 
   } catch (error: unknown) {
     console.error('[彩绘提取2工作流] ========== 工作流异常 ==========');
