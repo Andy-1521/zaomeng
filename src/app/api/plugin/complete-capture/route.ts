@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { assertAliyunOSSObjectExists, getAliyunOSSUrl } from '@/lib/aliyunOSS';
+import { withStorageKeyLock } from '@/lib/storageKeyLock';
 import { capturedImageManager, userManager } from '@/storage/database';
 
 type CompleteCaptureRequest = {
@@ -64,13 +65,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '上传对象无效' }, { status: 400 });
     }
 
-    const existingRecord = await capturedImageManager.getUserCapturedImageByStorageKey(userId, key);
-    if (existingRecord) {
-      const material = toMaterialResponse(existingRecord);
-      return NextResponse.json({
-        success: true,
-        message: '图片已采集到当前账号',
-        data: {
+    const result = await withStorageKeyLock('plugin-capture', userId, key, async () => {
+      const existingRecord = await capturedImageManager.getUserCapturedImageByStorageKey(userId, key);
+      if (existingRecord) {
+        const material = toMaterialResponse(existingRecord);
+        return {
           id: existingRecord.id,
           userId,
           uploadedUrl: material.imageUrl,
@@ -85,28 +84,24 @@ export async function POST(request: NextRequest) {
           createdAt: material.createdAt,
           capturedAt: body.capturedAt || Date.now(),
           material,
-        },
+        };
+      }
+
+      await assertAliyunOSSObjectExists(key);
+      const uploadedUrl = await getAliyunOSSUrl(key);
+      const imageType = isAllowedImageType(body.imageType) ? body.imageType : 'main';
+      const record = await capturedImageManager.createCapturedImage({
+        userId,
+        imageUrl: uploadedUrl,
+        originalUrl: body.originalUrl || null,
+        pageUrl: body.pageUrl || '',
+        pageTitle: body.pageTitle || '',
+        sourceHost: body.sourceHost || '',
+        imageType,
       });
-    }
+      const material = toMaterialResponse(record);
 
-    await assertAliyunOSSObjectExists(key);
-    const uploadedUrl = await getAliyunOSSUrl(key);
-    const imageType = isAllowedImageType(body.imageType) ? body.imageType : 'main';
-    const record = await capturedImageManager.createCapturedImage({
-      userId,
-      imageUrl: uploadedUrl,
-      originalUrl: body.originalUrl || null,
-      pageUrl: body.pageUrl || '',
-      pageTitle: body.pageTitle || '',
-      sourceHost: body.sourceHost || '',
-      imageType,
-    });
-    const material = toMaterialResponse(record);
-
-    return NextResponse.json({
-      success: true,
-      message: '图片已采集到当前账号',
-      data: {
+      return {
         id: record.id,
         userId,
         uploadedUrl: material.imageUrl,
@@ -121,7 +116,13 @@ export async function POST(request: NextRequest) {
         createdAt: material.createdAt,
         capturedAt: body.capturedAt || Date.now(),
         material,
-      },
+      };
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: '图片已采集到当前账号',
+      data: result,
     });
   } catch (error) {
     console.error('[插件直传] 完成采集入库失败:', error);

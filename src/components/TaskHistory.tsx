@@ -786,6 +786,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null);
   const toolFilterRef = useRef<HTMLDivElement>(null);
   const taskCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const hasLoadedDatabaseRef = useRef(false);
   const processingCount = tasks.filter((task) => task.status === '处理中').length;
 
   const historySourceTasks = showAllHistory ? tasks : tasks.slice(0, 20);
@@ -814,6 +815,9 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     }
     // 展开任务历史
     setIsCollapsed(false);
+    if (!hasLoadedDatabaseRef.current) {
+      void loadTasks(userId);
+    }
   };
 
   // 鼠标移出时启动自动隐藏定时器
@@ -837,6 +841,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   // 加载历史记录（从缓存 + 数据库加载）
   const loadTasks = useCallback(async (userId?: string) => {
     try {
+      hasLoadedDatabaseRef.current = true;
       // 清理过期的缓存记录
       cleanExpiredCache(userId);
 
@@ -868,6 +873,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
       setTasks(combinedTasks);
     } catch (error) {
+      hasLoadedDatabaseRef.current = false;
       console.error('[TaskHistory] 加载历史记录时发生错误:', error);
       // 不抛出异常，避免影响组件渲染
     }
@@ -875,7 +881,12 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
   useEffect(() => {
     queueMicrotask(() => {
-      void loadTasks(userId);
+      cleanExpiredCache(userId);
+      const cachedTasks = getTaskCache(userId).sort((a, b) => b.time - a.time);
+      setTasks(cachedTasks);
+      if (cachedTasks.some((task) => task.status === '处理中')) {
+        void loadTasks(userId);
+      }
     });
   }, [loadTasks, userId]);
 

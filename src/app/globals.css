@@ -108,6 +108,15 @@ body {
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.28);
 }
 
+@keyframes zaomeng-upload-shimmer {
+  0% {
+    background-position: 160% 0;
+  }
+  100% {
+    background-position: -60% 0;
+  }
+}
+
 /* 自动隐藏滚动条样式 */
 .scrollbar-auto-hide {
   scrollbar-width: thin;
