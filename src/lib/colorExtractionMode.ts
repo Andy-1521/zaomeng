@@ -1,4 +1,4 @@
-export type ColorExtractionMode = 'full' | 'hollow';
+export type ColorExtractionMode = 'full';
 
 type ColorExtractionModePayload = {
   extractionMode?: unknown;
@@ -11,8 +11,8 @@ export type ColorExtractionModeMeta = {
 };
 
 function normalizeColorExtractionMode(value: unknown): ColorExtractionMode | null {
-  if (value === 'full' || value === 'hollow') {
-    return value;
+  if (value === 'full') {
+    return 'full';
   }
 
   return null;

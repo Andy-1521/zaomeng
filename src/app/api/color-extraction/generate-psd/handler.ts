@@ -103,25 +103,13 @@ function extractImageUrls(value: unknown): string[] {
 async function processRunningHubLayeringAndPsd(
   extractionImageUrl: string,
   orderId: string,
-  additionalImageUrl?: string,
 ): Promise<{ psdUrl?: string; error?: string }> {
   try {
     const uploadedImageUrl = await uploadImageToStorage(extractionImageUrl, orderId);
     const decomposition = await decomposeLayersWithRunningHub(uploadedImageUrl);
-    const layers = [...decomposition.layers];
-
-    if (additionalImageUrl) {
-      layers.push({
-        name: '背景图（原图）',
-        kind: 'background',
-        imageUrl: additionalImageUrl,
-        zIndex: layers.length,
-      });
-    }
 
     const psdBuffer = await generatePsdFromDecomposition({
       ...decomposition,
-      layers,
     });
 
     const fileName = `color-extraction/psd/${orderId}.psd`;
@@ -153,7 +141,6 @@ export async function POST(request: NextRequest) {
     }
 
     const requestParams = parseRecord(transaction.requestParams);
-    const extractionMode = getString(requestParams?.actualExtractionMode) || getString(requestParams?.extractionMode);
     const psdGenerationStatus = getPsdGenerationStatus(requestParams);
     const psdGenerationStartedAt = getTimestamp(requestParams?.psdGenerationStartedAt);
     const isStaleProcessing = psdGenerationStatus === 'processing'
@@ -162,19 +149,6 @@ export async function POST(request: NextRequest) {
     const psdPointsCharged = requestParams?.psdPointsCharged === true;
     const resultImages = extractImageUrls(transaction.resultData);
     const layeringImageUrl = resultImages[0] ? resolveImageUrl(resultImages[0], request) : null;
-
-    let additionalImageUrl: string | undefined;
-    if (extractionMode === 'hollow') {
-      const storedAdditionalImageUrl = getString(requestParams?.psdAdditionalImageUrl);
-      if (storedAdditionalImageUrl) {
-        additionalImageUrl = resolveImageUrl(storedAdditionalImageUrl, request);
-      } else {
-        const uploadedImages = extractImageUrls(transaction.uploadedImage);
-        if (uploadedImages[0]) {
-          additionalImageUrl = resolveImageUrl(uploadedImages[0], request);
-        }
-      }
-    }
 
     if (!layeringImageUrl) {
       return NextResponse.json({ success: false, error: '订单暂无可用于分层的结果图' }, { status: 400 });
@@ -232,7 +206,7 @@ export async function POST(request: NextRequest) {
       }),
     });
 
-    const psdResult = await processRunningHubLayeringAndPsd(layeringImageUrl, orderNumber, additionalImageUrl);
+    const psdResult = await processRunningHubLayeringAndPsd(layeringImageUrl, orderNumber);
     if (!psdResult.psdUrl) {
       const refundedUser = chargedForPsd && (!psdPointsCharged || shouldRefundStalePsdChargeOnFailure)
         ? await userManager.addPointsAtomically(transaction.userId, psdPoints)

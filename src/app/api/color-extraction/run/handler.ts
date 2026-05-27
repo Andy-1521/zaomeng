@@ -1,17 +1,7 @@
 import { after, NextRequest, NextResponse } from 'next/server';
 import { userManager, transactionManager } from '@/storage/database';
-import {
-  runRemoveBgWorkflow,
-} from '@/lib/color-extraction-api/cozeWorkflows';
-import {
-  uploadFileUrlToCozeOpenApi,
-  type CozeWorkflowInputImage,
-} from '@/lib/cozeOpenApiFiles';
-import sharp from 'sharp';
 import { uploadFromUrlToCozeStorage, uploadToCozeStorage } from '@/lib/dualStorage';
-import { readLocalMaterialFileFromUrl } from '@/lib/localUploadStorage';
 import { isImageEditTimeoutError, runPsydoImageEditFromUrl } from '@/lib/psydoImageEdits';
-import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 import { getColorExtractionPoints, getGeneratePsdPoints } from '@/lib/pricing';
 
 const COLOR_EXTRACTION_POINTS = getColorExtractionPoints();
@@ -21,8 +11,6 @@ const COLOR_EXTRACTION_IMAGE_EDIT_TIMEOUT_MS = 280000;
 type ExtractionTaskResult = {
   success: boolean;
   resultUrl?: string;
-  removedBgUrl?: string;
-  processedImageUrl?: string;
   errorMsg?: string;
   isTimeout?: boolean;
 };
@@ -32,14 +20,12 @@ type RequestParamsRecord = Record<string, unknown> & {
   psdGenerationStatus?: 'processing' | 'success' | 'failed' | 'pending';
   psdPoints?: number;
   psdPointsCharged?: boolean;
-  psdAdditionalImageUrl?: string;
 };
 
 type ColorExtractionJob = {
   userId: string;
   imageUrl: string;
   finalOrderId: string;
-  extractionMode: 'full' | 'hollow';
   chargedRemainingPoints: number;
   localMaterialOrigin: string;
 };
@@ -107,76 +93,13 @@ async function submitCozeWorkflowExtractionTask(imageUrl: string, localMaterialO
   }
 }
 
-async function createCozeWorkflowInputImage(
-  imageUrl: string,
-  uploadFileName: string
-): Promise<CozeWorkflowInputImage> {
-  const uploadedFile = await uploadFileUrlToCozeOpenApi(imageUrl, uploadFileName);
-  console.log('[彩绘提取2工作流] 已上传 Coze OpenAPI 文件:', {
-    fileId: uploadedFile.id,
-    fileName: uploadedFile.fileName,
-    bytes: uploadedFile.bytes,
-  });
-
-  return {
-    file_id: uploadedFile.id,
-    file_type: 'image',
-  };
-}
-
 /**
- * 调用Coze去除背景工作流API（镂空图模式）
- * 返回三个URL：
- * - result_url: 不让用户看到
- * - removed_bg_url: 作为结果图展示给用户
- * - processed_image_url: 上传到PSD图层
- */
-async function submitCozeRemoveBgWorkflowTask(imageUrl: string): Promise<{ success: boolean; resultUrl?: string; removedBgUrl?: string; processedImageUrl?: string; errorMsg?: string; isTimeout?: boolean }> {
-  console.log(`[Coze去除背景] ========== 开始去除背景 ==========`);
-  console.log(`[Coze去除背景] 图片URL: ${imageUrl.substring(0, 80)}...`);
-
-  try {
-    const workflowInputImage = await createCozeWorkflowInputImage(imageUrl, 'remove-bg-input.jpg');
-    const result = await runRemoveBgWorkflow(workflowInputImage);
-
-    if (result.success) {
-      console.log(`[Coze去除背景] ========== 去除背景成功 ==========`);
-      return {
-        success: true,
-        resultUrl: result.resultUrl,
-        removedBgUrl: result.removedBgUrl,
-        processedImageUrl: result.processedImageUrl,
-      };
-    }
-
-    return {
-      success: false,
-      errorMsg: result.errorMsg,
-      isTimeout: result.isTimeout,
-    };
-
-  } catch (error: unknown) {
-    console.error(`[Coze去除背景] ========== 去除背景失败 ==========`);
-    console.error(`[Coze去除背景] 错误:`, error instanceof Error ? error.message : error);
-
-    // 检测是否为超时错误
-    const isTimeout = error instanceof Error && (error.message?.includes('超时') || error.name === 'AbortError');
-
-    return {
-      success: false,
-      errorMsg: error instanceof Error ? error.message : 'Coze去除背景失败',
-      isTimeout,
-    };
-  }
-}
-
-/**
- * 提取彩绘（使用Coze工作流API）
+ * 提取彩绘（使用 Psydo 图生图 API）
  * @param imageUrl 图片URL
  * @returns 提取结果
  */
 async function extractColorExtraction(imageUrl: string, localMaterialOrigin?: string): Promise<{ success: boolean; resultUrl?: string; errorMsg?: string; isTimeout?: boolean }> {
-  console.log(`[彩绘提取] ========== 开始彩绘提取（Coze工作流API） ==========`);
+  console.log(`[彩绘提取] ========== 开始彩绘提取（Psydo 图生图 API） ==========`);
 
   try {
     const result = await submitCozeWorkflowExtractionTask(imageUrl, localMaterialOrigin);
@@ -212,36 +135,6 @@ async function extractColorExtraction(imageUrl: string, localMaterialOrigin?: st
   }
 }
 
-async function normalizeWorkflowSourceImage(imageUrl: string, orderId: string, localMaterialOrigin: string): Promise<string> {
-  console.log(`[彩绘提取2工作流] 开始标准化工作流输入图片: ${imageUrl.substring(0, 80)}...`);
-  let sourceBuffer: Buffer;
-
-  const localMaterialFile = await readLocalMaterialFileFromUrl(imageUrl, { allowedOrigin: localMaterialOrigin });
-  if (localMaterialFile) {
-    sourceBuffer = localMaterialFile.buffer;
-  } else {
-    const image = await downloadSafeRemoteImage(imageUrl, {
-      timeoutMs: 30000,
-      maxBytes: 30 * 1024 * 1024,
-      allowLocalMaterialFile: true,
-      localMaterialOrigin,
-    });
-    sourceBuffer = image.buffer;
-  }
-
-  const normalizedBuffer = await sharp(sourceBuffer)
-    .rotate()
-    .flatten({ background: '#ffffff' })
-    .jpeg({ quality: 92, mozjpeg: true })
-    .toBuffer();
-
-    const fileName = `color-extraction/workflow-sources/${orderId}.jpg`;
-
-  const uploadedUrl = await uploadToCozeStorage(normalizedBuffer, fileName, 'image/jpeg');
-  console.log(`[彩绘提取2工作流] 工作流输入图片已上传到对象存储: ${uploadedUrl.substring(0, 80)}...`);
-  return uploadedUrl;
-}
-
 async function persistExternalResultImage(
   sourceUrl: string,
   relativeFilePath: string
@@ -255,57 +148,32 @@ async function processColorExtractionJob(params: ColorExtractionJob) {
     userId,
     imageUrl,
     finalOrderId,
-    extractionMode,
     chargedRemainingPoints,
     localMaterialOrigin,
   } = params;
   let shouldRefund = true;
 
   try {
-    if (extractionMode === 'hollow') {
-      console.log(`[彩绘提取2工作流] ========== 开始彩绘提取工作流（Coze去除背景API，PSD手动生成） ==========`);
-    } else {
-      console.log(`[彩绘提取2工作流] ========== 开始彩绘提取工作流（Psydo 图生图彩绘提取API，PSD手动生成） ==========`);
-    }
+    console.log(`[彩绘提取2工作流] ========== 开始彩绘提取工作流（Psydo 图生图彩绘提取API，PSD手动生成） ==========`);
 
-    let extractionResult: ExtractionTaskResult;
-    const actualExtractionMode = extractionMode;
-
-    if (extractionMode === 'hollow') {
-      console.log(`[彩绘提取2工作流] 使用镂空图模式（去除背景API）`);
-      const workflowInputImageUrl = await normalizeWorkflowSourceImage(imageUrl, finalOrderId, localMaterialOrigin);
-      extractionResult = await submitCozeRemoveBgWorkflowTask(workflowInputImageUrl);
-    } else {
-      console.log(`[彩绘提取2工作流] 使用全屏图模式（Psydo 图生图彩绘提取API）`);
-      extractionResult = await extractColorExtraction(imageUrl, localMaterialOrigin);
-    }
+    const actualExtractionMode = 'full';
+    const extractionResult: ExtractionTaskResult = await extractColorExtraction(imageUrl, localMaterialOrigin);
 
     console.log(`[彩绘提取2工作流] ========== 提取函数返回结果 ==========`);
     console.log(`[彩绘提取2工作流] success: ${extractionResult.success}`);
 
     let extractionImageUrl = '';
-    let processingImageUrl = '';
     let errorMsg = '';
     let success = false;
     let isTimeout = false;
 
     if (extractionResult.success) {
       success = true;
-      if (actualExtractionMode === 'hollow') {
-        extractionImageUrl = extractionResult.removedBgUrl || '';
-        processingImageUrl = extractionResult.processedImageUrl || '';
-        console.log(`[彩绘提取2工作流] 镂空图模式成功:`);
-        console.log(`[彩绘提取2工作流] removedBgUrl: ${extractionImageUrl.substring(0, 80)}...`);
-        console.log(`[彩绘提取2工作流] processedImageUrl: ${processingImageUrl.substring(0, 80)}...`);
-        console.log(`[彩绘提取2工作流] resultUrl: ${extractionResult.resultUrl ? extractionResult.resultUrl.substring(0, 80) : 'none'}...`);
-      } else {
-        extractionImageUrl = extractionResult.resultUrl || '';
-        processingImageUrl = extractionImageUrl;
-        console.log(`[彩绘提取2工作流] 全屏图模式成功:`);
-        console.log(`[彩绘提取2工作流] resultUrl: ${extractionImageUrl.substring(0, 80)}...`);
-      }
+      extractionImageUrl = extractionResult.resultUrl || '';
+      console.log(`[彩绘提取2工作流] 全屏图模式成功:`);
+      console.log(`[彩绘提取2工作流] resultUrl: ${extractionImageUrl.substring(0, 80)}...`);
 
-      if (!extractionImageUrl || (actualExtractionMode === 'hollow' && !processingImageUrl)) {
+      if (!extractionImageUrl) {
         throw new Error('彩绘提取未返回完整结果图');
       }
 
@@ -314,11 +182,6 @@ async function processColorExtractionJob(params: ColorExtractionJob) {
       extractionImageUrl = await persistExternalResultImage(extractionImageUrl, fileName);
       console.log(`[彩绘提取2工作流] 提取图片已持久化: ${extractionImageUrl.substring(0, 80)}...`);
 
-      if (actualExtractionMode === 'hollow' && processingImageUrl) {
-        const additionalFileName = `color-extraction/${finalOrderId}-additional.png`;
-        processingImageUrl = await persistExternalResultImage(processingImageUrl, additionalFileName);
-        console.log(`[彩绘提取2工作流] 额外图层已持久化: ${processingImageUrl.substring(0, 80)}...`);
-      }
     } else {
       errorMsg = extractionResult.errorMsg || '暂时未能完成处理，请稍后重试';
       isTimeout = extractionResult.isTimeout || false;
@@ -344,9 +207,6 @@ async function processColorExtractionJob(params: ColorExtractionJob) {
         requestParams.psdPoints = PSD_POINTS;
         requestParams.psdGenerationStatus = 'pending';
         requestParams.psdPointsCharged = false;
-        if (actualExtractionMode === 'hollow' && processingImageUrl) {
-          requestParams.psdAdditionalImageUrl = processingImageUrl;
-        }
 
         await transactionManager.updateTransaction(finalOrderId, {
           status: '成功',
@@ -435,12 +295,11 @@ export async function POST(request: NextRequest) {
   try {
     const requestBody = await request.json();
     const { userId: requestUserId, imageUrl, orderId } = requestBody;
-    const extractionMode = requestBody.extractionMode === 'hollow' ? 'hollow' : 'full';
 
     console.log(`[彩绘提取2工作流] ========== 接收到请求 ==========`);
     console.log(`[彩绘提取2工作流] userId: ${requestUserId}`);
     console.log(`[彩绘提取2工作流] orderId: ${orderId}`);
-    console.log(`[彩绘提取2工作流] extractionMode: ${extractionMode}`);
+    console.log(`[彩绘提取2工作流] extractionMode: full`);
     console.log(`[彩绘提取2工作流] ========== 请求参数解析完成 ==========`);
 
     if (!requestUserId || !imageUrl) {
@@ -514,14 +373,12 @@ export async function POST(request: NextRequest) {
       uploadedImage: imageUrl,
       requestParams: JSON.stringify({
         imageUrl: imageUrl,
-        extractionMode: extractionMode,
+        extractionMode: 'full',
         actualExtractionMode: 'pending', // 后续更新
         psdPoints: PSD_POINTS,
         psdGenerationStatus: 'pending',
         psdPointsCharged: false,
-        workflow: extractionMode === 'hollow'
-          ? '彩绘提取工作流（Coze去除背景API，PSD需手动生成）'
-          : '彩绘提取工作流（Coze工作流API彩绘提取，PSD需手动生成）',
+        workflow: '彩绘提取工作流（Psydo 图生图 API，PSD需手动生成）',
       }),
       status: '处理中',
     });
@@ -555,7 +412,6 @@ export async function POST(request: NextRequest) {
         userId,
         imageUrl,
         finalOrderId,
-        extractionMode,
         chargedRemainingPoints,
         localMaterialOrigin: request.nextUrl.origin,
       });
