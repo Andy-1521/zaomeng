@@ -98,7 +98,7 @@ Clown 彩色选区图需要先在 RunningHub 创建专用语义/实例分割工�
 
 工作流输入是彩绘提取结果图 URL，输出应是一张同画幅的纯色分区 PNG。优先使用 RunningHub 工作流 ID 调 `/task/openapi/create`；如果发布成 AI 应用，则使用 WebApp ID 调 `/task/openapi/ai-app/run`。第一版只允许 RunningHub 直接输出 PNG；如果后续工作流改为输出多张 mask，需要再补 RunningHub 工作流内的 mask 合成节点。未配置这些变量时，接口会明确提示未配置且不扣积分。
 
-当前第一版临时采用 RunningHub 公开应用 `2006235231480713217`（语义分割 Semantic Segmentation），配置为 `RUNNINGHUB_CLOWN_WEBAPP_ID=2006235231480713217`、`RUNNINGHUB_CLOWN_IMAGE_NODE_ID=1`、`RUNNINGHUB_CLOWN_IMAGE_FIELD_NAME=image`、`RUNNINGHUB_CLOWN_OUTPUT_NODE_ID=51`。实际测试可输出同尺寸纯色语义分割 PNG，可作为 PS 魔棒选区辅助；如果后续需要每个小物件独立颜色的更精细 Clown，需要在 RunningHub 工作台搭建 SAM/实例分割专用工作流替换该应用。
+不要把公开语义分割应用 `2006235231480713217` 作为生产 Clown 方案：实测对贴纸、线稿、小元素密集图会大面积错分。SAM3/SegmentAnything 公开应用多数只能输出黑白/透明蒙版，Kontext/Qwen 编辑类会改动原图内容，也不适合作为正式 Clown。当前生产和开发 `.env.local` 应保持 Clown 工作流变量为空，直到 RunningHub 工作台里搭好专用多实例 mask 转纯色 PNG 工作流并验收通过。
 
 ## 生产发布要点
 
