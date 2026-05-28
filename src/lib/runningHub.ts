@@ -46,6 +46,7 @@ export interface TaskOutput {
   fileType: string;
   fileUrl: string;
   taskCostTime: string;
+  nodeId?: string;
 }
 
 export interface TaskOutputsResponse {
@@ -59,6 +60,7 @@ export type RunningHubClownConfig = {
   workflowId?: string;
   imageNodeId: string;
   imageFieldName: string;
+  outputNodeId?: string;
   promptNodeId?: string;
   promptFieldName?: string;
 };
@@ -92,6 +94,7 @@ export function getRunningHubClownConfig(): RunningHubClownConfig | null {
   const workflowId = getEnvValue('RUNNINGHUB_CLOWN_WORKFLOW_ID');
   const imageNodeId = getEnvValue('RUNNINGHUB_CLOWN_IMAGE_NODE_ID');
   const imageFieldName = getEnvValue('RUNNINGHUB_CLOWN_IMAGE_FIELD_NAME');
+  const outputNodeId = getEnvValue('RUNNINGHUB_CLOWN_OUTPUT_NODE_ID');
   const promptNodeId = getEnvValue('RUNNINGHUB_CLOWN_PROMPT_NODE_ID');
   const promptFieldName = getEnvValue('RUNNINGHUB_CLOWN_PROMPT_FIELD_NAME');
 
@@ -104,6 +107,7 @@ export function getRunningHubClownConfig(): RunningHubClownConfig | null {
     workflowId: workflowId || undefined,
     imageNodeId,
     imageFieldName,
+    outputNodeId: outputNodeId || undefined,
     promptNodeId: promptNodeId || undefined,
     promptFieldName: promptFieldName || undefined,
   };
@@ -125,8 +129,11 @@ function normalizeRunningHubOutputUrl(fileUrl: string) {
   return fileUrl;
 }
 
-export function selectClownPngOutput(outputs: TaskOutput[]) {
-  const candidate = outputs.find((output) => {
+export function selectClownPngOutput(outputs: TaskOutput[], preferredNodeId?: string) {
+  const preferred = preferredNodeId
+    ? outputs.find((output) => output.nodeId === preferredNodeId && output.fileUrl)
+    : null;
+  const candidate = preferred || outputs.find((output) => {
     const type = (output.fileType || '').toLowerCase();
     const url = output.fileUrl || '';
     return url && (type.includes('png') || /\.png(?:$|\?)/i.test(url));
@@ -316,10 +323,11 @@ export async function createClownTask(imageUrl: string): Promise<string> {
 }
 
 export async function generateClownWithRunningHub(imageUrl: string): Promise<{ taskId: string; outputUrl: string }> {
+  const config = getRunningHubClownConfig();
   const taskId = await createClownTask(imageUrl);
   await waitForTaskComplete(taskId, 9);
   const outputs = await getTaskOutputs(taskId);
-  const outputUrl = selectClownPngOutput(outputs);
+  const outputUrl = selectClownPngOutput(outputs, config?.outputNodeId);
 
   if (!outputUrl) {
     throw new Error('Clown 工作流未返回可用PNG输出');

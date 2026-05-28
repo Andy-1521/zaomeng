@@ -204,7 +204,7 @@ Clown 当前要点：
 - 价格来源：`getGenerateClownPoints()`，当前固定 10 积分
 - 只允许 `彩绘提取` / `彩绘提取2` 成功订单调用
 - 已生成过 `clownUrl` 的订单重复点击直接返回已有图，不重复扣积分
-- RunningHub 配置变量：`RUNNINGHUB_CLOWN_WEBAPP_ID` 或 `RUNNINGHUB_CLOWN_WORKFLOW_ID`、`RUNNINGHUB_CLOWN_IMAGE_NODE_ID`、`RUNNINGHUB_CLOWN_IMAGE_FIELD_NAME`，可选 prompt 节点变量为 `RUNNINGHUB_CLOWN_PROMPT_NODE_ID`、`RUNNINGHUB_CLOWN_PROMPT_FIELD_NAME`
+- RunningHub 配置变量：`RUNNINGHUB_CLOWN_WEBAPP_ID` 或 `RUNNINGHUB_CLOWN_WORKFLOW_ID`、`RUNNINGHUB_CLOWN_IMAGE_NODE_ID`、`RUNNINGHUB_CLOWN_IMAGE_FIELD_NAME`，可选输出节点为 `RUNNINGHUB_CLOWN_OUTPUT_NODE_ID`，可选 prompt 节点变量为 `RUNNINGHUB_CLOWN_PROMPT_NODE_ID`、`RUNNINGHUB_CLOWN_PROMPT_FIELD_NAME`
 - 未配置 Clown 工作流时接口返回“Clown 分割工作流未配置”，不扣积分
 - RunningHub 输出 PNG 会原样以 `image/png` 上传 OSS，避免 JPEG 压缩破坏 PS 选区所需的纯色块；订单列表另存一张 WebP 缩略图到 `clownThumbnailUrl`
 - Clown 失败、超时、无输出或 OSS 上传失败只退款 Clown 积分，不影响原彩绘结果和 PSD 状态
