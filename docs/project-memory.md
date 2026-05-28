@@ -207,6 +207,7 @@ Clown 当前要点：
 - RunningHub 配置变量：`RUNNINGHUB_CLOWN_WEBAPP_ID` 或 `RUNNINGHUB_CLOWN_WORKFLOW_ID`、`RUNNINGHUB_CLOWN_IMAGE_NODE_ID`、`RUNNINGHUB_CLOWN_IMAGE_FIELD_NAME`，可选输出节点为 `RUNNINGHUB_CLOWN_OUTPUT_NODE_ID`，可选 prompt 节点变量为 `RUNNINGHUB_CLOWN_PROMPT_NODE_ID`、`RUNNINGHUB_CLOWN_PROMPT_FIELD_NAME`
 - 当前状态：公开 RunningHub 应用尚未找到合格方案。`2006235231480713217`（语义分割 Semantic Segmentation）实测会把贴纸/线稿/小元素密集图大面积错分；SAM3/SegmentAnything 类公开应用多输出黑白/透明蒙版；Kontext/Qwen 编辑类会改画面内容，不适合作为严肃 Clown 选区图。Clown 生产配置已清空，未配置时不扣积分。
 - 后续正确路线：在 RunningHub 登录态工作台搭专用工作流，流程为多实例 mask 生成，再在 RunningHub 工作流内把各 mask 填充为不同纯色，最后输出同尺寸 PNG。RunningHub OpenAPI 的 apiKey 只能运行已发布应用/工作流，不能创建或保存工作流。
+- 工作流验收必须覆盖贴纸小元素图、人物/商品图、文字装饰图。合格输出应是 1 张同尺寸 PNG，PS 魔棒可点选单个贴纸、文字、装饰或背景区域；不接受黑白 mask、透明抠图、原图叠加图、灰底大块图、模型重绘图。
 - 未配置 Clown 工作流时接口返回“Clown 分割工作流未配置”，不扣积分
 - RunningHub 输出 PNG 会原样以 `image/png` 上传 OSS，避免 JPEG 压缩破坏 PS 选区所需的纯色块；订单列表另存一张 WebP 缩略图到 `clownThumbnailUrl`
 - Clown 失败、超时、无输出或 OSS 上传失败只退款 Clown 积分，不影响原彩绘结果和 PSD 状态
