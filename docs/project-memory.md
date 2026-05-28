@@ -161,7 +161,7 @@
 - 高清+扩图：提交后立即创建后台订单并预扣，后台只做扩图和 4K 输出，失败退款
 - 高清放大：提交后立即创建后台订单并预扣 5 积分，后台调用 RunningHub 高清放大，失败退款
 - 彩绘 PSD：只能用户手动触发，单独预扣，失败单独退款
-- 彩绘 Clown：只能用户手动触发，单独预扣 10 积分，失败单独退款；优先 RunningHub，未配置 RunningHub Clown 工作流时走本地 SLIC 超像素分割兜底
+- 彩绘 Clown：只能用户手动触发，单独预扣 10 积分，失败单独退款；只走 RunningHub API，不走本地算法兜底
 
 前端涉及余额同步的关键组件：
 
@@ -205,8 +205,8 @@ Clown 当前要点：
 - 只允许 `彩绘提取` / `彩绘提取2` 成功订单调用
 - 已生成过 `clownUrl` 的订单重复点击直接返回已有图，不重复扣积分
 - RunningHub 配置变量：`RUNNINGHUB_CLOWN_WEBAPP_ID`、`RUNNINGHUB_CLOWN_IMAGE_NODE_ID`、`RUNNINGHUB_CLOWN_IMAGE_FIELD_NAME`，可选 prompt 节点变量为 `RUNNINGHUB_CLOWN_PROMPT_NODE_ID`、`RUNNINGHUB_CLOWN_PROMPT_FIELD_NAME`
-- 未配置 Clown 工作流时接口自动走本地 `src/lib/clownSegmentation.ts` 的 SLIC 超像素分割兜底，不再返回未配置错误
-- RunningHub 输出 PNG 或本地生成 PNG 都会原样以 `image/png` 上传 OSS，避免 JPEG 压缩破坏 PS 选区所需的纯色块；订单列表另存一张 WebP 缩略图到 `clownThumbnailUrl`
+- 未配置 Clown 工作流时接口返回“Clown 分割工作流未配置”，不扣积分
+- RunningHub 输出 PNG 会原样以 `image/png` 上传 OSS，避免 JPEG 压缩破坏 PS 选区所需的纯色块；订单列表另存一张 WebP 缩略图到 `clownThumbnailUrl`
 - Clown 失败、超时、无输出或 OSS 上传失败只退款 Clown 积分，不影响原彩绘结果和 PSD 状态
 
 ## 智能改图流程

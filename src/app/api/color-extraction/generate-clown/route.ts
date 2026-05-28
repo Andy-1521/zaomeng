@@ -5,7 +5,6 @@ import { uploadToCozeStorage } from '@/lib/dualStorage';
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 import { tryCreateAndUploadResultThumbnailFromUrl } from '@/lib/resultThumbnail';
 import { getGenerateClownPoints } from '@/lib/pricing';
-import { generateClownSegmentationBuffer } from '@/lib/clownSegmentation';
 
 type ParsedRecord = Record<string, unknown>;
 type ClownGenerationStatus = 'processing' | 'success' | 'failed' | 'pending';
@@ -124,17 +123,6 @@ async function persistRunningHubClownPng(outputUrl: string, orderNumber: string,
   return persistClownPngBuffer(image.buffer, orderNumber, request);
 }
 
-async function generateLocalClownPng(extractionImageUrl: string, orderNumber: string, request: NextRequest) {
-  const image = await downloadSafeRemoteImage(extractionImageUrl, {
-    timeoutMs: 90000,
-    maxBytes: 120 * 1024 * 1024,
-    allowLocalMaterialFile: true,
-    localMaterialOrigin: request.nextUrl.origin,
-  });
-  const clownBuffer = await generateClownSegmentationBuffer(image.buffer);
-  return persistClownPngBuffer(clownBuffer, orderNumber, request);
-}
-
 export async function POST(request: NextRequest) {
   let chargedUserId = '';
   let chargedPoints = 0;
@@ -197,6 +185,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '订单暂无可用于Clown生成的彩绘结果图' }, { status: 400 });
     }
 
+    if (!isRunningHubClownConfigured()) {
+      return NextResponse.json({ success: false, error: 'Clown 分割工作流未配置' }, { status: 400 });
+    }
+
     let chargedForClown = clownPointsCharged;
     let remainingPoints = transaction.remainingPoints;
 
@@ -236,13 +228,8 @@ export async function POST(request: NextRequest) {
       }),
     });
 
-    const useRunningHubClown = isRunningHubClownConfigured();
-    const clownResult = useRunningHubClown
-      ? await generateClownWithRunningHub(extractionImageUrl)
-      : null;
-    const persisted = clownResult
-      ? await persistRunningHubClownPng(clownResult.outputUrl, orderNumber, request)
-      : await generateLocalClownPng(extractionImageUrl, orderNumber, request);
+    const clownResult = await generateClownWithRunningHub(extractionImageUrl);
+    const persisted = await persistRunningHubClownPng(clownResult.outputUrl, orderNumber, request);
 
     await transactionManager.updateTransaction(orderNumber, {
       remainingPoints,
@@ -255,8 +242,8 @@ export async function POST(request: NextRequest) {
         clownGenerationStatus: 'success',
         clownGenerationStartedAt: undefined,
         clownGenerationError: undefined,
-        clownTaskId: clownResult?.taskId || 'local-slic',
-        clownProvider: clownResult ? 'runninghub' : 'local-slic',
+        clownTaskId: clownResult.taskId,
+        clownProvider: 'runninghub',
         clownPoints,
         clownPointsCharged: true,
         clownGeneratedAt: new Date().toISOString(),

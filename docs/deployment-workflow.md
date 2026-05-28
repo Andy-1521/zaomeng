@@ -51,7 +51,7 @@
 - PSD 入口是 `/api/color-extraction/generate-psd`，单独预扣积分，失败只退 PSD 积分，不影响已成功彩绘结果。
 - Clown 彩色选区图入口是 `/api/color-extraction/generate-clown`，只允许彩绘提取成功订单手动触发，固定收 10 积分，失败只退 Clown 积分，不影响原彩绘结果和 PSD。
 - Clown 图基于彩绘提取结果图调用 RunningHub 专用分割工作流，输出 PNG 保存到 OSS，并把 `clownUrl`、`clownThumbnailUrl`、`clownGenerationStatus` 等字段写入订单 `requestParams`；不会自动加入图库。
-- 未配置 RunningHub Clown 工作流时，接口自动走本地 SLIC 超像素分割兜底，仍生成同尺寸纯色分区 PNG；后续有 RunningHub SAM 工作流后优先使用 RunningHub。
+- 未配置 RunningHub Clown 工作流时，接口返回“Clown 分割工作流未配置”，不扣积分；Clown 不走本地算法兜底。
 
 ## 其他功能流程
 
@@ -95,7 +95,7 @@ Clown 彩色选区图需要先在 RunningHub 创建专用语义/实例分割应�
 - 可选：`RUNNINGHUB_CLOWN_PROMPT_NODE_ID`
 - 可选：`RUNNINGHUB_CLOWN_PROMPT_FIELD_NAME`
 
-工作流输入是彩绘提取结果图 URL，输出应是一张同画幅的纯色分区 PNG。第一版优先读取 RunningHub 直接输出的 PNG；如果后续工作流改为输出多张 mask，需要再补后端 mask 合成逻辑。未配置这些变量时，接口会自动使用本地 SLIC 超像素分割兜底，不依赖服务器持久化图片，生成结果仍上传 OSS。
+工作流输入是彩绘提取结果图 URL，输出应是一张同画幅的纯色分区 PNG。第一版只允许 RunningHub 直接输出 PNG；如果后续工作流改为输出多张 mask，需要再补后端 mask 合成逻辑。未配置这些变量时，接口会明确提示未配置且不扣积分。
 
 ## 生产发布要点
 
