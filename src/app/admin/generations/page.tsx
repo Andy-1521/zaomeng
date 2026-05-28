@@ -159,6 +159,7 @@ const adminToolOptions: ToolOption[] = [
   { label: 'AI生图', value: 'AI生图' },
   { label: '智能改图', value: '智能改图' },
   { label: '高清+扩图', value: '高清+扩图' },
+  { label: '高清放大', value: '高清放大' },
 ];
 
 const diagnosticOptions: DiagnosticOption[] = [
@@ -218,7 +219,7 @@ function getNormalizedToolLabel(toolPage: string, description: string, orderNumb
   }
 
   if (toolPage === '高清放大' || description.includes('高清放大') || orderNumber.startsWith('HD-')) {
-    return '高清+扩图';
+    return '高清放大';
   }
 
   return toolPage || '其他工具';
@@ -229,6 +230,7 @@ function getToolBadgeClass(toolLabel: string): string {
   if (toolLabel === 'AI生图') return 'border-fuchsia-300/25 bg-fuchsia-500/15 text-fuchsia-100';
   if (toolLabel === '智能改图') return 'border-sky-300/25 bg-sky-500/15 text-sky-100';
   if (toolLabel === '高清+扩图') return 'border-cyan-300/25 bg-cyan-500/15 text-cyan-100';
+  if (toolLabel === '高清放大') return 'border-emerald-300/25 bg-emerald-500/15 text-emerald-100';
   return 'border-white/15 bg-white/10 text-white/72';
 }
 

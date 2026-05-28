@@ -6,6 +6,7 @@ import { isImageEditTimeoutError, runPsydoImageEditFromUrl } from '@/lib/psydoIm
 import { getAiGeneratePoints } from '@/lib/pricing';
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 import { DEFAULT_SMART_EDIT_SIZE_OPTION, getSmartEditOutputSize, isSmartEditAspectRatioOption, isSmartEditResolution } from '@/lib/smartEditSize';
+import { tryCreateAndUploadResultThumbnail } from '@/lib/resultThumbnail';
 
 const IMAGE_TO_IMAGE_EDIT_TIMEOUT_MS = 120000;
 
@@ -173,6 +174,18 @@ export async function POST(request: NextRequest) {
     console.log('[AI生图] Psydo 返回成功，buffer bytes:', editedBuffer.length);
 
     const uploadedUrl = await uploadToCozeStorage(editedBuffer, `image-to-image/${orderId}.png`, 'image/png');
+    const thumbnailUrl = await tryCreateAndUploadResultThumbnail(
+      editedBuffer,
+      `thumbnails/image-to-image/${orderId}.webp`,
+      'AI生图',
+    );
+    const currentTransaction = await transactionManager.getTransactionByOrderNumber(orderId);
+    let requestParams: Record<string, unknown> = {};
+    try {
+      requestParams = currentTransaction?.requestParams ? JSON.parse(currentTransaction.requestParams) : {};
+    } catch {
+      requestParams = {};
+    }
 
     await transactionManager.updateTransaction(orderId, {
       status: '成功',
@@ -180,6 +193,10 @@ export async function POST(request: NextRequest) {
       actualPoints: requiredPoints,
       remainingPoints: chargedUser.points,
       resultData: uploadedUrl,
+      requestParams: JSON.stringify({
+        ...requestParams,
+        thumbnailUrl,
+      }),
     });
 
     return NextResponse.json({

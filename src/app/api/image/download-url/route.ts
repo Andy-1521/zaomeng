@@ -1,13 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAliyunOSSThumbnailUrlFromUrl } from '@/lib/aliyunOSS';
+import { getAliyunOSSDownloadUrl, getAliyunOSSKeyFromUrl } from '@/lib/aliyunOSS';
 
 export const runtime = 'nodejs';
-
-function clampSize(value: string | null) {
-  const parsed = Number(value || 160);
-  if (!Number.isFinite(parsed)) return 160;
-  return Math.max(48, Math.min(512, Math.round(parsed)));
-}
 
 function hasLoggedInUser(request: NextRequest) {
   const userCookie = request.cookies.get('user');
@@ -21,6 +15,19 @@ function hasLoggedInUser(request: NextRequest) {
   }
 }
 
+function sanitizeFileName(value: string | null) {
+  const fallback = 'image.png';
+  if (!value) return fallback;
+
+  const cleaned = value
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160);
+
+  return cleaned || fallback;
+}
+
 export async function GET(request: NextRequest) {
   try {
     if (!hasLoggedInUser(request)) {
@@ -28,29 +35,23 @@ export async function GET(request: NextRequest) {
     }
 
     const imageUrl = request.nextUrl.searchParams.get('url') || '';
-    const size = clampSize(request.nextUrl.searchParams.get('size'));
-
     if (!imageUrl) {
       return NextResponse.json({ success: false, message: '缺少图片地址' }, { status: 400 });
     }
 
-    const thumbnailUrl = await getAliyunOSSThumbnailUrlFromUrl(imageUrl, size);
-    if (!thumbnailUrl) {
-      return NextResponse.json({ success: true, data: { thumbnailUrl: imageUrl, passthrough: true } });
+    const key = getAliyunOSSKeyFromUrl(imageUrl);
+    if (!key) {
+      return NextResponse.json({ success: false, message: '该图片暂不支持直签下载' }, { status: 400 });
     }
+
+    const downloadUrl = await getAliyunOSSDownloadUrl(key, sanitizeFileName(request.nextUrl.searchParams.get('filename')));
 
     return NextResponse.json({
       success: true,
-      data: {
-        thumbnailUrl,
-        passthrough: false,
-      },
+      data: { downloadUrl },
     });
   } catch (error) {
-    console.error('[缩略图URL] 生成失败:', error);
-    return NextResponse.json(
-      { success: false, message: error instanceof Error ? error.message : '生成缩略图URL失败' },
-      { status: 500 }
-    );
+    console.error('[图片下载签名API] 生成失败:', error);
+    return NextResponse.json({ success: false, message: '生成下载链接失败，请稍后重试' }, { status: 500 });
   }
 }

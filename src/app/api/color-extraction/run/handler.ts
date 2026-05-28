@@ -3,6 +3,7 @@ import { userManager, transactionManager } from '@/storage/database';
 import { uploadFromUrlToCozeStorage, uploadToCozeStorage } from '@/lib/dualStorage';
 import { isImageEditTimeoutError, runPsydoImageEditFromUrl } from '@/lib/psydoImageEdits';
 import { getColorExtractionPoints, getGeneratePsdPoints } from '@/lib/pricing';
+import { tryCreateAndUploadResultThumbnailFromUrl } from '@/lib/resultThumbnail';
 
 const COLOR_EXTRACTION_POINTS = getColorExtractionPoints();
 const PSD_POINTS = getGeneratePsdPoints();
@@ -207,6 +208,12 @@ async function processColorExtractionJob(params: ColorExtractionJob) {
         requestParams.psdPoints = PSD_POINTS;
         requestParams.psdGenerationStatus = 'pending';
         requestParams.psdPointsCharged = false;
+        requestParams.thumbnailUrl = await tryCreateAndUploadResultThumbnailFromUrl(
+          extractionImageUrl,
+          `thumbnails/color-extraction/${finalOrderId}.webp`,
+          '彩绘提取2工作流',
+          { localMaterialOrigin },
+        );
 
         await transactionManager.updateTransaction(finalOrderId, {
           status: '成功',

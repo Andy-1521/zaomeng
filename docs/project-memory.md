@@ -27,7 +27,7 @@
 
 - 用浏览器插件从网页采集图片到当前账号素材库
 - 本地上传、拖拽上传、收藏、分组、预览和管理素材
-- 基于选中素材执行 AI 生图、智能改图、彩绘提取、手动 PSD、高清+扩图
+- 基于选中素材执行 AI 生图、智能改图、彩绘提取、手动 PSD、高清+扩图、高清放大
 - 在任务中心查看处理进度、失败原因、退款结果和下载入口
 - 用积分计费高成本功能；自动支付暂时隐藏，当前使用管理员生成的一次性兑换码充值
 
@@ -39,6 +39,9 @@
 - 插件采图默认由插件读取图片并直传阿里云 OSS，再调用服务端完成入库。
 - 插件遇到跨站图片读取限制时，可走服务端兼容保存，但服务端也只能下载远程图片后上传 OSS，再写入数据库 URL；不得改成本地 `public/` 持久存储。
 - 数据库只保存素材 URL、来源页面、分组、收藏等元数据，不保存图片二进制。
+- AI 生成结果、订单结果原图和订单缩略图都必须上传 OSS；服务器不保存结果图片，不把 `public/` 当正式存储。
+- 新订单成功时会用结果 buffer 生成一张 512px WebP 缩略图，上传到 OSS `thumbnails/...`，并把 `thumbnailUrl` 写入订单 `requestParams`。
+- 旧订单没有 `thumbnailUrl` 时，只允许走一次兼容缩略图生成：生成 WebP 后上传 OSS 并写回订单，之后接口直接返回 OSS 缩略图。
 - 前端收到上传或插件采集成功返回的 `material` 后必须立即插入图库；慢列表刷新只作为校准，不应要求用户手动刷新才能看到图片。
 - OSS 图片首次读取偶发失败时前端会自动短间隔重试，不应立刻显示“图片不可用”。
 - 上传刷新中断后，前端会用 sessionStorage 记录未完成 OSS key，并在重新进入页面后尝试补完成入库。
@@ -57,8 +60,9 @@
 - 前端先按瀑布流尺寸渲染缩略图，图片加载失败时会用短间隔重试；不要把首次 OSS 慢响应直接当成素材失败。
 - 缩略图大小由本地 `material-library:thumbnail-size` 保存，页面刷新后沿用用户上次选择。
 - 上传和插件采集成功后，后端返回完整 `material`，前端用 `prependUploadedMaterials` 立即插入当前图库；之后的列表刷新只负责校准总数和排序。
-- 订单记录里的 88px 小图不直接拉 OSS 原图，走 `/api/image/thumbnail-url` 生成带 OSS 图片处理参数的签名小图，减少订单面板加载体积。
-- 订单记录下载按钮走 `/api/image/download` 同源下载代理，服务端读取 OSS 图片并返回附件，避免浏览器直接跨域下载 OSS 签名图失败。
+- 订单记录里的小图优先使用订单 `requestParams.thumbnailUrl` 中已保存的 OSS WebP 缩略图，避免加载 2K/4K 原图。
+- 普通小图缺少持久化缩略图时可走 `/api/image/thumbnail-url` 获取 OSS 图片处理签名 URL；旧的大图订单可走 `/api/image/thumbnail-proxy` 兼容生成一次并回写 OSS 缩略图。
+- 订单记录下载按钮优先走 `/api/image/download-url` 生成 OSS 附件下载签名 URL，浏览器直接从 OSS 下载大图；非 OSS 图片再回退到 `/api/image/download` 同源代理。
 - 订单记录点击缩略图的大图预览使用普通 `img` 和 `object-contain`，保持原图比例完整显示。
 - 图库“订单结果”只显示成功或部分成功且有真实结果图的订单；失败、超时、处理中和无结果图订单不作为图片卡展示。
 
@@ -120,7 +124,8 @@
 - 智能改图：画笔/标记局部编辑，后端整理 prompt 并调用图像编辑
 - 彩绘提取：从商品图中提取适合打印的平面彩绘稿
 - 彩绘 PSD：用户手动点击生成，单独计费
-- 高清+扩图：扩图后接高清放大，后台执行
+- 高清+扩图：Psydo `gpt-image-2` 补全四周并输出 4K 长边，后台执行
+- 高清放大：RunningHub 高清放大，后台执行，5 积分
 - 任务中心：展示处理中、成功、失败、超时、PSD 状态和下载入口
 - 插件采图：浏览器插件从网页采集图片回素材库；网站会检测插件版本并提示更新
 - 积分兑换码：管理员生成一次性兑换码，用户在个人中心兑换积分
@@ -153,7 +158,8 @@
 - AI生图：提交前查余额，后端模型调用前预扣，失败/超时退款
 - 智能改图：提交前查余额，后端后台任务开始前预扣，失败/超时退款
 - 彩绘提取：提交前查余额，后端模型调用前预扣，失败/超时退款
-- 高清+扩图：提交后立即创建后台订单并预扣，后台失败退款
+- 高清+扩图：提交后立即创建后台订单并预扣，后台只做扩图和 4K 输出，失败退款
+- 高清放大：提交后立即创建后台订单并预扣 5 积分，后台调用 RunningHub 高清放大，失败退款
 - 彩绘 PSD：只能用户手动触发，单独预扣，失败单独退款
 
 前端涉及余额同步的关键组件：
@@ -197,7 +203,7 @@ PSD 当前要点：
 - prompt 组合入口是 `POST /api/material-editor/compose-prompt`，核心逻辑在 `src/lib/materialEditorPrompt.ts`。Prompt Agent 失败时直接失败，不返回模板提示词。
 - 正式提交入口是 `POST /api/material-editor`，智能改图会创建订单、记录 requestParams、预扣积分，然后后台执行编辑任务。
 - 后台任务调用 `composePromptFromImage` 形成最终提示词，再通过 `src/lib/psydoImageEdits.ts` 调主图像编辑接口；当前没有备用模型目标。
-- 编辑结果下载成 buffer 后上传阿里云 OSS，订单 `resultData` 保存最终 OSS URL。AI 生图和智能改图结果只进入订单记录，不自动写入图库。
+- 编辑结果下载成 buffer 后上传阿里云 OSS，订单 `resultData` 保存最终 OSS URL，同时生成 WebP 缩略图上传 OSS 并保存到 `requestParams.thumbnailUrl`。AI 生图和智能改图结果只进入订单记录，不自动写入图库。
 - 成功后通过 `taskHistoryUpdated` 和订单轮询刷新右侧任务中心；失败、超时、上传失败或结果缺失时，订单标记失败并按预扣规则退款。
 - 当前 mask 仍以 base64 JSON 提交，Nginx 已放宽 `/api/material-editor` 请求体；长期建议改 multipart 或先上传 mask 到 OSS。
 
@@ -206,7 +212,7 @@ PSD 当前要点：
 主应用：
 
 - `src/app/home/page.tsx`：首页入口
-- `src/components/QuickCreatePage.tsx`：素材库、AI生图、彩绘提取、高清+扩图入口
+- `src/components/QuickCreatePage.tsx`：素材库、AI生图、彩绘提取、高清+扩图、高清放大入口
 - `src/components/LocalEditPanel.tsx`：智能改图入口
 - `src/components/TaskHistory.tsx`：任务中心和 PSD 手动生成入口
 - `src/components/Navbar.tsx`：顶部账号、插件状态、头像、积分展示
@@ -239,6 +245,8 @@ PSD 当前要点：
 - `src/lib/aliyunOSS.ts`：OSS 上传和签名 URL
 - `src/lib/safeRemoteImage.ts`：远程图片安全下载
 - `src/app/api/image/download/route.ts`：订单记录同源下载代理，解决浏览器直连 OSS 的 CORS 下载问题
+- `src/app/api/image/download-url/route.ts`：OSS 附件下载签名 URL，订单和图库下载优先使用，避免服务器中转大图
+- `src/app/api/hd-upscale/run/route.ts`：高清放大入口，RunningHub 放大结果上传 OSS
 - `src/lib/localUploadStorage.ts`：本地素材文件读取/历史文件能力，不作为失败替代存储
 - `src/app/api/material-file/[...path]/route.ts`：历史本地素材文件读取
 
@@ -499,11 +507,12 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 - 保留 `/profile?tab=recharge` 和现有 `RechargePanel` 充值链路
 - 订单记录面板必须适配笔记本高度：展开后避开顶部导航，内部滚动，不让卡片或底部按钮溢出视口。
 - 订单记录缩略图不直接拉 OSS 原图，使用 `/api/image/thumbnail-url` 生成带 OSS 图片处理参数的签名小图，降低 88px 缩略图加载体积。
-- 订单记录下载必须走 `/api/image/download`，不要恢复成前端直接 `fetch(OSS URL)`。
+- 订单记录下载必须优先走 `/api/image/download-url`，非 OSS 图片才回退 `/api/image/download`，不要恢复成前端直接 `fetch(OSS URL)` 后 blob 下载。
 - 删除或清空订单记录时，刷新事件必须带 `{ highlight: false }`，避免自动滚动到其它失败订单。
 - 订单记录大图预览必须完整按比例展示，不要用裁切式 `object-cover`。
-- 用户侧和管理员侧工具筛选只保留当前主工具：彩绘提取、AI生图、智能改图、高清+扩图；旧的 AI扩图、高清放大、去水印记录统一显示/归类为高清+扩图。
+- 用户侧和管理员侧工具筛选只保留当前主工具：彩绘提取、AI生图、智能改图、高清+扩图、高清放大；旧的 AI扩图、去水印记录统一显示/归类为高清+扩图。
 - 高清+扩图当前价格为 30 积分，前端按钮和后端扣费都应通过 `getOutpaintUpsamplingPoints()` 读取，不要写死数字。
+- 高清放大当前价格为 5 积分，前端按钮和后端扣费都应通过 `getHdUpscalePoints()` 读取，不要写死数字。
 
 ## 后续优先级
 

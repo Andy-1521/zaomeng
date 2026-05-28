@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { transactionManager, userManager } from '@/storage/database';
 import { reconcileProcessingTransactions } from '@/lib/reconcileProcessingTransactions';
+import { getAliyunOSSThumbnailUrlFromUrl } from '@/lib/aliyunOSS';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误';
@@ -14,8 +15,63 @@ type ResultDataObject = {
 };
 
 type RequestParamsObject = {
+  thumbnailUrl?: unknown;
+  thumbnailUrls?: unknown;
   [key: string]: unknown;
 };
+
+function extractImageUrls(value: unknown): string[] {
+  if (!value) return [];
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    try {
+      return extractImageUrls(JSON.parse(trimmed));
+    } catch {
+      return trimmed.startsWith('http://') || trimmed.startsWith('https://') ? [trimmed] : [];
+    }
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(extractImageUrls);
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return [
+      ...extractImageUrls(record.imageUrl),
+      ...extractImageUrls(record.image_url),
+      ...extractImageUrls(record.result_image_url),
+      ...extractImageUrls(record.url),
+    ];
+  }
+  return [];
+}
+
+function shouldUseProxyThumbnail(transaction: { orderNumber?: string | null; toolPage?: string | null; description?: string | null }) {
+  return Boolean(
+    transaction.orderNumber?.startsWith('HDO-')
+    || transaction.orderNumber?.startsWith('HD-')
+    || transaction.toolPage === '高清+扩图'
+    || transaction.toolPage === '高清放大'
+    || transaction.description?.includes('高清+扩图')
+    || transaction.description?.includes('高清放大')
+  );
+}
+
+function buildProxyThumbnailUrl(imageUrl: string, size: number) {
+  return `/api/image/thumbnail-proxy?url=${encodeURIComponent(imageUrl)}&size=${size}`;
+}
+
+function buildPersistedProxyThumbnailUrl(imageUrl: string, size: number, orderNumber?: string | null) {
+  const orderPart = orderNumber ? `&orderNumber=${encodeURIComponent(orderNumber)}` : '';
+  return `${buildProxyThumbnailUrl(imageUrl, size)}${orderPart}`;
+}
+
+function extractThumbnailUrls(requestParams: unknown) {
+  if (!requestParams || typeof requestParams !== 'object' || Array.isArray(requestParams)) return [];
+  const params = requestParams as RequestParamsObject;
+  const rawUrls = Array.isArray(params.thumbnailUrls) ? params.thumbnailUrls : [params.thumbnailUrl];
+  return rawUrls.filter((url): url is string => typeof url === 'string' && url.startsWith('http'));
+}
 
 function isSmartEditTransaction(toolPage?: string | null, description?: string | null, orderNumber?: string | null) {
   return toolPage === '智能改图'
@@ -109,7 +165,7 @@ export async function GET(request: NextRequest) {
     });
 
     // 格式化返回数据 - 一次性解析，避免前端重复解析
-    const formattedTransactions = reconciledTransactions.map(trans => {
+    const formattedTransactions = await Promise.all(reconciledTransactions.map(async (trans) => {
       // 解析 resultData（可能是 JSON 字符串，也可能是普通字符串）
       let resultData: unknown = null;
       if (trans.resultData) {
@@ -137,8 +193,16 @@ export async function GET(request: NextRequest) {
       }
 
       const isSmartEdit = isSmartEditTransaction(trans.toolPage, trans.description, trans.orderNumber);
+      const resultImageUrls = extractImageUrls(resultData);
+      const savedThumbnailUrls = extractThumbnailUrls(requestParams);
+      const useProxy = shouldUseProxyThumbnail(trans);
+      const thumbnailUrls = savedThumbnailUrls.length > 0
+        ? savedThumbnailUrls
+        : useProxy
+          ? resultImageUrls.map((imageUrl) => buildPersistedProxyThumbnailUrl(imageUrl, 256, trans.orderNumber))
+          : await Promise.all(resultImageUrls.map((imageUrl) => getAliyunOSSThumbnailUrlFromUrl(imageUrl, 256).catch(() => null)));
 
-        return {
+      return {
         id: trans.id,
         orderNumber: trans.orderNumber,
         toolPage: trans.toolPage,
@@ -151,10 +215,11 @@ export async function GET(request: NextRequest) {
         prompt: isSmartEdit ? '' : trans.prompt || '',
         requestParams: isSmartEdit ? sanitizeSmartEditRequestParams(requestParams) : requestParams,
         resultData,
+        thumbnailUrls: thumbnailUrls.map((thumbnailUrl) => thumbnailUrl || ''),
         psdUrl: trans.psdUrl || '',
         uploadedImage: trans.uploadedImage || '',
       };
-    });
+    }));
 
     // 返回数据 + 分页游标
     const lastItem = reconciledTransactions[reconciledTransactions.length - 1];

@@ -2,8 +2,8 @@ import { after, NextRequest, NextResponse } from 'next/server';
 import sharp from 'sharp';
 import { transactionManager, userManager } from '@/storage/database';
 import { uploadToCozeStorage } from '@/lib/dualStorage';
+import { tryCreateAndUploadResultThumbnail } from '@/lib/resultThumbnail';
 import { runPsydoImageEditWithMetaFromUrl, isImageEditTimeoutError } from '@/lib/psydoImageEdits';
-import { createUpsamplingTask, waitForUpsamplingTaskComplete } from '@/lib/runningHubWatermark';
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 import { getOutpaintUpsamplingPoints } from '@/lib/pricing';
 
@@ -47,7 +47,6 @@ type RouteOptions = {
 
 const FINAL_LONG_EDGE_TARGET = 4096;
 const IMAGE_DOWNLOAD_MAX_BYTES = 30 * 1024 * 1024;
-const UPSAMPLING_RESULT_MAX_BYTES = 80 * 1024 * 1024;
 const OUTPAINT_IMAGE_EDIT_TIMEOUT_MS = 120000;
 const EDIT_CANVAS_SPECS: EditCanvasSpec[] = [
   { width: 1024, height: 1024, size: '1024x1024', aspectRatio: 1 },
@@ -332,9 +331,6 @@ export async function runOutpaintUpsamplingRoute(request: NextRequest, options: 
         console.log(`[${options.logPrefix}] 步骤1: 上传 outpaint 输入画布`);
         const sourceCanvasUrl = await uploadToCozeStorage(sourceCanvasBuffer, `${options.routeStoragePrefix}/${orderId}-source.png`, 'image/png');
 
-        let outpaintResultUrl = '';
-        let upsamplingTaskId = '';
-        let upsamplingResultUrl = '';
         let finalResultUrl = '';
         let final4kResult: Final4kResult | null = null;
         let imageEditMeta: {
@@ -355,17 +351,14 @@ export async function runOutpaintUpsamplingRoute(request: NextRequest, options: 
 
         imageEditMeta = imageEditResult.meta;
 
-        console.log(`[${options.logPrefix}] 步骤3: 上传扩图结果供放大使用`);
-        outpaintResultUrl = await uploadToCozeStorage(imageEditResult.buffer, `${options.routeStoragePrefix}/${orderId}-outpaint.png`, 'image/png');
-
-        console.log(`[${options.logPrefix}] 步骤4: 基于扩图结果做高清放大`);
-        upsamplingTaskId = await createUpsamplingTask(outpaintResultUrl);
-        upsamplingResultUrl = await waitForUpsamplingTaskComplete(upsamplingTaskId, 5);
-
-        console.log(`[${options.logPrefix}] 步骤5: 下载放大结果并规范到 4K 长边`);
-        const upsamplingBuffer = await downloadImageBuffer(upsamplingResultUrl, UPSAMPLING_RESULT_MAX_BYTES);
-        final4kResult = await ensure4kLongEdge(upsamplingBuffer, finalOutputSize);
+        console.log(`[${options.logPrefix}] 步骤3: 规范扩图结果为 4K 长边`);
+        final4kResult = await ensure4kLongEdge(imageEditResult.buffer, finalOutputSize);
         finalResultUrl = await uploadToCozeStorage(final4kResult.buffer, `${options.routeStoragePrefix}/${orderId}.png`, 'image/png');
+        const thumbnailUrl = await tryCreateAndUploadResultThumbnail(
+          final4kResult.buffer,
+          `thumbnails/${options.routeStoragePrefix}/${orderId}.webp`,
+          options.logPrefix,
+        );
 
         if (!final4kResult || !imageEditMeta) {
           throw new Error(`${options.toolPage}任务未生成完整结果`);
@@ -393,9 +386,6 @@ export async function runOutpaintUpsamplingRoute(request: NextRequest, options: 
             outpaintCanvasSize: canvas.size,
             sourcePlacement: placement,
             outpaintInputUrl: sourceCanvasUrl,
-            outpaintResultUrl,
-            upsamplingTaskId,
-            upsamplingResultUrl,
             targetOutputWidth: finalOutputSize.width,
             targetOutputHeight: finalOutputSize.height,
             finalWidth: final4kResult.width,
@@ -404,6 +394,7 @@ export async function runOutpaintUpsamplingRoute(request: NextRequest, options: 
             editModel: imageEditMeta.model,
             editTarget: imageEditMeta.targetName,
             editBaseUrl: imageEditMeta.baseUrl,
+            thumbnailUrl,
           }),
         });
 

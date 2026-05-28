@@ -258,3 +258,51 @@ export async function getAliyunOSSProcessedUrl(
     throw new Error(`生成阿里云OSS缩略图签名失败: ${getErrorMessage(error)}`);
   }
 }
+
+export async function getAliyunOSSThumbnailUrlFromUrl(
+  imageUrl: string,
+  size: number,
+  expireSeconds: number = 24 * 60 * 60
+): Promise<string | null> {
+  const key = getAliyunOSSKeyFromUrl(imageUrl);
+  if (!key) return null;
+
+  const safeSize = Math.max(48, Math.min(768, Math.round(size)));
+  return getAliyunOSSProcessedUrl(
+    key,
+    `image/resize,m_lfit,w_${safeSize},h_${safeSize}/quality,q_78/format,webp`,
+    expireSeconds
+  );
+}
+
+export async function getAliyunOSSDownloadUrl(
+  key: string,
+  fileName: string,
+  expireSeconds: number = 10 * 60
+): Promise<string> {
+  if (!HAS_ALIYUN_OSS_CONFIG || !ossClient) {
+    throw new Error('[阿里云OSS] 未配置或已禁用');
+  }
+
+  const safeFileName = fileName
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160) || 'image.png';
+
+  try {
+    return ossClient.signatureUrl(
+      key,
+      {
+        expires: expireSeconds,
+        method: 'GET',
+        response: {
+          'content-disposition': `attachment; filename="${safeFileName.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(safeFileName)}`,
+        },
+      } as Parameters<OSS['signatureUrl']>[1] & { response: Record<string, string> }
+    );
+  } catch (error: unknown) {
+    console.error('[阿里云OSS] 生成下载签名URL失败:', error);
+    throw new Error(`生成阿里云OSS下载签名失败: ${getErrorMessage(error)}`);
+  }
+}

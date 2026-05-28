@@ -20,7 +20,8 @@ function mapToolFilter(toolFilter: string): string[] {
   if (toolFilter === 'AI生图') return ['AI生图', 'AI生图（图生图）'];
   if (toolFilter === '智能改图') return ['智能改图', '局部改图'];
   if (toolFilter === '去除水印') return ['去除水印', '去水印'];
-  if (toolFilter === '高清+扩图') return ['高清+扩图', '高清+扩图2', 'AI扩图', '去除水印', '去水印', '高清放大'];
+  if (toolFilter === '高清+扩图') return ['高清+扩图', '高清+扩图2', 'AI扩图', '去除水印', '去水印'];
+  if (toolFilter === '高清放大') return ['高清放大'];
   return [toolFilter];
 }
 

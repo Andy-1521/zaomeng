@@ -23,6 +23,7 @@ interface ImageThumbnailProps {
   thumbnailSize?: 'small' | 'medium' | 'large';
   onLoad?: () => void; // 图片加载成功回调
   useProcessedThumbnail?: boolean;
+  fallbackSrc?: string;
 }
 
 const THUMBNAIL_SIZES = {
@@ -49,11 +50,13 @@ export function ImageThumbnail({
   thumbnailSize = 'medium',
   onLoad,
   useProcessedThumbnail = false,
+  fallbackSrc,
 }: ImageThumbnailProps) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
   const [inView, setInView] = useState(false);
   const [resolvedThumbnailUrl, setResolvedThumbnailUrl] = useState<string | null>(null);
+  const [proxyFallbackUsed, setProxyFallbackUsed] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const displayWidth = width || THUMBNAIL_SIZES[thumbnailSize].width;
   const displayHeight = height || THUMBNAIL_SIZES[thumbnailSize].height;
@@ -85,6 +88,7 @@ export function ImageThumbnail({
     setLoaded(false);
     setError(false);
     setResolvedThumbnailUrl(null);
+    setProxyFallbackUsed(false);
   }, [src]);
 
   useEffect(() => {
@@ -196,6 +200,15 @@ export function ImageThumbnail({
             onLoad?.();
           }}
           onError={() => {
+            const originalUrl = fallbackSrc || src;
+            if (!proxyFallbackUsed && originalUrl && (useProcessedThumbnail || originalUrl !== thumbnailUrl)) {
+              const size = Math.max(displayWidth, displayHeight);
+              setProxyFallbackUsed(true);
+              setLoaded(false);
+              setError(false);
+              setResolvedThumbnailUrl(`/api/image/thumbnail-proxy?url=${encodeURIComponent(originalUrl)}&size=${size}`);
+              return;
+            }
             setError(true);
             setLoaded(false);
           }}

@@ -11,7 +11,7 @@ import { parseColorExtractionModeMeta, type ColorExtractionMode } from '@/lib/co
 import { toUserFacingErrorFromUnknown, toUserFacingErrorMessage } from '@/lib/userFacingError';
 import { formatPointsLabel, getGeneratePsdPoints } from '@/lib/pricing';
 
-export type TabType = 'color-extraction' | 'watermark' | 'custom' | 'ai-generate' | 'smart-edit';
+export type TabType = 'color-extraction' | 'watermark' | 'hd-upscale' | 'custom' | 'ai-generate' | 'smart-edit';
 export type FilterType = 'all' | TabType;
 type TaskCenterFilter = 'all' | 'processing' | 'success' | 'failed';
 export type TaskStatus = '处理中' | '成功' | '失败' | '超时' | '部分成功';
@@ -20,8 +20,9 @@ type TaskHistoryUpdatedEventDetail = {
   highlight?: boolean;
 };
 const PSD_PROCESSING_STALE_MS = 12 * 60 * 1000;
+const TASK_HISTORY_PAGE_SIZE = 80;
 
-const TASK_FILTER_VALUES: FilterType[] = ['all', 'color-extraction', 'ai-generate', 'smart-edit', 'watermark'];
+const TASK_FILTER_VALUES: FilterType[] = ['all', 'color-extraction', 'ai-generate', 'smart-edit', 'watermark', 'hd-upscale'];
 
 export interface TaskRecord {
   id: string;
@@ -30,6 +31,7 @@ export interface TaskRecord {
   description: string;
   time: number;
   imageUrl?: string | string[]; // 支持单图片（string）或多图片（string[]）
+  thumbnailUrl?: string | string[];
   imageUrls?: string[]; // 【废弃】用于多图片（已合并到imageUrl中，保留用于向后兼容）
   orderId?: string;
   duration?: number; // 运行时长（秒）
@@ -92,6 +94,7 @@ type TaskRecordApiItem = {
   createdAt?: number | string;
   toolPage?: string;
   uploadedImage?: string;
+  thumbnailUrls?: string[];
 };
 
 type TaskRecordApiResponse = {
@@ -362,7 +365,7 @@ export const updateTaskRecordStatus = (orderId: string, status: TaskStatus, imag
 };
 
 // 从数据库加载历史记录（带缓存优化）
-const loadTasksFromDatabase = async (userId?: string): Promise<TaskRecord[]> => {
+const loadTasksFromDatabase = async (userId?: string, cursor?: string | null, limit = TASK_HISTORY_PAGE_SIZE): Promise<TaskRecord[]> => {
   debugTaskHistory('[TaskHistory] loadTasksFromDatabase ========== 开始 ==========');
   debugTaskHistory('[TaskHistory] loadTasksFromDatabase - userId:', userId);
 
@@ -393,7 +396,14 @@ const loadTasksFromDatabase = async (userId?: string): Promise<TaskRecord[]> => 
     // 【优化】先尝试从缓存加载
     let response: Response;
     try {
-      response = await fetch(`/api/user/transactions?userId=${userData.id}&limit=200`, {
+      const params = new URLSearchParams({
+        userId: userData.id,
+        limit: String(limit),
+      });
+      if (cursor) {
+        params.set('cursor', cursor);
+      }
+      response = await fetch(`/api/user/transactions?${params.toString()}`, {
         credentials: 'include',
       });
       } catch (fetchError: unknown) {
@@ -532,6 +542,9 @@ export const forceRefreshCache = (userId?: string) => {
         length: Array.isArray(imageUrl) ? imageUrl.length : 0,
         value: typeof imageUrl === 'string' ? imageUrl.substring(0, 60) + '...' : JSON.stringify(imageUrl),
       });
+      const thumbnailUrl = Array.isArray(item.thumbnailUrls)
+        ? (Array.isArray(imageUrl) ? item.thumbnailUrls : item.thumbnailUrls[0])
+        : undefined;
 
       // 解析 requestParams 获取上传的参考图片
       let uploadedImage: string | string[] = item.uploadedImage || '';
@@ -692,8 +705,8 @@ export const forceRefreshCache = (userId?: string) => {
         tab = 'smart-edit';
         tabName = '智能改图';
       } else if (item.toolPage === '高清放大' || item.description?.includes('高清放大') || item.orderNumber?.startsWith('HD-')) {
-        tab = 'watermark';
-        tabName = '高清+扩图';
+        tab = 'hd-upscale';
+        tabName = '高清放大';
       } else if (item.toolPage === '去水印') {
         // 兼容性处理：旧数据可能使用'去水印'
         tab = 'watermark';
@@ -722,6 +735,7 @@ export const forceRefreshCache = (userId?: string) => {
         description,
         time,
         imageUrl,  // 可能是string（单图片）或string[]（多图片）
+        thumbnailUrl,
         orderId: item.orderNumber,
         duration,
         uploadedImage,
@@ -803,6 +817,8 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   const [statusFilter, setStatusFilter] = useState<TaskCenterFilter>('all');
   const [isToolFilterOpen, setIsToolFilterOpen] = useState(false);
   const [showAllHistory, setShowAllHistory] = useState(false);
+  const [hasMoreDatabaseTasks, setHasMoreDatabaseTasks] = useState(false);
+  const [isLoadingMoreTasks, setIsLoadingMoreTasks] = useState(false);
   const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null);
   const toolFilterRef = useRef<HTMLDivElement>(null);
   const taskCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -867,6 +883,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
       // 先从数据库加载历史记录（传入userId以支持用户切换）
       const dbTasks = await loadTasksFromDatabase(userId);
+      setHasMoreDatabaseTasks(dbTasks.length === TASK_HISTORY_PAGE_SIZE);
 
       debugTaskHistory('[TaskHistory] 从数据库加载到', dbTasks.length, '条记录');
 
@@ -898,6 +915,34 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       // 不抛出异常，避免影响组件渲染
     }
   }, []);
+
+  const loadMoreTasks = useCallback(async () => {
+    if (isLoadingMoreTasks || tasks.length === 0) return;
+
+    setIsLoadingMoreTasks(true);
+    try {
+      const oldestTask = tasks.reduce((oldest, task) => (task.time < oldest.time ? task : oldest), tasks[0]);
+      const cursor = new Date(oldestTask.time).toISOString();
+      const moreTasks = await loadTasksFromDatabase(userId, cursor);
+      setHasMoreDatabaseTasks(moreTasks.length === TASK_HISTORY_PAGE_SIZE);
+      if (moreTasks.length === 0) return;
+
+      setTasks((current) => {
+        const existingOrderIds = new Set(current.map((task) => task.orderId).filter(Boolean));
+        const merged = [
+          ...current,
+          ...moreTasks.filter((task) => !task.orderId || !existingOrderIds.has(task.orderId)),
+        ];
+        merged.sort((a, b) => b.time - a.time);
+        return merged;
+      });
+    } catch (error) {
+      console.error('[TaskHistory] 加载更多历史记录失败:', error);
+      showToast('加载更早订单失败，请稍后重试', 'error');
+    } finally {
+      setIsLoadingMoreTasks(false);
+    }
+  }, [isLoadingMoreTasks, tasks, userId]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -1041,6 +1086,12 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
         );
+      case 'hd-upscale':
+        return (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4-4 4 4m-4-4v9m8-16l4 4-4 4m4-4H7" />
+          </svg>
+        );
       case 'ai-generate':
         return (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1084,8 +1135,22 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
         await new Promise(resolve => setTimeout(resolve, i * 200));
         const fileName = `image-${task.orderId || task.id}-${i + 1}.png`;
-        const downloadUrl = `/api/image/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fileName)}`;
-        const response = await fetch(downloadUrl, { credentials: 'include' });
+        const signedResponse = await fetch(`/api/image/download-url?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fileName)}`, { credentials: 'include' });
+        if (signedResponse.ok) {
+          const signedResult = await signedResponse.json().catch(() => null) as { success?: boolean; data?: { downloadUrl?: string } } | null;
+          if (signedResult?.success && signedResult.data?.downloadUrl) {
+            const link = document.createElement('a');
+            link.href = signedResult.data.downloadUrl;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            successCount += 1;
+            continue;
+          }
+        }
+
+        const response = await fetch(`/api/image/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fileName)}`, { credentials: 'include' });
         if (!response.ok) {
           throw new Error(`下载失败: ${response.status}`);
         }
@@ -1410,6 +1475,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       'ai-generate': 'AI生图',
       'smart-edit': '智能改图',
       'watermark': '高清+扩图',
+      'hd-upscale': '高清放大',
       'custom': '其他历史',
     };
     return labels[filter] || filter;
@@ -1613,8 +1679,9 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                         <span className="h-px flex-1 bg-white/8" />
                       </div>
                       {group.tasks.map((task) => {
-                        const resultImage = getFirstImage(task.imageUrl);
-                        const hasResult = isImageValue(resultImage);
+                        const originalResultImage = getFirstImage(task.imageUrl);
+                        const resultImage = getFirstImage(task.thumbnailUrl || task.imageUrl);
+                        const hasResult = isImageValue(originalResultImage);
                         const statusLabel = getTaskStatusLabel(task);
                         const isSuccessTask = task.status === '成功' || task.status === '部分成功' || !task.status;
                         const isFailedTask = task.status === '失败' || task.status === '超时';
@@ -1639,9 +1706,9 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                           >
                             <div className="flex items-center gap-3">
                               <div className="w-[88px] shrink-0 overflow-hidden rounded-xl border border-white/8 bg-black/30 self-start transition-colors group-hover:border-white/16">
-                                <button type="button" onClick={(e) => { e.stopPropagation(); if (hasResult) setPreviewImageUrl(resultImage); }} className="block w-full text-left">
+                                <button type="button" onClick={(e) => { e.stopPropagation(); if (hasResult) setPreviewImageUrl(originalResultImage); }} className="block w-full text-left">
                                   {hasResult ? (
-                                    <ImageThumbnail src={resultImage} alt="结果图" width={88} height={88} thumbnailSize="small" useProcessedThumbnail className="h-[88px] w-[88px] object-cover transition duration-200 group-hover:scale-[1.02] group-hover:opacity-90" />
+                                    <ImageThumbnail src={resultImage || undefined} fallbackSrc={originalResultImage || undefined} alt="结果图" width={88} height={88} thumbnailSize="small" useProcessedThumbnail={!task.thumbnailUrl} className="h-[88px] w-[88px] object-cover transition duration-200 group-hover:scale-[1.02] group-hover:opacity-90" />
                                   ) : (
                                     <div className="flex h-[88px] w-[88px] items-center justify-center text-[11px] text-white/32 text-center leading-tight px-2">
                                       {task.status === '处理中' ? '处理中' : '暂无结果'}
@@ -1752,6 +1819,15 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                 >
                   {showAllHistory ? '只看最近20条' : '显示全部历史'}
                 </button>
+                {showAllHistory && hasMoreDatabaseTasks && (
+                  <button
+                    onClick={() => void loadMoreTasks()}
+                    disabled={isLoadingMoreTasks}
+                    className="rounded-xl bg-white/8 px-4 py-2 text-sm text-white/75 transition-colors hover:bg-white/14 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isLoadingMoreTasks ? '加载中...' : '更早'}
+                  </button>
+                )}
                 <button
                   onClick={clearHistory}
                   className="rounded-xl bg-red-500/14 px-4 py-2 text-sm text-red-200 transition-colors hover:bg-red-500/22"

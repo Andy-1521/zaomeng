@@ -8,6 +8,7 @@ import { isImageEditTimeoutError, runPsydoImageEditWithMetaFromPreparedBuffer } 
 import { getSmartEditPoints } from '@/lib/pricing';
 import { DEFAULT_SMART_EDIT_SIZE_OPTION, resolveSmartEditAspectRatio } from '@/lib/smartEditSize';
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
+import { tryCreateAndUploadResultThumbnail } from '@/lib/resultThumbnail';
 
 const MAX_MASK_IMAGE_BYTES = 10 * 1024 * 1024;
 const SMART_EDIT_SOURCE_MAX_EDGE = 1536;
@@ -496,6 +497,7 @@ async function createMaterialRecord(userId: string, imageUrl: string, action: 'c
 async function createOrderRecord(
   userId: string,
   imageUrl: string,
+  imageBuffer: Buffer,
   payload: {
     toolPage: string;
     description: string;
@@ -522,6 +524,11 @@ async function createOrderRecord(
       imageUrl: payload.uploadedImage,
       uploadedImage: payload.uploadedImage,
       sourceImageUrl: payload.sourceImageUrl || payload.uploadedImage,
+      thumbnailUrl: await tryCreateAndUploadResultThumbnail(
+        imageBuffer,
+        `thumbnails/material-editor/${orderNumber}.webp`,
+        '素材裁剪',
+      ),
     }),
     resultData: imageUrl,
     uploadedImage: payload.sourceImageUrl || payload.uploadedImage,
@@ -588,8 +595,9 @@ function buildSmartEditRequestParams(params: {
   promptSource?: string;
   preparedSource?: Awaited<ReturnType<typeof prepareSourceImageForSmartEdit>>;
   imageEditMeta?: Awaited<ReturnType<typeof runPsydoImageEditWithMetaFromPreparedBuffer>>['meta'];
+  thumbnailUrl?: string;
 }) {
-  const { body, resolvedAspectRatio, outputWidth, outputHeight, promptSummary, finalPrompt, agentPrompt, negativePrompt, promptSource, preparedSource, imageEditMeta } = params;
+  const { body, resolvedAspectRatio, outputWidth, outputHeight, promptSummary, finalPrompt, agentPrompt, negativePrompt, promptSource, preparedSource, imageEditMeta, thumbnailUrl } = params;
   const mode = getRedrawMode(body);
   const imageEditRequest = getSmartEditImageEditRequest(resolvedAspectRatio);
   return {
@@ -626,6 +634,7 @@ function buildSmartEditRequestParams(params: {
     editModel: imageEditMeta?.model,
     editTarget: imageEditMeta?.targetName,
     editBaseUrl: imageEditMeta?.baseUrl,
+    thumbnailUrl,
     regionCount: Array.isArray(body.regions) ? body.regions.length : 0,
     regions: sanitizeRegionsForRequest(body.regions),
     hasMask: mode === 'brush',
@@ -830,6 +839,11 @@ async function completeSmartEditRedrawInBackground(params: {
     });
 
     const editedUrl = await uploadToCozeStorage(resultBuffer, `material-editor/${userId}/${orderNumber}-redraw.png`, 'image/png');
+    const thumbnailUrl = await tryCreateAndUploadResultThumbnail(
+      resultBuffer,
+      `thumbnails/material-editor/${orderNumber}-redraw.webp`,
+      'MaterialEditor',
+    );
     logStep('upload-result');
 
     logStep('deduct-points', { remainingPoints: chargedRemainingPoints, prepaid: true });
@@ -853,6 +867,7 @@ async function completeSmartEditRedrawInBackground(params: {
         promptSource: promptResult.source,
         preparedSource,
         imageEditMeta: imageEditResult.meta,
+        thumbnailUrl,
       })),
       resultData: editedUrl,
       uploadedImage: body.imageUrl,
@@ -1074,7 +1089,7 @@ export async function POST(request: NextRequest) {
 
     if (body.action === 'crop' && body.destination === 'orders') {
       const toolLabel = body.toolLabel?.trim() || '裁切工具';
-      const orderRecord = await createOrderRecord(userId, editedUrl, {
+      const orderRecord = await createOrderRecord(userId, editedUrl, outputBuffer, {
         toolPage: '裁切工具',
         description: `${toolLabel}裁切结果`,
         uploadedImage: body.imageUrl,

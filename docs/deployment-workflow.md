@@ -15,7 +15,7 @@
 
 ## 网站作用
 
-造梦 AI 是图片素材采集与 AI 图片生产工作台。用户在 `/home` 统一完成素材采集、上传、整理、AI 生图、智能改图、彩绘提取、手动 PSD、高清+扩图和任务查看。浏览器插件负责把网页图片保存到当前账号素材库。用户通过积分使用高成本功能，失败或超时按后端规则退款。
+造梦 AI 是图片素材采集与 AI 图片生产工作台。用户在 `/home` 统一完成素材采集、上传、整理、AI 生图、智能改图、彩绘提取、手动 PSD、高清+扩图、高清放大和任务查看。浏览器插件负责把网页图片保存到当前账号素材库。用户通过积分使用高成本功能，失败或超时按后端规则退款。
 
 ## 图库主链路
 
@@ -23,19 +23,21 @@
 - 插件采图：插件优先直传阿里云 OSS，再调用 `/api/plugin/complete-capture` 写入图库记录。
 - 插件因网页跨站限制无法直读图片时，可走 `/api/plugin/capture-image` 服务端兼容保存，但最终仍必须上传 OSS 并保存 OSS URL。
 - 生产服务器不应承担素材持久化，不应把新图库文件写进 `public/` 当作正式存储。
+- AI 生成结果原图和缩略图也必须落 OSS；服务器不保存图片文件，数据库只保存结果 URL 和缩略图 URL。
 - 上传或插件采集成功后，页面必须立即插入返回的素材记录；列表刷新只用于校准。
 - 图库页面通过 `/api/plugin/captured-images` 分页加载，上传中显示占位卡片；刷新中断后会根据 sessionStorage 中的 OSS key 自动补完成入库。
-- 订单记录缩略图通过 `/api/image/thumbnail-url` 获取 OSS 处理后的小图签名 URL，不应直接加载原始大图。
+- 订单记录缩略图优先读取订单 `requestParams.thumbnailUrl` 的 OSS WebP 小图；新订单在生成成功时同步生成并上传这张小图。
+- 旧订单没有缩略图时，`/api/image/thumbnail-proxy` 只作为一次性兼容：生成 WebP、上传 OSS、写回订单，后续不再反复处理原图。
 - 订单结果页只展示成功或部分成功且有真实结果图的订单；失败、超时、处理中和无结果图订单不显示为图片卡片。
 - 右侧订单记录面板保留失败/超时记录，用于查看失败原因、删除、重新提交和退款排查。
-- 订单记录下载按钮走同源 `/api/image/download`，由服务器读取 OSS 图片并作为附件返回，避免浏览器跨域下载失败。
+- 订单记录下载按钮优先走 `/api/image/download-url` 生成 OSS 附件下载签名 URL，让浏览器直接从 OSS 下载；非 OSS 图片再回退到 `/api/image/download` 同源代理。
 
 ## 智能改图主链路
 
 - 前端入口在 `/home` 的智能改图面板，相关组件是 `QuickCreatePage.tsx` 和 `LocalEditPanel.tsx`。
 - 标记识别调用 `/api/smart-edit/identify`，保留预识别 `prewarm`，实际识别发送压缩裁切图。
 - prompt 组合由 `/api/material-editor/compose-prompt` 和 `src/lib/materialEditorPrompt.ts` 处理。
-- 正式生成调用 `/api/material-editor`，后端创建订单、预扣积分、调用图像编辑主接口、上传结果到 OSS，再把结果 URL 写回订单。
+- 正式生成调用 `/api/material-editor`，后端创建订单、预扣积分、调用图像编辑主接口、上传结果到 OSS，同时生成并上传 OSS 缩略图，再把结果 URL 和缩略图 URL 写回订单。
 - AI 生图和智能改图结果只显示在订单记录，不自动加入图库。
 - 失败、超时、上传失败或结果缺失时，订单失败并按积分规则退款。
 
@@ -44,15 +46,16 @@
 - 彩绘提取入口是 `/api/color-extraction/run`，前端从 `/home` 选中素材后提交。
 - 接口只负责校验用户、创建订单、原子预扣积分并快速返回订单号；真实图片处理在后台并发执行。
 - 当前只保留 Psydo 图生图彩绘提取模式，不再保留镂空模式，不再走 Coze 去背景分支。
-- 彩绘结果只保存到 OSS，并写入订单 `resultData`；不会自动加入图库。
+- 彩绘结果只保存到 OSS，并写入订单 `resultData`；同时生成 OSS WebP 缩略图写入 `requestParams.thumbnailUrl`；不会自动加入图库。
 - 彩绘提取成功后 PSD 状态为 `pending`，用户在右侧订单记录中手动点击生成 PSD。
 - PSD 入口是 `/api/color-extraction/generate-psd`，单独预扣积分，失败只退 PSD 积分，不影响已成功彩绘结果。
 
 ## 其他功能流程
 
-- AI 生图：`/api/image-to-image/run` 创建订单、预扣积分、调用 Psydo 图像接口、结果上传 OSS、订单成功；失败或超时退款。
-- 高清+扩图：`/api/outpaint-upsampling/run` 创建后台订单、预扣积分、执行扩图和放大、结果上传 OSS；当前价格通过 `getOutpaintUpsamplingPoints()` 读取，不写死。
-- 素材下载/订单下载：图库下载和订单记录下载均应优先通过同源站点处理，不依赖 OSS 跨域能力。
+- AI 生图：`/api/image-to-image/run` 创建订单、预扣积分、调用 Psydo 图像接口、结果上传 OSS、生成 OSS 缩略图、订单成功；失败或超时退款。
+- 高清+扩图：`/api/outpaint-upsampling/run` 创建后台订单、预扣积分、构建扩图画布和 mask，调用 Psydo `gpt-image-2` 只补全四周，最终规范为 4K 长边后上传 OSS，并同步上传 OSS 缩略图；当前价格通过 `getOutpaintUpsamplingPoints()` 读取，不写死。
+- 高清放大：`/api/hd-upscale/run` 创建后台订单、预扣 5 积分，调用 RunningHub 高清放大，结果下载后上传 OSS，并同步上传 OSS 缩略图；价格通过 `getHdUpscalePoints()` 读取。
+- 素材下载/订单下载：图库下载和订单记录下载均应优先走 OSS 直签附件下载，避免服务器中转大图。
 - 插件更新：用户只看到“下载最新版插件”，不要向用户暴露服务器、域名、迁移细节。
 
 ## 标准步骤

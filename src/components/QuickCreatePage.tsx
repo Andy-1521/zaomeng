@@ -8,7 +8,7 @@ import CropEditorPanel from '@/components/CropEditorPanel';
 import LocalEditPanel from '@/components/LocalEditPanel';
 import PointsIconLabel from '@/components/PointsIconLabel';
 import { useUser } from '@/contexts/UserContext';
-import { formatPointsLabel, getAiGeneratePoints, getColorExtractionPoints, getOutpaintUpsamplingPoints, getSmartEditPoints } from '@/lib/pricing';
+import { formatPointsLabel, getAiGeneratePoints, getColorExtractionPoints, getHdUpscalePoints, getOutpaintUpsamplingPoints, getSmartEditPoints } from '@/lib/pricing';
 import { isSmartEditAspectRatioOption, isSmartEditResolution, type SmartEditAspectRatioOption, type SmartEditResolution } from '@/lib/smartEditSize';
 import { showToast } from '@/lib/toast';
 import { toUserFacingErrorFromUnknown, toUserFacingErrorMessage } from '@/lib/userFacingError';
@@ -26,6 +26,7 @@ type PluginCapturePayload = {
 type CapturedImageRecord = {
   id: string;
   imageUrl: string;
+  thumbnailUrl?: string | null;
   originalUrl?: string | null;
   pageUrl?: string | null;
   pageTitle?: string | null;
@@ -46,6 +47,7 @@ type RawOrderRecord = {
   resultData?: unknown;
   requestParams?: unknown;
   uploadedImage?: string | null;
+  thumbnailUrls?: string[] | null;
   remainingPoints?: number | null;
   createdAt?: string | number | Date | null;
   time?: string | number | Date | null;
@@ -55,6 +57,7 @@ type OrderResultCard = {
   id: string;
   orderId: string;
   imageUrl: string;
+  thumbnailUrl?: string | null;
   createdAt: string | number | Date;
   toolLabel: string;
   statusLabel: string;
@@ -67,7 +70,7 @@ type OrderResultCard = {
 
 type MaterialFilter = 'all' | 'today' | 'yesterday' | 'earlier';
 type MaterialScope = 'all' | 'favorite' | 'uncategorized' | `folder:${string}`;
-type GalleryActionId = 'color-extraction' | 'ai-generate' | 'outpaint-upsampling';
+type GalleryActionId = 'color-extraction' | 'ai-generate' | 'outpaint-upsampling' | 'hd-upscale';
 type LibraryView = 'gallery' | 'orders';
 
 type MaterialFolder = {
@@ -262,13 +265,26 @@ const galleryActions: GalleryAction[] = [
   {
     id: 'outpaint-upsampling',
     label: '高清+扩图',
-    description: '先扩图，再做高清放大',
+    description: 'AI补全四周并输出4K',
     points: getOutpaintUpsamplingPoints(),
     className: 'bg-gradient-to-r from-cyan-600 to-sky-600 hover:from-cyan-500 hover:to-sky-500',
-    tag: '对比实验',
+    tag: '4K扩图',
     preview: (
       <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
         <Image src="/assets/remove-watermark-demo.jpg" alt="高清+扩图示例" width={128} height={140} className="w-full h-full object-cover" />
+      </div>
+    ),
+  },
+  {
+    id: 'hd-upscale',
+    label: '高清放大',
+    description: '保留构图细节做高清放大',
+    points: getHdUpscalePoints(),
+    className: 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500',
+    tag: '5积分',
+    preview: (
+      <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
+        <Image src="/assets/remove-watermark-demo.jpg" alt="高清放大示例" width={128} height={140} className="w-full h-full object-cover" />
       </div>
     ),
   },
@@ -1077,7 +1093,9 @@ export default function QuickCreatePage() {
   const dragDepthRef = useRef(0);
   const trackedProcessingOrdersRef = useRef<Record<string, number>>({});
   const materialRequestIdRef = useRef(0);
+  const orderResultsRequestIdRef = useRef(0);
   const hasLoadedMaterialsRef = useRef(false);
+  const hasLoadedOrderResultsRef = useRef(false);
   const prefetchedMaterialKeysRef = useRef<Set<string>>(new Set());
   const prefetchedMaterialPaginationRef = useRef<Map<string, CapturedImagesPagination>>(new Map());
   const prefetchingMaterialKeysRef = useRef<Set<string>>(new Set());
@@ -1089,6 +1107,7 @@ export default function QuickCreatePage() {
   const uploadPlaceholderObjectUrlsRef = useRef<Record<string, string>>({});
   const retryUploadFilesRef = useRef<Record<string, File>>({});
   const materialRecoveryInFlightRef = useRef(false);
+  const preloadedOrderThumbnailUrlsRef = useRef<Set<string>>(new Set());
   const [capturedImages, setCapturedImages] = useState<CapturedImageRecord[]>([]);
   const [materialUploadPlaceholders, setMaterialUploadPlaceholders] = useState<MaterialUploadPlaceholder[]>([]);
   const [materialFolders, setMaterialFolders] = useState<MaterialFolder[]>([]);
@@ -1610,19 +1629,25 @@ export default function QuickCreatePage() {
   }, []);
 
   const loadOrderResults = useCallback(async (options?: { silent?: boolean }) => {
+    const requestId = orderResultsRequestIdRef.current + 1;
+    orderResultsRequestIdRef.current = requestId;
+
     if (!user?.id) {
       setOrderResults([]);
       setHasProcessingOrders(false);
+      hasLoadedOrderResultsRef.current = false;
+      preloadedOrderThumbnailUrlsRef.current.clear();
       trackedProcessingOrdersRef.current = {};
       return;
     }
 
     try {
-      const response = await fetch('/api/task/orders', { credentials: 'include' });
+      const response = await fetch('/api/task/orders?limit=160', { credentials: 'include' });
       const data = await response.json() as { success?: boolean; message?: string; data?: RawOrderRecord[] };
       if (!response.ok || !data.success || !Array.isArray(data.data)) {
         throw new Error(toUserFacingErrorMessage(data.message, '刷新订单记录失败，请重试'));
       }
+      if (requestId !== orderResultsRequestIdRef.current) return;
 
       const now = Date.now();
       const orderByNumber = new Map(data.data.map((item) => [item.orderNumber || item.id, item]));
@@ -1664,6 +1689,7 @@ export default function QuickCreatePage() {
           id: `${item.id}-${index}`,
           orderId: orderNumber,
           imageUrl,
+          thumbnailUrl: Array.isArray(item.thumbnailUrls) ? item.thumbnailUrls[index] || null : null,
           createdAt,
           toolLabel,
           statusLabel,
@@ -1678,6 +1704,7 @@ export default function QuickCreatePage() {
       cards.sort((left, right) => parseMaterialDate(right.createdAt).getTime() - parseMaterialDate(left.createdAt).getTime());
 
       setOrderResults(cards);
+      hasLoadedOrderResultsRef.current = true;
     } catch (error) {
       console.error('[订单库] 加载失败:', error);
       setHasProcessingOrders(false);
@@ -2296,6 +2323,20 @@ export default function QuickCreatePage() {
   const downloadImageByUrl = useCallback(async (imageUrl: string, fileName: string) => {
     const displayImageUrl = getDisplayImageUrl(imageUrl);
     try {
+      const signedResponse = await fetch(`/api/image/download-url?url=${encodeURIComponent(displayImageUrl)}&filename=${encodeURIComponent(fileName)}`, { credentials: 'include' });
+      if (signedResponse.ok) {
+        const signedResult = await signedResponse.json().catch(() => null) as { success?: boolean; data?: { downloadUrl?: string } } | null;
+        if (signedResult?.success && signedResult.data?.downloadUrl) {
+          const link = document.createElement('a');
+          link.href = signedResult.data.downloadUrl;
+          link.download = fileName;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          return;
+        }
+      }
+
       const response = await fetch(displayImageUrl);
       if (!response.ok) {
         throw new Error('图片下载失败');
@@ -2697,6 +2738,44 @@ export default function QuickCreatePage() {
     }
   }, [dispatchTaskHistoryUpdated, syncPoints, user?.id]);
 
+  const startHdUpscale = useCallback(async (imageUrl: string) => {
+    if (!user?.id) return false;
+    try {
+      const response = await fetch('/api/hd-upscale/run', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, imageUrl }),
+      });
+      const data = await response.json().catch(() => ({} as {
+        success?: boolean;
+        message?: string;
+        data?: { orderId?: string; remainingPoints?: number };
+      }));
+      if (!response.ok) {
+        const errorMessage = toUserFacingErrorMessage(data.message || '暂时未能完成处理，请稍后重试', '暂时未能完成处理，请稍后重试');
+        throw new Error(errorMessage);
+      }
+
+      if (typeof data.data?.remainingPoints === 'number') {
+        syncPoints(data.data.remainingPoints);
+      }
+      const orderId = data.data?.orderId?.trim();
+      if (orderId) {
+        trackedProcessingOrdersRef.current = { ...trackedProcessingOrdersRef.current, [orderId]: Date.now() };
+        setHasProcessingOrders(true);
+      }
+      dispatchTaskHistoryUpdated();
+      dispatchTaskHistoryUpdated(500);
+      return true;
+    } catch (error) {
+      console.error('[素材库] 高清放大执行失败:', error);
+      dispatchTaskHistoryUpdated();
+      showToast(toUserFacingErrorFromUnknown(error, '暂时未能完成处理，请稍后重试'), 'error');
+      return false;
+    }
+  }, [dispatchTaskHistoryUpdated, syncPoints, user?.id]);
+
   const startAiGenerate = useCallback((imageUrl: string, prompt: string, options: {
     aspectRatio: SmartEditAspectRatioOption;
     resolution: SmartEditResolution;
@@ -2794,11 +2873,23 @@ export default function QuickCreatePage() {
         showToast(`已提交 ${submittedCount} 张图片到高清+扩图`, 'info');
       }
 
+      if (actionId === 'hd-upscale') {
+        const hasEnoughPoints = await ensureEnoughPoints(getHdUpscalePoints() * selectedImageList.length);
+        if (!hasEnoughPoints) return;
+        let submittedCount = 0;
+        for (const imageUrl of selectedImageList) {
+          if (await startHdUpscale(imageUrl)) {
+            submittedCount += 1;
+          }
+        }
+        showToast(`已提交 ${submittedCount} 张图片到高清放大`, 'info');
+      }
+
       clearSelectionState();
     } finally {
       setProcessingAction(null);
     }
-  }, [clearSelectionState, ensureEnoughColorExtractionPoints, ensureEnoughPoints, ensureUserReady, selectedImageList, startColorExtraction, startOutpaintUpsampling]);
+  }, [clearSelectionState, ensureEnoughColorExtractionPoints, ensureEnoughPoints, ensureUserReady, selectedImageList, startColorExtraction, startHdUpscale, startOutpaintUpsampling]);
 
   const submitAiGenerate = useCallback(async () => {
     const prompt = aiPrompt.trim();
@@ -3133,6 +3224,14 @@ export default function QuickCreatePage() {
   }, [loadOrderResults, user?.id]);
 
   useEffect(() => {
+    if (!user?.id || hasLoadedOrderResultsRef.current) return;
+    const timerId = window.setTimeout(() => {
+      void loadOrderResults({ silent: true });
+    }, 500);
+    return () => window.clearTimeout(timerId);
+  }, [loadOrderResults, user?.id]);
+
+  useEffect(() => {
     clearSelectionState();
     const materialViewKey = `${materialScope}:${materialFilter}`;
     const cachedPagination = prefetchedMaterialPaginationRef.current.get(materialViewKey);
@@ -3156,6 +3255,22 @@ export default function QuickCreatePage() {
     window.addEventListener('taskHistoryUpdated', handleTaskUpdate);
     return () => window.removeEventListener('taskHistoryUpdated', handleTaskUpdate);
   }, [loadOrderResults]);
+
+  useEffect(() => {
+    if (orderResults.length === 0) return;
+
+    const urls = orderResults
+      .map((image) => getDisplayImageUrl(image.thumbnailUrl || image.imageUrl))
+      .filter((url) => url && !preloadedOrderThumbnailUrlsRef.current.has(url))
+      .slice(0, 80);
+
+    for (const url of urls) {
+      preloadedOrderThumbnailUrlsRef.current.add(url);
+      const img = new window.Image();
+      img.decoding = 'async';
+      img.src = url;
+    }
+  }, [orderResults]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -3413,7 +3528,7 @@ export default function QuickCreatePage() {
                   clearSelectionState();
                   closeDropdowns();
                   setLibraryView(view);
-                  if (view === 'orders') {
+                  if (view === 'orders' && !hasLoadedOrderResultsRef.current) {
                     void loadOrderResults();
                   }
                 }}
@@ -3834,6 +3949,7 @@ export default function QuickCreatePage() {
                       >
                         {column.map((image, index) => {
                           const displayImageUrl = getDisplayImageUrl(image.imageUrl);
+                          const displayThumbnailUrl = getDisplayImageUrl(image.thumbnailUrl || image.imageUrl);
                           const selected = selectedImages.has(image.imageUrl);
                           const imageFailed = failedImageUrls.has(image.imageUrl);
                           const cardIndex = columnIndex * 100 + index;
@@ -3888,7 +4004,7 @@ export default function QuickCreatePage() {
                                   >
                                     <SafeImage
                                       key={`${image.imageUrl}-${imageRetryTokens[image.imageUrl] || 0}`}
-                                      src={displayImageUrl}
+                                      src={displayThumbnailUrl}
                                       alt={`素材图片 ${cardIndex + 1}`}
                                       fill
                                       sizes={`(max-width: 768px) 50vw, ${thumbnailSize}px`}

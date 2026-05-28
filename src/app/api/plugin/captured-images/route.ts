@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { capturedImageManager } from '@/storage/database'
+import { getAliyunOSSThumbnailUrlFromUrl } from '@/lib/aliyunOSS'
 
 function getCookieUserId(request: NextRequest): string | null {
   const userCookie = request.cookies.get('user')
@@ -76,9 +77,18 @@ export async function GET(request: NextRequest) {
     capturedImageManager.countUserCapturedImages(userId, filters),
   ])
 
+  const displayableImages = images.filter((image) => isLikelyDisplayableImage(image.imageUrl))
+  const data = await Promise.all(displayableImages.map(async (image) => {
+    const thumbnailUrl = await getAliyunOSSThumbnailUrlFromUrl(image.imageUrl, 512).catch(() => null)
+    return {
+      ...image,
+      ...(thumbnailUrl ? { thumbnailUrl } : {}),
+    }
+  }))
+
   return NextResponse.json({
     success: true,
-    data: images.filter((image) => isLikelyDisplayableImage(image.imageUrl)),
+    data,
     pagination: {
       limit,
       offset,

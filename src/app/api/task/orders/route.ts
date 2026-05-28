@@ -3,6 +3,83 @@ import { getDb } from '@/storage/database/client';
 import { transactions } from '@/storage/database/shared/schema';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { reconcileProcessingTransactions } from '@/lib/reconcileProcessingTransactions';
+import { getAliyunOSSThumbnailUrlFromUrl } from '@/lib/aliyunOSS';
+
+type RequestParamsObject = {
+  thumbnailUrl?: unknown;
+  thumbnailUrls?: unknown;
+  [key: string]: unknown;
+};
+
+function extractImageUrls(value: unknown): string[] {
+  if (!value) return [];
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    try {
+      return extractImageUrls(JSON.parse(trimmed));
+    } catch {
+      return trimmed.startsWith('http://') || trimmed.startsWith('https://') ? [trimmed] : [];
+    }
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(extractImageUrls);
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return [
+      ...extractImageUrls(record.imageUrl),
+      ...extractImageUrls(record.image_url),
+      ...extractImageUrls(record.result_image_url),
+      ...extractImageUrls(record.url),
+    ];
+  }
+  return [];
+}
+
+function clampInteger(value: string | null, fallback: number, min: number, max: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(parsed)));
+}
+
+function shouldUseProxyThumbnail(order: { orderNumber?: string | null; toolPage?: string | null; description?: string | null }) {
+  return Boolean(
+    order.orderNumber?.startsWith('HDO-')
+    || order.orderNumber?.startsWith('HD-')
+    || order.toolPage === '高清+扩图'
+    || order.toolPage === '高清放大'
+    || order.description?.includes('高清+扩图')
+    || order.description?.includes('高清放大')
+  );
+}
+
+function buildProxyThumbnailUrl(imageUrl: string, size: number) {
+  return `/api/image/thumbnail-proxy?url=${encodeURIComponent(imageUrl)}&size=${size}`;
+}
+
+function buildPersistedProxyThumbnailUrl(imageUrl: string, size: number, orderNumber?: string | null) {
+  const orderPart = orderNumber ? `&orderNumber=${encodeURIComponent(orderNumber)}` : '';
+  return `${buildProxyThumbnailUrl(imageUrl, size)}${orderPart}`;
+}
+
+function parseRequestParams(value: unknown) {
+  if (!value) return null;
+  if (typeof value === 'object') return value;
+  if (typeof value !== 'string') return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function extractThumbnailUrls(requestParams: unknown) {
+  if (!requestParams || typeof requestParams !== 'object' || Array.isArray(requestParams)) return [];
+  const params = requestParams as RequestParamsObject;
+  const rawUrls = Array.isArray(params.thumbnailUrls) ? params.thumbnailUrls : [params.thumbnailUrl];
+  return rawUrls.filter((url): url is string => typeof url === 'string' && url.startsWith('http'));
+}
 
 /**
  * GET /api/task/orders
@@ -22,6 +99,7 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const requestedUserId = searchParams.get('userId');
     const toolPage = searchParams.get('toolPage');
+    const limit = clampInteger(searchParams.get('limit'), 120, 20, 200);
     const userCookie = request.cookies.get('user');
     let cookieUserId: string | null = null;
 
@@ -78,7 +156,8 @@ export async function GET(request: NextRequest) {
       .select()
       .from(transactions)
       .where(and(...conditions))
-      .orderBy(desc(transactions.createdAt));
+      .orderBy(desc(transactions.createdAt))
+      .limit(limit);
 
     const visibleOrders = orders.filter((order) => order.toolPage !== '积分充值');
 
@@ -86,9 +165,22 @@ export async function GET(request: NextRequest) {
       logPrefix: '订单查询',
     });
 
+    const data = await Promise.all(reconciledOrders.map(async (order) => {
+      const resultImageUrls = extractImageUrls(order.resultData);
+      const savedThumbnailUrls = extractThumbnailUrls(parseRequestParams(order.requestParams));
+      const useProxy = shouldUseProxyThumbnail(order);
+      const thumbnailUrls = savedThumbnailUrls.length > 0
+        ? savedThumbnailUrls
+        : useProxy
+          ? resultImageUrls.map((imageUrl) => buildPersistedProxyThumbnailUrl(imageUrl, 512, order.orderNumber))
+          : await Promise.all(resultImageUrls.map((imageUrl) => getAliyunOSSThumbnailUrlFromUrl(imageUrl, 512).catch(() => null)));
+      const resolvedThumbnailUrls = thumbnailUrls.map((thumbnailUrl) => thumbnailUrl || '');
+      return resolvedThumbnailUrls.some(Boolean) ? { ...order, thumbnailUrls: resolvedThumbnailUrls } : order;
+    }));
+
     return NextResponse.json({
       success: true,
-      data: reconciledOrders,
+      data,
     });
   } catch (error) {
     console.error('[订单查询] 查询失败:', error);
