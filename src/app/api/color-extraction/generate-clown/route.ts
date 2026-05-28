@@ -5,6 +5,7 @@ import { uploadToCozeStorage } from '@/lib/dualStorage';
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 import { tryCreateAndUploadResultThumbnailFromUrl } from '@/lib/resultThumbnail';
 import { getGenerateClownPoints } from '@/lib/pricing';
+import { generateClownSegmentationBuffer } from '@/lib/clownSegmentation';
 
 type ParsedRecord = Record<string, unknown>;
 type ClownGenerationStatus = 'processing' | 'success' | 'failed' | 'pending';
@@ -102,14 +103,8 @@ function extractImageUrls(value: unknown): string[] {
   return [];
 }
 
-async function persistClownPng(outputUrl: string, orderNumber: string, request: NextRequest) {
-  const image = await downloadSafeRemoteImage(outputUrl, {
-    timeoutMs: 90000,
-    maxBytes: 120 * 1024 * 1024,
-    allowLocalMaterialFile: true,
-    localMaterialOrigin: request.nextUrl.origin,
-  });
-  const clownUrl = await uploadToCozeStorage(image.buffer, `color-extraction/clown/${orderNumber}.png`, 'image/png');
+async function persistClownPngBuffer(clownBuffer: Buffer, orderNumber: string, request: NextRequest) {
+  const clownUrl = await uploadToCozeStorage(clownBuffer, `color-extraction/clown/${orderNumber}.png`, 'image/png');
   const clownThumbnailUrl = await tryCreateAndUploadResultThumbnailFromUrl(
     clownUrl,
     `thumbnails/color-extraction/clown/${orderNumber}.webp`,
@@ -117,6 +112,27 @@ async function persistClownPng(outputUrl: string, orderNumber: string, request: 
     { localMaterialOrigin: request.nextUrl.origin },
   );
   return { clownUrl, clownThumbnailUrl };
+}
+
+async function persistRunningHubClownPng(outputUrl: string, orderNumber: string, request: NextRequest) {
+  const image = await downloadSafeRemoteImage(outputUrl, {
+    timeoutMs: 90000,
+    maxBytes: 120 * 1024 * 1024,
+    allowLocalMaterialFile: true,
+    localMaterialOrigin: request.nextUrl.origin,
+  });
+  return persistClownPngBuffer(image.buffer, orderNumber, request);
+}
+
+async function generateLocalClownPng(extractionImageUrl: string, orderNumber: string, request: NextRequest) {
+  const image = await downloadSafeRemoteImage(extractionImageUrl, {
+    timeoutMs: 90000,
+    maxBytes: 120 * 1024 * 1024,
+    allowLocalMaterialFile: true,
+    localMaterialOrigin: request.nextUrl.origin,
+  });
+  const clownBuffer = await generateClownSegmentationBuffer(image.buffer);
+  return persistClownPngBuffer(clownBuffer, orderNumber, request);
 }
 
 export async function POST(request: NextRequest) {
@@ -160,10 +176,6 @@ export async function POST(request: NextRequest) {
           remainingPoints: transaction.remainingPoints,
         },
       });
-    }
-
-    if (!isRunningHubClownConfigured()) {
-      return NextResponse.json({ success: false, error: 'Clown 分割工作流未配置' }, { status: 400 });
     }
 
     const clownGenerationStatus = getClownGenerationStatus(requestParams);
@@ -224,8 +236,13 @@ export async function POST(request: NextRequest) {
       }),
     });
 
-    const clownResult = await generateClownWithRunningHub(extractionImageUrl);
-    const persisted = await persistClownPng(clownResult.outputUrl, orderNumber, request);
+    const useRunningHubClown = isRunningHubClownConfigured();
+    const clownResult = useRunningHubClown
+      ? await generateClownWithRunningHub(extractionImageUrl)
+      : null;
+    const persisted = clownResult
+      ? await persistRunningHubClownPng(clownResult.outputUrl, orderNumber, request)
+      : await generateLocalClownPng(extractionImageUrl, orderNumber, request);
 
     await transactionManager.updateTransaction(orderNumber, {
       remainingPoints,
@@ -238,7 +255,8 @@ export async function POST(request: NextRequest) {
         clownGenerationStatus: 'success',
         clownGenerationStartedAt: undefined,
         clownGenerationError: undefined,
-        clownTaskId: clownResult.taskId,
+        clownTaskId: clownResult?.taskId || 'local-slic',
+        clownProvider: clownResult ? 'runninghub' : 'local-slic',
         clownPoints,
         clownPointsCharged: true,
         clownGeneratedAt: new Date().toISOString(),
