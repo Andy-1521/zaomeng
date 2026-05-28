@@ -49,7 +49,7 @@
 - 彩绘结果只保存到 OSS，并写入订单 `resultData`；同时生成 OSS WebP 缩略图写入 `requestParams.thumbnailUrl`；不会自动加入图库。
 - 彩绘提取成功后 PSD 状态为 `pending`，用户在右侧订单记录中手动点击生成 PSD。
 - PSD 入口是 `/api/color-extraction/generate-psd`，单独预扣积分，失败只退 PSD 积分，不影响已成功彩绘结果。
-- Clown 彩色选区图入口是 `/api/color-extraction/generate-clown`，只允许彩绘提取成功订单手动触发，固定收 10 积分，失败只退 Clown 积分，不影响原彩绘结果和 PSD。
+- Clown 彩色选区图入口是 `/api/color-extraction/generate-clown`，只允许订单本人或管理员在彩绘提取成功订单上手动触发，固定收 10 积分，失败只退 Clown 积分，不影响原彩绘结果和 PSD。
 - Clown 图基于彩绘提取结果图调用 RunningHub 专用分割工作流，输出 PNG 保存到 OSS，并把 `clownUrl`、`clownThumbnailUrl`、`clownGenerationStatus` 等字段写入订单 `requestParams`；不会自动加入图库。
 - 未配置 RunningHub Clown 工作流时，接口返回“Clown 分割工作流未配置”，不扣积分；Clown 不走本地算法兜底。
 
@@ -87,27 +87,31 @@
 
 ## RunningHub Clown 工作流配置
 
-Clown 彩色选区图需要先在 RunningHub 创建专用语义/实例分割工作流或 AI 应用，再把节点配置写入本地和生产 `.env.local`：
+Clown 彩色选区图当前本地开发环境使用 RunningHub 工作流 `2052146758297374721`（图片分割语义分割 SAM3）。网站后端会通过 OpenAPI 读取 workflow JSON，把图片节点替换为 URL 加载节点，追加 `MaskToImage` 和 `SaveImage` 节点导出多张 mask，再用 Sharp 在后端合成同尺寸纯色 PNG 并上传 OSS。
 
-- `RUNNINGHUB_CLOWN_WEBAPP_ID` 或 `RUNNINGHUB_CLOWN_WORKFLOW_ID`
+- `RUNNINGHUB_CLOWN_WORKFLOW_ID`
 - `RUNNINGHUB_CLOWN_IMAGE_NODE_ID`
 - `RUNNINGHUB_CLOWN_IMAGE_FIELD_NAME`
-- 可选：`RUNNINGHUB_CLOWN_OUTPUT_NODE_ID`
+- `RUNNINGHUB_CLOWN_MODE=sam3-mask-compose`
+- `RUNNINGHUB_CLOWN_MASK_SOURCE_NODE_ID`
+- `RUNNINGHUB_CLOWN_MASK_SOURCE_OUTPUT_INDEX`
+- `RUNNINGHUB_CLOWN_MASK_OUTPUT_NODE_ID`
+- 可选兼容直接 PNG 输出：`RUNNINGHUB_CLOWN_WEBAPP_ID`
+- 可选兼容直接 PNG 输出：`RUNNINGHUB_CLOWN_OUTPUT_NODE_ID`
 - 可选：`RUNNINGHUB_CLOWN_PROMPT_NODE_ID`
 - 可选：`RUNNINGHUB_CLOWN_PROMPT_FIELD_NAME`
 
-工作流输入是彩绘提取结果图 URL，输出应是一张同画幅的纯色分区 PNG。优先使用 RunningHub 工作流 ID 调 `/task/openapi/create`；如果发布成 AI 应用，则使用 WebApp ID 调 `/task/openapi/ai-app/run`。第一版只允许 RunningHub 直接输出 PNG；如果后续工作流改为输出多张 mask，需要再补 RunningHub 工作流内的 mask 合成节点。未配置这些变量时，接口会明确提示未配置且不扣积分。
+工作流输入是彩绘提取结果图 URL，RunningHub 输出多张 mask PNG，后端合成为一张同画幅纯色分区 PNG。未配置这些变量时，接口会明确提示未配置且不扣积分。
 
-不要把公开语义分割应用 `2006235231480713217` 作为生产 Clown 方案：实测对贴纸、线稿、小元素密集图会大面积错分。SAM3/SegmentAnything 公开应用多数只能输出黑白/透明蒙版，Kontext/Qwen 编辑类会改动原图内容，也不适合作为正式 Clown。当前生产和开发 `.env.local` 应保持 Clown 工作流变量为空，直到 RunningHub 工作台里搭好专用多实例 mask 转纯色 PNG 工作流并验收通过。
+不要把公开语义分割应用 `2006235231480713217` 作为生产 Clown 方案：实测对贴纸、线稿、小元素密集图会大面积错分。Kontext/Qwen 编辑类会改动原图内容，也不适合作为正式 Clown。生产环境只在本地验收通过并得到用户明确上线指令后同步配置。
 
-专用工作流搭建目标：
+当前方案目标：
 
-- 输入节点：1 张彩绘提取结果图 URL。
-- 分割节点：优先用 SAM/SAM3/Segment Anything 的自动多实例分割，而不是只按一个 prompt 抠单主体。
-- 后处理节点：过滤极小噪点 mask，必要时按面积阈值合并碎片，但不要把相邻贴纸、文字、装饰合成一整块。
-- 上色节点：每个保留 mask 填不同高对比纯色，背景也必须是单独颜色；输出不能是黑白 mask、透明 PNG、原图叠加图或编辑重绘图。
-- 输出节点：只输出 1 张与输入同尺寸、同画幅、同构图的 PNG。
-- 验收样例：至少用贴纸小元素图、人物/商品图、文字装饰图各 1 张测试；PS 魔棒点选单个贴纸/文字/装饰时应能选中对应区域，而不是大面积灰底或整张背景。
+- 输入：1 张彩绘提取结果图 URL。
+- 分割：SAM3 自动多实例分割，导出多个 mask。
+- 后处理：后端最多读取 64 张 mask，按面积排序，过滤空 mask，并给每个 mask 填高对比纯色。
+- 输出：1 张与输入同尺寸、同画幅、同构图的 PNG，背景也是单独颜色。
+- 验收样例：至少用贴纸小元素图、人物/商品图、文字装饰图各 1 张测试；PS 魔棒点选单个贴纸/文字/装饰时应能选中对应区域。
 
 ## 生产发布要点
 

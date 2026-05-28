@@ -202,14 +202,14 @@ Clown 当前要点：
 - 实现文件：`src/app/api/color-extraction/generate-clown/route.ts`
 - 前端入口：`src/components/TaskHistory.tsx`
 - 价格来源：`getGenerateClownPoints()`，当前固定 10 积分
-- 只允许 `彩绘提取` / `彩绘提取2` 成功订单调用
+- 只允许 `彩绘提取` / `彩绘提取2` 成功订单调用，且必须是订单本人或管理员
 - 已生成过 `clownUrl` 的订单重复点击直接返回已有图，不重复扣积分
-- RunningHub 配置变量：`RUNNINGHUB_CLOWN_WEBAPP_ID` 或 `RUNNINGHUB_CLOWN_WORKFLOW_ID`、`RUNNINGHUB_CLOWN_IMAGE_NODE_ID`、`RUNNINGHUB_CLOWN_IMAGE_FIELD_NAME`，可选输出节点为 `RUNNINGHUB_CLOWN_OUTPUT_NODE_ID`，可选 prompt 节点变量为 `RUNNINGHUB_CLOWN_PROMPT_NODE_ID`、`RUNNINGHUB_CLOWN_PROMPT_FIELD_NAME`
-- 当前状态：公开 RunningHub 应用尚未找到合格方案。`2006235231480713217`（语义分割 Semantic Segmentation）实测会把贴纸/线稿/小元素密集图大面积错分；SAM3/SegmentAnything 类公开应用多输出黑白/透明蒙版；Kontext/Qwen 编辑类会改画面内容，不适合作为严肃 Clown 选区图。Clown 生产配置已清空，未配置时不扣积分。
-- 后续正确路线：在 RunningHub 登录态工作台搭专用工作流，流程为多实例 mask 生成，再在 RunningHub 工作流内把各 mask 填充为不同纯色，最后输出同尺寸 PNG。RunningHub OpenAPI 的 apiKey 只能运行已发布应用/工作流，不能创建或保存工作流。
-- 工作流验收必须覆盖贴纸小元素图、人物/商品图、文字装饰图。合格输出应是 1 张同尺寸 PNG，PS 魔棒可点选单个贴纸、文字、装饰或背景区域；不接受黑白 mask、透明抠图、原图叠加图、灰底大块图、模型重绘图。
+- 当前可用路线：RunningHub 工作流 `2052146758297374721`（图片分割语义分割 SAM3）通过 OpenAPI 读取 workflow JSON，后端把图片节点替换为 `LoadImageFromUrl`，追加 `MaskToImage` + `SaveImage` 导出多张 mask，再由后端用 Sharp 合成为同尺寸纯色 Clown PNG。
+- RunningHub 配置变量：`RUNNINGHUB_CLOWN_WORKFLOW_ID`、`RUNNINGHUB_CLOWN_IMAGE_NODE_ID`、`RUNNINGHUB_CLOWN_IMAGE_FIELD_NAME`、`RUNNINGHUB_CLOWN_MODE=sam3-mask-compose`、`RUNNINGHUB_CLOWN_MASK_SOURCE_NODE_ID`、`RUNNINGHUB_CLOWN_MASK_SOURCE_OUTPUT_INDEX`、`RUNNINGHUB_CLOWN_MASK_OUTPUT_NODE_ID`；兼容直接 PNG 输出的 `RUNNINGHUB_CLOWN_WEBAPP_ID` / `RUNNINGHUB_CLOWN_OUTPUT_NODE_ID`。
+- 本地开发环境已按 SAM3 mask 合成方案配置；生产环境只有在用户确认上线时才同步配置和代码。
+- 工作流验收覆盖贴纸小元素图、人物/商品图、文字装饰图。合格输出是 1 张同尺寸 PNG，PS 魔棒可点选单个贴纸、文字、装饰或背景区域；不接受透明抠图、原图叠加图、灰底大块图、模型重绘图。
 - 未配置 Clown 工作流时接口返回“Clown 分割工作流未配置”，不扣积分
-- RunningHub 输出 PNG 会原样以 `image/png` 上传 OSS，避免 JPEG 压缩破坏 PS 选区所需的纯色块；订单列表另存一张 WebP 缩略图到 `clownThumbnailUrl`
+- 生成结果以 `image/png` 上传 OSS，避免 JPEG 压缩破坏 PS 选区所需的纯色块；订单列表另存一张 WebP 缩略图到 `clownThumbnailUrl`
 - Clown 失败、超时、无输出或 OSS 上传失败只退款 Clown 积分，不影响原彩绘结果和 PSD 状态
 
 ## 智能改图流程

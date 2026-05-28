@@ -5,6 +5,7 @@ const API_KEY = process.env.RUNNINGHUB_API_KEY || '';
 const WEBAPP_ID = '2002961339758833665'; // 彩绘提取1
 const UPSAMPLING_APP_ID = '1990958565772963841'; // 高清放大
 const CLOWN_PROMPT = 'Generate a precise clown segmentation PNG from the input image. Keep the same canvas, composition, and aspect ratio. Use only flat high-contrast solid color regions. No gradients, shadows, texture, outlines, text, watermark, or background changes.';
+const CLOWN_MASK_PROMPT = 'all visible objects, text, stickers, decorations, foreground items, small details, and background regions';
 
 export interface NodeInfo {
   nodeId: string;
@@ -63,6 +64,10 @@ export type RunningHubClownConfig = {
   outputNodeId?: string;
   promptNodeId?: string;
   promptFieldName?: string;
+  mode?: string;
+  maskSourceNodeId?: string;
+  maskSourceOutputIndex?: number;
+  maskOutputNodeId?: string;
 };
 
 function getErrorMessage(error: unknown) {
@@ -97,6 +102,11 @@ export function getRunningHubClownConfig(): RunningHubClownConfig | null {
   const outputNodeId = getEnvValue('RUNNINGHUB_CLOWN_OUTPUT_NODE_ID');
   const promptNodeId = getEnvValue('RUNNINGHUB_CLOWN_PROMPT_NODE_ID');
   const promptFieldName = getEnvValue('RUNNINGHUB_CLOWN_PROMPT_FIELD_NAME');
+  const mode = getEnvValue('RUNNINGHUB_CLOWN_MODE');
+  const maskSourceNodeId = getEnvValue('RUNNINGHUB_CLOWN_MASK_SOURCE_NODE_ID');
+  const maskOutputNodeId = getEnvValue('RUNNINGHUB_CLOWN_MASK_OUTPUT_NODE_ID');
+  const rawMaskSourceOutputIndex = getEnvValue('RUNNINGHUB_CLOWN_MASK_SOURCE_OUTPUT_INDEX');
+  const maskSourceOutputIndex = rawMaskSourceOutputIndex ? Number(rawMaskSourceOutputIndex) : undefined;
 
   if ((!webappId && !workflowId) || !imageNodeId || !imageFieldName) {
     return null;
@@ -110,6 +120,10 @@ export function getRunningHubClownConfig(): RunningHubClownConfig | null {
     outputNodeId: outputNodeId || undefined,
     promptNodeId: promptNodeId || undefined,
     promptFieldName: promptFieldName || undefined,
+    mode: mode || undefined,
+    maskSourceNodeId: maskSourceNodeId || undefined,
+    maskSourceOutputIndex: Number.isFinite(maskSourceOutputIndex) ? maskSourceOutputIndex : undefined,
+    maskOutputNodeId: maskOutputNodeId || undefined,
   };
 }
 
@@ -140,6 +154,17 @@ export function selectClownPngOutput(outputs: TaskOutput[], preferredNodeId?: st
   }) || outputs.find((output) => output.fileUrl);
 
   return candidate?.fileUrl ? normalizeRunningHubOutputUrl(candidate.fileUrl) : '';
+}
+
+export function selectClownMaskOutputs(outputs: TaskOutput[], preferredNodeId?: string) {
+  return outputs
+    .filter((output) => (!preferredNodeId || output.nodeId === preferredNodeId) && output.fileUrl)
+    .filter((output) => {
+      const type = (output.fileType || '').toLowerCase();
+      const url = output.fileUrl || '';
+      return type.includes('png') || /\.png(?:$|\?)/i.test(url);
+    })
+    .map((output) => normalizeRunningHubOutputUrl(output.fileUrl));
 }
 
 /**
@@ -322,8 +347,154 @@ export async function createClownTask(imageUrl: string): Promise<string> {
   }
 }
 
-export async function generateClownWithRunningHub(imageUrl: string): Promise<{ taskId: string; outputUrl: string }> {
+type RunningHubPromptNode = {
+  class_type?: string;
+  inputs?: Record<string, unknown>;
+  _meta?: Record<string, unknown>;
+};
+
+async function getRunningHubWorkflowPrompt(workflowId: string): Promise<Record<string, RunningHubPromptNode>> {
+  const response = await axios.post<{ code: number | null; data?: { prompt?: string }; msg: string }>(
+    `${BASE_URL}/api/openapi/getJsonApiFormat`,
+    {
+      workflowId,
+      apiKey: API_KEY,
+    },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'Host': 'www.runninghub.cn',
+      },
+      timeout: 60000,
+    }
+  );
+
+  if (response.data.msg !== 'success' || !response.data.data?.prompt) {
+    throw new Error(`读取Clown工作流失败: ${response.data.msg}`);
+  }
+
+  const parsed = JSON.parse(response.data.data.prompt) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Clown工作流格式无效');
+  }
+
+  return parsed as Record<string, RunningHubPromptNode>;
+}
+
+function setPromptNodeInput(prompt: Record<string, RunningHubPromptNode>, nodeId: string, fieldName: string, value: unknown) {
+  const node = prompt[nodeId];
+  if (!node) {
+    throw new Error(`Clown工作流缺少节点 ${nodeId}`);
+  }
+
+  node.inputs = {
+    ...(node.inputs || {}),
+    [fieldName]: value,
+  };
+}
+
+function disableExistingSaveNodes(prompt: Record<string, RunningHubPromptNode>) {
+  for (const [nodeId, node] of Object.entries(prompt)) {
+    if (node.class_type === 'SaveImage') {
+      delete prompt[nodeId];
+    }
+  }
+}
+
+export async function createClownMaskWorkflowTask(imageUrl: string): Promise<string> {
   const config = getRunningHubClownConfig();
+  if (!API_KEY || !config?.workflowId || config.mode !== 'sam3-mask-compose') {
+    throw new Error('Clown 分割工作流未配置');
+  }
+
+  if (!config.maskSourceNodeId || typeof config.maskSourceOutputIndex !== 'number') {
+    throw new Error('Clown mask输出节点未配置');
+  }
+
+  const maskOutputNodeId = config.maskOutputNodeId || '901';
+  const maskToImageNodeId = maskOutputNodeId === '900' ? '902' : '900';
+  const prompt = await getRunningHubWorkflowPrompt(config.workflowId);
+
+  const imageNode = prompt[config.imageNodeId];
+  if (!imageNode) {
+    throw new Error(`Clown工作流缺少图片节点 ${config.imageNodeId}`);
+  }
+  imageNode.class_type = 'LoadImageFromUrl';
+  imageNode.inputs = {
+    image: imageUrl,
+    keep_alpha_channel: false,
+  };
+
+  if (config.promptNodeId && config.promptFieldName) {
+    setPromptNodeInput(prompt, config.promptNodeId, config.promptFieldName, CLOWN_MASK_PROMPT);
+  }
+
+  disableExistingSaveNodes(prompt);
+  prompt[maskToImageNodeId] = {
+    class_type: 'MaskToImage',
+    inputs: {
+      mask: [config.maskSourceNodeId, config.maskSourceOutputIndex],
+    },
+    _meta: {
+      title: 'Convert object masks to images',
+    },
+  };
+  prompt[maskOutputNodeId] = {
+    class_type: 'SaveImage',
+    inputs: {
+      filename_prefix: 'clown_masks',
+      images: [maskToImageNodeId, 0],
+    },
+    _meta: {
+      title: 'Save object masks',
+    },
+  };
+
+  try {
+    const response = await axios.post<CreateTaskResponse>(
+      `${BASE_URL}/task/openapi/create`,
+      {
+        workflowId: config.workflowId,
+        apiKey: API_KEY,
+        workflow: JSON.stringify(prompt),
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Host': 'www.runninghub.cn',
+        },
+        timeout: 600000,
+      }
+    );
+
+    if (response.data.msg === 'success') {
+      const taskId = response.data.data.taskId;
+      console.log(`[RunningHub Clown] mask任务创建成功: ${taskId}`);
+      return taskId;
+    }
+
+    throw new Error(`创建Clown mask任务失败: ${response.data.msg}`);
+  } catch (error: unknown) {
+    console.error('[RunningHub Clown] 创建mask任务异常:', getAxiosErrorDetails(error));
+    throw error;
+  }
+}
+
+export async function generateClownWithRunningHub(imageUrl: string): Promise<{ taskId: string; outputUrl?: string; maskUrls?: string[] }> {
+  const config = getRunningHubClownConfig();
+  if (config?.mode === 'sam3-mask-compose') {
+    const taskId = await createClownMaskWorkflowTask(imageUrl);
+    await waitForTaskComplete(taskId, 9);
+    const outputs = await getTaskOutputs(taskId);
+    const maskUrls = selectClownMaskOutputs(outputs, config.maskOutputNodeId || '901');
+
+    if (!maskUrls.length) {
+      throw new Error('Clown 工作流未返回可用mask输出');
+    }
+
+    return { taskId, maskUrls };
+  }
+
   const taskId = await createClownTask(imageUrl);
   await waitForTaskComplete(taskId, 9);
   const outputs = await getTaskOutputs(taskId);
