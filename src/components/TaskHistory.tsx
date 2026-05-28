@@ -48,6 +48,11 @@ export interface TaskRecord {
   clownGenerationStatus?: ClownGenerationStatus;
   clownGenerationStartedAt?: number;
   clownPoints?: number;
+  clownGptUrl?: string;
+  clownGptThumbnailUrl?: string;
+  clownGptGenerationStatus?: ClownGenerationStatus;
+  clownGptGenerationStartedAt?: number;
+  clownGptPoints?: number;
   aspectRatio?: string; // 图像比例
   imageSize?: string; // 分辨率
   generateCount?: number; // 【新增】预期生成数量（用于判断部分成功）
@@ -89,6 +94,11 @@ type RequestParamsObject = {
   clownGenerationStatus?: ClownGenerationStatus;
   clownGenerationStartedAt?: string | number;
   clownPoints?: number;
+  clownGptUrl?: string;
+  clownGptThumbnailUrl?: string;
+  clownGptGenerationStatus?: ClownGenerationStatus;
+  clownGptGenerationStartedAt?: string | number;
+  clownGptPoints?: number;
   [key: string]: unknown;
 };
 
@@ -634,6 +644,16 @@ export const forceRefreshCache = (userId?: string) => {
           ? new Date(rawClownGenerationStartedAt).getTime()
           : undefined;
       const clownPoints = params?.clownPoints;
+      const clownGptUrl = typeof params?.clownGptUrl === 'string' ? params.clownGptUrl : '';
+      const clownGptThumbnailUrl = typeof params?.clownGptThumbnailUrl === 'string' ? params.clownGptThumbnailUrl : '';
+      const clownGptGenerationStatus = params?.clownGptGenerationStatus;
+      const rawClownGptGenerationStartedAt = params?.clownGptGenerationStartedAt;
+      const clownGptGenerationStartedAt = typeof rawClownGptGenerationStartedAt === 'number'
+        ? rawClownGptGenerationStartedAt
+        : typeof rawClownGptGenerationStartedAt === 'string'
+          ? new Date(rawClownGptGenerationStartedAt).getTime()
+          : undefined;
+      const clownGptPoints = params?.clownGptPoints;
 
       const isSmartEditOrder = item.toolPage === '智能改图'
         || item.toolPage === '局部改图'
@@ -776,6 +796,11 @@ export const forceRefreshCache = (userId?: string) => {
         clownGenerationStatus,
         clownGenerationStartedAt: Number.isFinite(clownGenerationStartedAt) ? clownGenerationStartedAt : undefined,
         clownPoints,
+        clownGptUrl,
+        clownGptThumbnailUrl,
+        clownGptGenerationStatus,
+        clownGptGenerationStartedAt: Number.isFinite(clownGptGenerationStartedAt) ? clownGptGenerationStartedAt : undefined,
+        clownGptPoints,
         aspectRatio,
         imageSize,
         generateCount, // 【新增】预期生成数量
@@ -845,6 +870,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   const [deletingOrder, setDeletingOrder] = useState<string | null>(null);
   const [generatingPsdOrders, setGeneratingPsdOrders] = useState<Set<string>>(new Set());
   const [generatingClownOrders, setGeneratingClownOrders] = useState<Set<string>>(new Set());
+  const [generatingGptClownOrders, setGeneratingGptClownOrders] = useState<Set<string>>(new Set());
   const [retryingOrder, setRetryingOrder] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState<FilterType>('all');
   const [statusFilter, setStatusFilter] = useState<TaskCenterFilter>('all');
@@ -1291,18 +1317,21 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     }
   };
 
-  const handleGenerateClown = async (task: TaskRecord) => {
+  const handleGenerateClown = async (task: TaskRecord, variant: 'runninghub' | 'gpt' = 'runninghub') => {
     if (!task.orderId) {
       showToast('订单号缺失，无法生成Clown图', 'error');
       return;
     }
 
-    const clownProcessingIsFresh = task.clownGenerationStatus === 'processing'
-      && task.clownGenerationStartedAt
-      && Date.now() - task.clownGenerationStartedAt <= CLOWN_PROCESSING_STALE_MS;
+    const isGptVariant = variant === 'gpt';
+    const generationStatus = isGptVariant ? task.clownGptGenerationStatus : task.clownGenerationStatus;
+    const generationStartedAt = isGptVariant ? task.clownGptGenerationStartedAt : task.clownGenerationStartedAt;
+    const clownProcessingIsFresh = generationStatus === 'processing'
+      && generationStartedAt
+      && Date.now() - generationStartedAt <= CLOWN_PROCESSING_STALE_MS;
 
     if (clownProcessingIsFresh) {
-      showToast('Clown生成中，请稍后查看', 'info');
+      showToast(isGptVariant ? 'GPT Clown生成中，请稍后查看' : 'Clown生成中，请稍后查看', 'info');
       return;
     }
 
@@ -1312,13 +1341,14 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       return;
     }
 
-    setGeneratingClownOrders((current) => new Set(current).add(task.orderId!));
+    const setGeneratingOrders = isGptVariant ? setGeneratingGptClownOrders : setGeneratingClownOrders;
+    setGeneratingOrders((current) => new Set(current).add(task.orderId!));
     try {
       const response = await fetch('/api/color-extraction/generate-clown', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ orderNumber: task.orderId }),
+        body: JSON.stringify({ orderNumber: task.orderId, variant }),
       });
 
       const result = await response.json() as {
@@ -1331,7 +1361,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
         };
       };
       if (!result.success) {
-        throw new Error(toUserFacingErrorMessage(result.error, 'Clown生成失败，请重试'));
+        throw new Error(toUserFacingErrorMessage(result.error, isGptVariant ? 'GPT Clown生成失败，请重试' : 'Clown生成失败，请重试'));
       }
 
       if (typeof result.data?.remainingPoints === 'number') {
@@ -1340,13 +1370,13 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
         }));
       }
 
-      showToast(result.message || 'Clown图生成成功', 'success');
+      showToast(result.message || (isGptVariant ? 'GPT Clown图生成成功' : 'Clown图生成成功'), 'success');
       await loadTasks();
     } catch (error) {
       console.error('[TaskHistory] 生成Clown失败:', error);
-      showToast(toUserFacingErrorFromUnknown(error, 'Clown生成失败，请重试'), 'error');
+      showToast(toUserFacingErrorFromUnknown(error, isGptVariant ? 'GPT Clown生成失败，请重试' : 'Clown生成失败，请重试'), 'error');
     } finally {
-      setGeneratingClownOrders((current) => {
+      setGeneratingOrders((current) => {
         const next = new Set(current);
         next.delete(task.orderId!);
         return next;
@@ -1475,19 +1505,20 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     showToast('已在新标签页打开下载链接', 'info');
   };
 
-  const openClownUrl = (task: TaskRecord) => {
-    if (!task.clownUrl) {
+  const openClownUrl = (task: TaskRecord, variant: 'runninghub' | 'gpt' = 'runninghub') => {
+    const clownUrl = variant === 'gpt' ? task.clownGptUrl : task.clownUrl;
+    if (!clownUrl) {
       showToast('Clown图尚未生成完成', 'error');
       return;
     }
 
-    if (typeof task.clownUrl !== 'string' || !task.clownUrl.startsWith('http')) {
+    if (typeof clownUrl !== 'string' || !clownUrl.startsWith('http')) {
       showToast('Clown链接无效', 'error');
       return;
     }
 
-    window.open(task.clownUrl, '_blank');
-    showToast('已在新标签页打开Clown图', 'info');
+    window.open(clownUrl, '_blank');
+    showToast(variant === 'gpt' ? '已在新标签页打开GPT Clown图' : '已在新标签页打开Clown图', 'info');
   };
 
   const copyOrderId = (task: TaskRecord, e: React.MouseEvent) => {
@@ -1828,6 +1859,13 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                           ? generatingClownOrders.has(task.orderId) || Boolean(clownProcessingIsFresh)
                           : Boolean(clownProcessingIsFresh);
                         const clownPoints = task.clownPoints || getGenerateClownPoints();
+                        const gptClownProcessingIsFresh = task.clownGptGenerationStatus === 'processing'
+                          && task.clownGptGenerationStartedAt
+                          && Date.now() - task.clownGptGenerationStartedAt <= CLOWN_PROCESSING_STALE_MS;
+                        const isGptClownGenerating = task.orderId
+                          ? generatingGptClownOrders.has(task.orderId) || Boolean(gptClownProcessingIsFresh)
+                          : Boolean(gptClownProcessingIsFresh);
+                        const gptClownPoints = task.clownGptPoints || getGenerateClownPoints();
 
                         const canDelete = task.status !== '处理中';
 
@@ -1940,6 +1978,28 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                                               <span>生成Clown</span>
                                               <span className="text-fuchsia-100/45">·</span>
                                               <PointsIconLabel points={clownPoints} iconClassName="h-3 w-3" />
+                                            </span>
+                                          )}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (task.clownGptUrl) {
+                                              openClownUrl(task, 'gpt');
+                                            } else {
+                                              void handleGenerateClown(task, 'gpt');
+                                            }
+                                          }}
+                                          disabled={isGptClownGenerating}
+                                          className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${task.clownGptUrl ? 'border-emerald-300/20 bg-emerald-500/12 text-emerald-200 hover:bg-emerald-500/20' : 'border-amber-300/22 bg-amber-500/14 text-amber-100 hover:bg-amber-500/22'}`}
+                                          title={isGptClownGenerating ? 'GPT Clown生成中' : task.clownGptUrl ? '下载GPT Clown彩色选区图' : task.clownGptGenerationStatus === 'processing' ? '上次生成中断，点击重新生成GPT Clown图' : `点击生成GPT Clown图（${formatPointsLabel(gptClownPoints)}）`}
+                                        >
+                                          {isGptClownGenerating ? 'GPT生成中' : task.clownGptUrl ? '下载GPT图' : task.clownGptGenerationStatus === 'processing' ? '重新生成GPT' : (
+                                            <span className="inline-flex items-center gap-1.5">
+                                              <span>生成GPT图</span>
+                                              <span className="text-amber-100/45">·</span>
+                                              <PointsIconLabel points={gptClownPoints} iconClassName="h-3 w-3" />
                                             </span>
                                           )}
                                         </button>

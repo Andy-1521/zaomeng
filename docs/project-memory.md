@@ -203,8 +203,9 @@ Clown 当前要点：
 - 前端入口：`src/components/TaskHistory.tsx`
 - 价格来源：`getGenerateClownPoints()`，当前固定 10 积分
 - 只允许 `彩绘提取` / `彩绘提取2` 成功订单调用，且必须是订单本人或管理员
-- 已生成过 `clownUrl` 的订单重复点击直接返回已有图，不重复扣积分
+- 已生成过 `clownUrl` 的订单重复点击直接返回已有 RunningHub 图，不重复扣积分；GPT 实验图单独存 `clownGptUrl`，也不重复扣积分
 - 当前可用路线：RunningHub 工作流 `2052146758297374721`（图片分割语义分割 SAM3）通过 OpenAPI 读取 workflow JSON，后端把图片节点替换为 `LoadImageFromUrl`，追加 `MaskToImage` + `SaveImage` 导出多张 mask，再由后端用 Sharp 合成为同尺寸纯色 Clown PNG。
+- GPT 实验路线：任务中心额外提供“生成GPT图”，通过 Psydo `gpt-image-2` 图像编辑根据提示词生成 Clown 彩色选区图，再由后端按固定高对比色板量化、平滑小色块并输出 PNG。该路线更少 SAM 碎片噪点，但可能存在轻微重绘和边界不完全像素对齐，需本地验收后再决定是否替代默认路线。
 - RunningHub 配置变量：`RUNNINGHUB_CLOWN_WORKFLOW_ID`、`RUNNINGHUB_CLOWN_IMAGE_NODE_ID`、`RUNNINGHUB_CLOWN_IMAGE_FIELD_NAME`、`RUNNINGHUB_CLOWN_MODE=sam3-mask-compose`、`RUNNINGHUB_CLOWN_MASK_SOURCE_NODE_ID`、`RUNNINGHUB_CLOWN_MASK_SOURCE_OUTPUT_INDEX`、`RUNNINGHUB_CLOWN_MASK_OUTPUT_NODE_ID`；兼容直接 PNG 输出的 `RUNNINGHUB_CLOWN_WEBAPP_ID` / `RUNNINGHUB_CLOWN_OUTPUT_NODE_ID`。
 - 本地开发环境已按 SAM3 mask 合成方案配置；生产环境只有在用户确认上线时才同步配置和代码。
 - 工作流验收覆盖贴纸小元素图、人物/商品图、文字装饰图。合格输出是 1 张同尺寸 PNG，PS 魔棒可点选单个贴纸、文字、装饰或背景区域；不接受透明抠图、原图叠加图、灰底大块图、模型重绘图。
