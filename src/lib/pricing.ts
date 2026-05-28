@@ -2,12 +2,13 @@ import type { SmartEditResolution } from '@/lib/smartEditSize';
 
 export type { SmartEditResolution } from '@/lib/smartEditSize';
 
-export type PaidActionId = 'color-extraction' | 'generate-psd' | 'ai-generate' | 'outpaint-upsampling' | 'hd-upscale' | 'smart-edit';
+export type PaidActionId = 'color-extraction' | 'generate-psd' | 'generate-clown' | 'ai-generate' | 'outpaint-upsampling' | 'hd-upscale' | 'smart-edit';
 
 type StandardResolution = SmartEditResolution;
 
 const COLOR_EXTRACTION_POINTS = 30;
 const GENERATE_PSD_POINTS = 20;
+const GENERATE_CLOWN_POINTS = 10;
 const AI_GENERATE_POINTS: Record<StandardResolution, number> = {
   '1k': 20,
   '2k': 20,
@@ -27,6 +28,10 @@ export function getColorExtractionPoints() {
 
 export function getGeneratePsdPoints() {
   return GENERATE_PSD_POINTS;
+}
+
+export function getGenerateClownPoints() {
+  return GENERATE_CLOWN_POINTS;
 }
 
 export function getAiGeneratePoints(resolution: SmartEditResolution) {

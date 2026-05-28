@@ -4,6 +4,7 @@ const BASE_URL = 'https://www.runninghub.cn';
 const API_KEY = process.env.RUNNINGHUB_API_KEY || '';
 const WEBAPP_ID = '2002961339758833665'; // 彩绘提取1
 const UPSAMPLING_APP_ID = '1990958565772963841'; // 高清放大
+const CLOWN_PROMPT = 'Generate a precise clown segmentation PNG from the input image. Keep the same canvas, composition, and aspect ratio. Use only flat high-contrast solid color regions. No gradients, shadows, texture, outlines, text, watermark, or background changes.';
 
 export interface NodeInfo {
   nodeId: string;
@@ -53,6 +54,14 @@ export interface TaskOutputsResponse {
   msg: string;
 }
 
+export type RunningHubClownConfig = {
+  webappId: string;
+  imageNodeId: string;
+  imageFieldName: string;
+  promptNodeId?: string;
+  promptFieldName?: string;
+};
+
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'RunningHub请求失败';
 }
@@ -71,6 +80,56 @@ function getAxiosErrorDetails(error: unknown) {
     code: undefined,
     response: undefined,
   };
+}
+
+function getEnvValue(key: string) {
+  return process.env[key]?.trim() || '';
+}
+
+export function getRunningHubClownConfig(): RunningHubClownConfig | null {
+  const webappId = getEnvValue('RUNNINGHUB_CLOWN_WEBAPP_ID');
+  const imageNodeId = getEnvValue('RUNNINGHUB_CLOWN_IMAGE_NODE_ID');
+  const imageFieldName = getEnvValue('RUNNINGHUB_CLOWN_IMAGE_FIELD_NAME');
+  const promptNodeId = getEnvValue('RUNNINGHUB_CLOWN_PROMPT_NODE_ID');
+  const promptFieldName = getEnvValue('RUNNINGHUB_CLOWN_PROMPT_FIELD_NAME');
+
+  if (!webappId || !imageNodeId || !imageFieldName) {
+    return null;
+  }
+
+  return {
+    webappId,
+    imageNodeId,
+    imageFieldName,
+    promptNodeId: promptNodeId || undefined,
+    promptFieldName: promptFieldName || undefined,
+  };
+}
+
+export function isRunningHubClownConfigured() {
+  return !!API_KEY && !!getRunningHubClownConfig();
+}
+
+function normalizeRunningHubOutputUrl(fileUrl: string) {
+  if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+    return fileUrl;
+  }
+
+  if (fileUrl.startsWith('/')) {
+    return `${BASE_URL}${fileUrl}`;
+  }
+
+  return fileUrl;
+}
+
+export function selectClownPngOutput(outputs: TaskOutput[]) {
+  const candidate = outputs.find((output) => {
+    const type = (output.fileType || '').toLowerCase();
+    const url = output.fileUrl || '';
+    return url && (type.includes('png') || /\.png(?:$|\?)/i.test(url));
+  }) || outputs.find((output) => output.fileUrl);
+
+  return candidate?.fileUrl ? normalizeRunningHubOutputUrl(candidate.fileUrl) : '';
 }
 
 /**
@@ -191,6 +250,73 @@ export async function createTask(imageUrl: string): Promise<string> {
     console.error('[RunningHub] 创建任务异常:', error);
     throw error;
   }
+}
+
+export async function createClownTask(imageUrl: string): Promise<string> {
+  const config = getRunningHubClownConfig();
+  if (!API_KEY || !config) {
+    throw new Error('Clown 分割工作流未配置');
+  }
+
+  const nodeInfoList: NodeInfo[] = [
+    {
+      nodeId: config.imageNodeId,
+      fieldName: config.imageFieldName,
+      fieldValue: imageUrl,
+      description: '彩绘提取结果图',
+    },
+  ];
+
+  if (config.promptNodeId && config.promptFieldName) {
+    nodeInfoList.push({
+      nodeId: config.promptNodeId,
+      fieldName: config.promptFieldName,
+      fieldValue: CLOWN_PROMPT,
+      description: 'Clown纯色分割提示词',
+    });
+  }
+
+  try {
+    const response = await axios.post<CreateTaskResponse>(
+      `${BASE_URL}/task/openapi/ai-app/run`,
+      {
+        webappId: config.webappId,
+        apiKey: API_KEY,
+        nodeInfoList,
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Host': 'www.runninghub.cn',
+        },
+        timeout: 600000,
+      }
+    );
+
+    if (response.data.msg === 'success') {
+      const taskId = response.data.data.taskId;
+      console.log(`[RunningHub Clown] 任务创建成功: ${taskId}`);
+      return taskId;
+    }
+
+    throw new Error(`创建Clown任务失败: ${response.data.msg}`);
+  } catch (error: unknown) {
+    console.error('[RunningHub Clown] 创建任务异常:', getAxiosErrorDetails(error));
+    throw error;
+  }
+}
+
+export async function generateClownWithRunningHub(imageUrl: string): Promise<{ taskId: string; outputUrl: string }> {
+  const taskId = await createClownTask(imageUrl);
+  await waitForTaskComplete(taskId, 9);
+  const outputs = await getTaskOutputs(taskId);
+  const outputUrl = selectClownPngOutput(outputs);
+
+  if (!outputUrl) {
+    throw new Error('Clown 工作流未返回可用PNG输出');
+  }
+
+  return { taskId, outputUrl };
 }
 
 /**

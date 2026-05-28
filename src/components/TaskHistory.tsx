@@ -9,17 +9,19 @@ import { clearCache } from '@/lib/globalRecordManager';
 import { ImageThumbnail } from '@/components/ui/ImageThumbnail';
 import { parseColorExtractionModeMeta, type ColorExtractionMode } from '@/lib/colorExtractionMode';
 import { toUserFacingErrorFromUnknown, toUserFacingErrorMessage } from '@/lib/userFacingError';
-import { formatPointsLabel, getGeneratePsdPoints } from '@/lib/pricing';
+import { formatPointsLabel, getGenerateClownPoints, getGeneratePsdPoints } from '@/lib/pricing';
 
 export type TabType = 'color-extraction' | 'watermark' | 'hd-upscale' | 'custom' | 'ai-generate' | 'smart-edit';
 export type FilterType = 'all' | TabType;
 type TaskCenterFilter = 'all' | 'processing' | 'success' | 'failed';
 export type TaskStatus = '处理中' | '成功' | '失败' | '超时' | '部分成功';
 type PsdGenerationStatus = 'pending' | 'processing' | 'success' | 'failed';
+type ClownGenerationStatus = 'pending' | 'processing' | 'success' | 'failed';
 type TaskHistoryUpdatedEventDetail = {
   highlight?: boolean;
 };
 const PSD_PROCESSING_STALE_MS = 12 * 60 * 1000;
+const CLOWN_PROCESSING_STALE_MS = 12 * 60 * 1000;
 const TASK_HISTORY_PAGE_SIZE = 80;
 
 const TASK_FILTER_VALUES: FilterType[] = ['all', 'color-extraction', 'ai-generate', 'smart-edit', 'watermark', 'hd-upscale'];
@@ -41,6 +43,11 @@ export interface TaskRecord {
   psdGenerationStatus?: PsdGenerationStatus;
   psdGenerationStartedAt?: number;
   psdPoints?: number;
+  clownUrl?: string;
+  clownThumbnailUrl?: string;
+  clownGenerationStatus?: ClownGenerationStatus;
+  clownGenerationStartedAt?: number;
+  clownPoints?: number;
   aspectRatio?: string; // 图像比例
   imageSize?: string; // 分辨率
   generateCount?: number; // 【新增】预期生成数量（用于判断部分成功）
@@ -77,6 +84,11 @@ type RequestParamsObject = {
   psdGenerationStatus?: PsdGenerationStatus;
   psdGenerationStartedAt?: string | number;
   psdPoints?: number;
+  clownUrl?: string;
+  clownThumbnailUrl?: string;
+  clownGenerationStatus?: ClownGenerationStatus;
+  clownGenerationStartedAt?: string | number;
+  clownPoints?: number;
   [key: string]: unknown;
 };
 
@@ -612,6 +624,16 @@ export const forceRefreshCache = (userId?: string) => {
           ? new Date(rawPsdGenerationStartedAt).getTime()
           : undefined;
       const psdPoints = params?.psdPoints;
+      const clownUrl = typeof params?.clownUrl === 'string' ? params.clownUrl : '';
+      const clownThumbnailUrl = typeof params?.clownThumbnailUrl === 'string' ? params.clownThumbnailUrl : '';
+      const clownGenerationStatus = params?.clownGenerationStatus;
+      const rawClownGenerationStartedAt = params?.clownGenerationStartedAt;
+      const clownGenerationStartedAt = typeof rawClownGenerationStartedAt === 'number'
+        ? rawClownGenerationStartedAt
+        : typeof rawClownGenerationStartedAt === 'string'
+          ? new Date(rawClownGenerationStartedAt).getTime()
+          : undefined;
+      const clownPoints = params?.clownPoints;
 
       const isSmartEditOrder = item.toolPage === '智能改图'
         || item.toolPage === '局部改图'
@@ -749,6 +771,11 @@ export const forceRefreshCache = (userId?: string) => {
         psdGenerationStatus,
         psdGenerationStartedAt: Number.isFinite(psdGenerationStartedAt) ? psdGenerationStartedAt : undefined,
         psdPoints,
+        clownUrl,
+        clownThumbnailUrl,
+        clownGenerationStatus,
+        clownGenerationStartedAt: Number.isFinite(clownGenerationStartedAt) ? clownGenerationStartedAt : undefined,
+        clownPoints,
         aspectRatio,
         imageSize,
         generateCount, // 【新增】预期生成数量
@@ -817,6 +844,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   const [previewImage, setPreviewImage] = useState<PreviewImageState | null>(null);
   const [deletingOrder, setDeletingOrder] = useState<string | null>(null);
   const [generatingPsdOrders, setGeneratingPsdOrders] = useState<Set<string>>(new Set());
+  const [generatingClownOrders, setGeneratingClownOrders] = useState<Set<string>>(new Set());
   const [retryingOrder, setRetryingOrder] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState<FilterType>('all');
   const [statusFilter, setStatusFilter] = useState<TaskCenterFilter>('all');
@@ -1263,6 +1291,69 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     }
   };
 
+  const handleGenerateClown = async (task: TaskRecord) => {
+    if (!task.orderId) {
+      showToast('订单号缺失，无法生成Clown图', 'error');
+      return;
+    }
+
+    const clownProcessingIsFresh = task.clownGenerationStatus === 'processing'
+      && task.clownGenerationStartedAt
+      && Date.now() - task.clownGenerationStartedAt <= CLOWN_PROCESSING_STALE_MS;
+
+    if (clownProcessingIsFresh) {
+      showToast('Clown生成中，请稍后查看', 'info');
+      return;
+    }
+
+    const resultImage = getFirstImage(task.imageUrl);
+    if (!isImageValue(resultImage)) {
+      showToast('该订单暂无可用于Clown生成的彩绘结果图', 'error');
+      return;
+    }
+
+    setGeneratingClownOrders((current) => new Set(current).add(task.orderId!));
+    try {
+      const response = await fetch('/api/color-extraction/generate-clown', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ orderNumber: task.orderId }),
+      });
+
+      const result = await response.json() as {
+        success?: boolean;
+        message?: string;
+        error?: string;
+        data?: {
+          clownUrl?: string;
+          remainingPoints?: number;
+        };
+      };
+      if (!result.success) {
+        throw new Error(toUserFacingErrorMessage(result.error, 'Clown生成失败，请重试'));
+      }
+
+      if (typeof result.data?.remainingPoints === 'number') {
+        window.dispatchEvent(new CustomEvent('userPointsChanged', {
+          detail: { points: result.data.remainingPoints },
+        }));
+      }
+
+      showToast(result.message || 'Clown图生成成功', 'success');
+      await loadTasks();
+    } catch (error) {
+      console.error('[TaskHistory] 生成Clown失败:', error);
+      showToast(toUserFacingErrorFromUnknown(error, 'Clown生成失败，请重试'), 'error');
+    } finally {
+      setGeneratingClownOrders((current) => {
+        const next = new Set(current);
+        next.delete(task.orderId!);
+        return next;
+      });
+    }
+  };
+
   const handleRetryFailedTask = async (task: TaskRecord, e: React.MouseEvent) => {
     e.stopPropagation();
 
@@ -1382,6 +1473,21 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
     window.open(task.psdUrl, '_blank');
     showToast('已在新标签页打开下载链接', 'info');
+  };
+
+  const openClownUrl = (task: TaskRecord) => {
+    if (!task.clownUrl) {
+      showToast('Clown图尚未生成完成', 'error');
+      return;
+    }
+
+    if (typeof task.clownUrl !== 'string' || !task.clownUrl.startsWith('http')) {
+      showToast('Clown链接无效', 'error');
+      return;
+    }
+
+    window.open(task.clownUrl, '_blank');
+    showToast('已在新标签页打开Clown图', 'info');
   };
 
   const copyOrderId = (task: TaskRecord, e: React.MouseEvent) => {
@@ -1715,6 +1821,13 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                           ? generatingPsdOrders.has(task.orderId) || Boolean(psdProcessingIsFresh)
                           : Boolean(psdProcessingIsFresh);
                         const psdPoints = task.psdPoints || getGeneratePsdPoints();
+                        const clownProcessingIsFresh = task.clownGenerationStatus === 'processing'
+                          && task.clownGenerationStartedAt
+                          && Date.now() - task.clownGenerationStartedAt <= CLOWN_PROCESSING_STALE_MS;
+                        const isClownGenerating = task.orderId
+                          ? generatingClownOrders.has(task.orderId) || Boolean(clownProcessingIsFresh)
+                          : Boolean(clownProcessingIsFresh);
+                        const clownPoints = task.clownPoints || getGenerateClownPoints();
 
                         const canDelete = task.status !== '处理中';
 
@@ -1785,28 +1898,52 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                                       下载
                                     </button>
                                     {task.tab === 'color-extraction' && (
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          if (task.psdUrl) {
-                                            openPsdUrl(task);
-                                          } else {
-                                            void handleGeneratePsd(task);
-                                          }
-                                        }}
-                                        disabled={isPsdGenerating}
-                                        className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${task.psdUrl ? 'border-[#31a8ff]/20 bg-[#001e36] text-[#31a8ff] hover:bg-[#001e36]/80' : 'border-violet-300/25 bg-violet-500/15 text-violet-200 hover:bg-violet-500/22'}`}
-                                        title={isPsdGenerating ? 'PSD生成中' : task.psdUrl ? '下载PSD文件' : task.psdGenerationStatus === 'processing' ? '上次生成中断，点击重新生成PSD' : `点击生成PSD（${formatPointsLabel(psdPoints)}）`}
-                                      >
-                                        {isPsdGenerating ? '生成中...' : task.psdUrl ? '下载PSD' : task.psdGenerationStatus === 'processing' ? '重新生成PSD' : (
-                                          <span className="inline-flex items-center gap-1.5">
-                                            <span>生成PSD</span>
-                                            <span className="text-violet-100/45">·</span>
-                                            <PointsIconLabel points={psdPoints} iconClassName="h-3 w-3" />
-                                          </span>
-                                        )}
-                                      </button>
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (task.psdUrl) {
+                                              openPsdUrl(task);
+                                            } else {
+                                              void handleGeneratePsd(task);
+                                            }
+                                          }}
+                                          disabled={isPsdGenerating}
+                                          className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${task.psdUrl ? 'border-[#31a8ff]/20 bg-[#001e36] text-[#31a8ff] hover:bg-[#001e36]/80' : 'border-violet-300/25 bg-violet-500/15 text-violet-200 hover:bg-violet-500/22'}`}
+                                          title={isPsdGenerating ? 'PSD生成中' : task.psdUrl ? '下载PSD文件' : task.psdGenerationStatus === 'processing' ? '上次生成中断，点击重新生成PSD' : `点击生成PSD（${formatPointsLabel(psdPoints)}）`}
+                                        >
+                                          {isPsdGenerating ? '生成中...' : task.psdUrl ? '下载PSD' : task.psdGenerationStatus === 'processing' ? '重新生成PSD' : (
+                                            <span className="inline-flex items-center gap-1.5">
+                                              <span>生成PSD</span>
+                                              <span className="text-violet-100/45">·</span>
+                                              <PointsIconLabel points={psdPoints} iconClassName="h-3 w-3" />
+                                            </span>
+                                          )}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (task.clownUrl) {
+                                              openClownUrl(task);
+                                            } else {
+                                              void handleGenerateClown(task);
+                                            }
+                                          }}
+                                          disabled={isClownGenerating}
+                                          className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${task.clownUrl ? 'border-cyan-300/20 bg-cyan-500/12 text-cyan-200 hover:bg-cyan-500/20' : 'border-fuchsia-300/22 bg-fuchsia-500/14 text-fuchsia-100 hover:bg-fuchsia-500/22'}`}
+                                          title={isClownGenerating ? 'Clown生成中' : task.clownUrl ? '下载Clown彩色选区图' : task.clownGenerationStatus === 'processing' ? '上次生成中断，点击重新生成Clown图' : `点击生成Clown图（${formatPointsLabel(clownPoints)}）`}
+                                        >
+                                          {isClownGenerating ? 'Clown生成中' : task.clownUrl ? '下载Clown' : task.clownGenerationStatus === 'processing' ? '重新生成Clown' : (
+                                            <span className="inline-flex items-center gap-1.5">
+                                              <span>生成Clown</span>
+                                              <span className="text-fuchsia-100/45">·</span>
+                                              <PointsIconLabel points={clownPoints} iconClassName="h-3 w-3" />
+                                            </span>
+                                          )}
+                                        </button>
+                                      </>
                                     )}
                                   </div>
                                 )}

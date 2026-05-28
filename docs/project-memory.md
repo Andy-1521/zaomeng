@@ -161,6 +161,7 @@
 - 高清+扩图：提交后立即创建后台订单并预扣，后台只做扩图和 4K 输出，失败退款
 - 高清放大：提交后立即创建后台订单并预扣 5 积分，后台调用 RunningHub 高清放大，失败退款
 - 彩绘 PSD：只能用户手动触发，单独预扣，失败单独退款
+- 彩绘 Clown：只能用户手动触发，单独预扣 10 积分，失败单独退款；未配置 RunningHub Clown 工作流时不扣积分
 
 前端涉及余额同步的关键组件：
 
@@ -184,6 +185,7 @@
 - 新订单不会自动后台生成 PSD
 - 新订单的 PSD 状态初始为 `pending`
 - 彩绘结果成功后，用户可在任务中心手动点击生成 PSD
+- 彩绘结果成功后，用户也可在任务中心手动点击生成 Clown 彩色选区图；Clown 图基于彩绘结果图，不基于原商品图
 
 PSD 当前要点：
 
@@ -193,6 +195,19 @@ PSD 当前要点：
 - PSD 生成单独收积分
 - PSD 失败只退 PSD 的积分，不影响已成功的彩绘结果
 - PSD 当前只基于彩绘结果图做 RunningHub 图层分解和 PSD 合成，不再读取镂空模式的额外图层
+
+Clown 当前要点：
+
+- 正式入口：`POST /api/color-extraction/generate-clown`
+- 实现文件：`src/app/api/color-extraction/generate-clown/route.ts`
+- 前端入口：`src/components/TaskHistory.tsx`
+- 价格来源：`getGenerateClownPoints()`，当前固定 10 积分
+- 只允许 `彩绘提取` / `彩绘提取2` 成功订单调用
+- 已生成过 `clownUrl` 的订单重复点击直接返回已有图，不重复扣积分
+- RunningHub 配置变量：`RUNNINGHUB_CLOWN_WEBAPP_ID`、`RUNNINGHUB_CLOWN_IMAGE_NODE_ID`、`RUNNINGHUB_CLOWN_IMAGE_FIELD_NAME`，可选 prompt 节点变量为 `RUNNINGHUB_CLOWN_PROMPT_NODE_ID`、`RUNNINGHUB_CLOWN_PROMPT_FIELD_NAME`
+- 未配置 Clown 工作流时接口返回“Clown 分割工作流未配置”，不扣积分
+- RunningHub 输出 PNG 会原样以 `image/png` 上传 OSS，避免 JPEG 压缩破坏 PS 选区所需的纯色块；订单列表另存一张 WebP 缩略图到 `clownThumbnailUrl`
+- Clown 失败、超时、无输出或 OSS 上传失败只退款 Clown 积分，不影响原彩绘结果和 PSD 状态
 
 ## 智能改图流程
 
@@ -279,6 +294,7 @@ PSD 当前要点：
 - `POST /api/smart-edit/identify`
 - `POST /api/color-extraction/run`
 - `POST /api/color-extraction/generate-psd`
+- `POST /api/color-extraction/generate-clown`
 - `POST /api/outpaint-upsampling/run`
 - `POST /api/upload/oss-policy`
 - `POST /api/upload/complete-material`
