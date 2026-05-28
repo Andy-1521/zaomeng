@@ -72,8 +72,18 @@ export default function HomePage() {
       {/* 动态背景 */}
       <div className="absolute inset-0">
         <div className="absolute inset-0 bg-gradient-to-b from-black via-neutral-900 to-black" />
-        <div className="absolute top-1/4 left-1/4 w-[800px] h-[800px] bg-purple-600/12 rounded-full blur-[120px] animate-pulse" />
-        <div className="absolute bottom-1/4 right-1/4 w-[700px] h-[700px] bg-blue-600/12 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: '1.5s' }} />
+        <div className="absolute top-1/4 left-1/4 h-[800px] w-[800px] animate-pulse rounded-full bg-purple-600/12 blur-[120px]" />
+        <div className="absolute bottom-1/4 right-1/4 h-[700px] w-[700px] animate-pulse rounded-full bg-blue-600/12 blur-[120px]" style={{ animationDelay: '1.5s' }} />
+        <div className="absolute left-1/2 top-1/2 h-[900px] w-[900px] -translate-x-1/2 -translate-y-1/2 animate-pulse rounded-full bg-indigo-600/8 blur-[120px]" style={{ animationDelay: '2.5s' }} />
+        <div className="absolute right-20 top-20 h-96 w-96 rounded-full bg-gradient-to-br from-purple-500/10 via-pink-500/10 to-blue-500/10 blur-[100px]" />
+        <div className="absolute bottom-20 left-20 h-96 w-96 rounded-full bg-gradient-to-br from-blue-500/10 via-cyan-500/10 to-purple-500/10 blur-[100px]" />
+        <div className="absolute inset-0 opacity-20" style={{
+          backgroundImage: `
+            linear-gradient(rgba(147, 51, 234, 0.2) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(147, 51, 234, 0.2) 1px, transparent 1px)
+          `,
+          backgroundSize: '40px 40px',
+        }} />
       </div>
 
       {/* 主内容 */}
