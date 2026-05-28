@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 function clampSize(value: string | null) {
   const parsed = Number(value || 160);
   if (!Number.isFinite(parsed)) return 160;
-  return Math.max(48, Math.min(512, Math.round(parsed)));
+  return Math.max(48, Math.min(2048, Math.round(parsed)));
 }
 
 function hasLoggedInUser(request: NextRequest) {

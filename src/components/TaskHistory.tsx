@@ -102,6 +102,11 @@ type TaskRecordApiResponse = {
   data?: TaskRecordApiItem[];
 };
 
+type PreviewImageState = {
+  originalUrl: string;
+  displayUrl: string;
+};
+
 const taskRecordCacheByUser = new Map<string, TaskRecord[]>();
 const TASK_CACHE_STORAGE_PREFIX = 'zaomeng:task-history-cache:';
 const DEBUG_TASK_HISTORY = false;
@@ -809,7 +814,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   const [isCollapsed, setIsCollapsed] = useState(true);
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [showCopySuccessForOrder, setShowCopySuccessForOrder] = useState<string | null>(null);
-  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<PreviewImageState | null>(null);
   const [deletingOrder, setDeletingOrder] = useState<string | null>(null);
   const [generatingPsdOrders, setGeneratingPsdOrders] = useState<Set<string>>(new Set());
   const [retryingOrder, setRetryingOrder] = useState<string | null>(null);
@@ -829,6 +834,24 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   const visibleTasks = historySourceTasks.filter((task) =>
     (filterTab === 'all' || task.tab === filterTab) && matchesTaskCenterFilter(task, statusFilter)
   );
+  const previewResultImage = useCallback((originalUrl: string | null, instantPreviewUrl?: string | null) => {
+    if (!originalUrl) return;
+    const fallbackUrl = instantPreviewUrl || originalUrl;
+    setPreviewImage({ originalUrl, displayUrl: fallbackUrl });
+
+    fetch(`/api/image/thumbnail-url?url=${encodeURIComponent(originalUrl)}&size=1600`, { credentials: 'include' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((result: { success?: boolean; data?: { thumbnailUrl?: string; passthrough?: boolean } } | null) => {
+        const previewUrl = result?.success && result.data?.thumbnailUrl && !result.data.passthrough
+          ? result.data.thumbnailUrl
+          : '';
+        if (!previewUrl) return;
+        setPreviewImage((current) => current?.originalUrl === originalUrl ? { ...current, displayUrl: previewUrl } : current);
+      })
+      .catch(() => {
+        // 超大 OSS 原图可能超过在线处理限制，保留已加载的小图预览。
+      });
+  }, []);
   const groupedVisibleTasks = visibleTasks.reduce<Array<{ label: string; tasks: TaskRecord[] }>>((groups, task) => {
     const label = getTaskDateGroup(task.time);
     const existing = groups.find((group) => group.label === label);
@@ -1706,7 +1729,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                           >
                             <div className="flex items-center gap-3">
                               <div className="w-[88px] shrink-0 overflow-hidden rounded-xl border border-white/8 bg-black/30 self-start transition-colors group-hover:border-white/16">
-                                <button type="button" onClick={(e) => { e.stopPropagation(); if (hasResult) setPreviewImageUrl(originalResultImage); }} className="block w-full text-left">
+                                <button type="button" onClick={(e) => { e.stopPropagation(); if (hasResult) previewResultImage(originalResultImage, resultImage); }} className="block w-full text-left">
                                   {hasResult ? (
                                     <ImageThumbnail src={resultImage || undefined} fallbackSrc={originalResultImage || undefined} alt="结果图" width={88} height={88} thumbnailSize="small" useProcessedThumbnail={!task.thumbnailUrl} className="h-[88px] w-[88px] object-cover transition duration-200 group-hover:scale-[1.02] group-hover:opacity-90" />
                                   ) : (
@@ -1851,24 +1874,24 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       )}
 
       {/* 大图预览弹窗 - 使用 Portal 渲染到 body */}
-      {previewImageUrl && createPortal(
+      {previewImage && createPortal(
         <div
           className="fixed left-0 right-0 top-0 bottom-0 z-[9999] flex items-center justify-center"
           style={{ backgroundColor: "rgba(0,0,0,0.9)" }}
-          onClick={() => setPreviewImageUrl(null)}
+          onClick={() => setPreviewImage(null)}
         >
           <button
             onClick={(e) => {
               e.stopPropagation();
-              setPreviewImageUrl(null);
+              setPreviewImage(null);
             }}
             className="absolute top-6 right-6 w-10 h-10 bg-white/10 hover:bg-white/20 backdrop-blur-xl rounded-full flex items-center justify-center text-white text-2xl transition-colors z-[10000]"
           >
             ×
           </button>
-          <div className="relative flex h-[90vh] w-[90vw] items-center justify-center p-2" onClick={() => setPreviewImageUrl(null)}>
+          <div className="relative flex h-[90vh] w-[90vw] items-center justify-center p-2" onClick={() => setPreviewImage(null)}>
             <img
-              src={previewImageUrl}
+              src={previewImage.displayUrl}
               alt="预览大图"
               className="pointer-events-none block max-h-full max-w-full rounded-xl object-contain"
             />

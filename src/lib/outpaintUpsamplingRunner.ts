@@ -47,7 +47,7 @@ type RouteOptions = {
 
 const FINAL_LONG_EDGE_TARGET = 4096;
 const IMAGE_DOWNLOAD_MAX_BYTES = 30 * 1024 * 1024;
-const OUTPAINT_IMAGE_EDIT_TIMEOUT_MS = 120000;
+const OUTPAINT_IMAGE_EDIT_TIMEOUT_MS = 260000;
 const EDIT_CANVAS_SPECS: EditCanvasSpec[] = [
   { width: 1024, height: 1024, size: '1024x1024', aspectRatio: 1 },
   { width: 1024, height: 1536, size: '1024x1536', aspectRatio: 1024 / 1536 },

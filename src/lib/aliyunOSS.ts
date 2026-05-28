@@ -267,7 +267,7 @@ export async function getAliyunOSSThumbnailUrlFromUrl(
   const key = getAliyunOSSKeyFromUrl(imageUrl);
   if (!key) return null;
 
-  const safeSize = Math.max(48, Math.min(768, Math.round(size)));
+  const safeSize = Math.max(48, Math.min(2048, Math.round(size)));
   return getAliyunOSSProcessedUrl(
     key,
     `image/resize,m_lfit,w_${safeSize},h_${safeSize}/quality,q_78/format,webp`,

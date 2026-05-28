@@ -72,6 +72,10 @@ type MaterialFilter = 'all' | 'today' | 'yesterday' | 'earlier';
 type MaterialScope = 'all' | 'favorite' | 'uncategorized' | `folder:${string}`;
 type GalleryActionId = 'color-extraction' | 'ai-generate' | 'outpaint-upsampling' | 'hd-upscale';
 type LibraryView = 'gallery' | 'orders';
+type PreviewImageState = {
+  originalUrl: string;
+  displayUrl: string;
+};
 
 type MaterialFolder = {
   id: string;
@@ -1131,7 +1135,7 @@ export default function QuickCreatePage() {
   const [processingAction, setProcessingAction] = useState<GalleryActionId | null>(null);
   const [actionBarPosition, setActionBarPosition] = useState<{ top: number; left: number } | null>(null);
   const [showAiPromptPanel, setShowAiPromptPanel] = useState(false);
-  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<PreviewImageState | null>(null);
   const [deletingOrderNumber, setDeletingOrderNumber] = useState<string | null>(null);
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiAspectRatio, setAiAspectRatio] = useState<SmartEditAspectRatioOption>('auto');
@@ -2567,8 +2571,23 @@ export default function QuickCreatePage() {
     });
   };
 
-  const previewMaterialImage = useCallback((imageUrl: string) => {
-    setPreviewImageUrl(getDisplayImageUrl(imageUrl));
+  const previewMaterialImage = useCallback((imageUrl: string, instantPreviewUrl?: string | null) => {
+    const originalUrl = getDisplayImageUrl(imageUrl);
+    const fallbackUrl = getDisplayImageUrl(instantPreviewUrl || imageUrl);
+    setPreviewImage({ originalUrl, displayUrl: fallbackUrl });
+
+    fetch(`/api/image/thumbnail-url?url=${encodeURIComponent(originalUrl)}&size=1600`, { credentials: 'include' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((result: { success?: boolean; data?: { thumbnailUrl?: string; passthrough?: boolean } } | null) => {
+        const previewUrl = result?.success && result.data?.thumbnailUrl && !result.data.passthrough
+          ? result.data.thumbnailUrl
+          : '';
+        if (!previewUrl) return;
+        setPreviewImage((current) => current?.originalUrl === originalUrl ? { ...current, displayUrl: previewUrl } : current);
+      })
+      .catch(() => {
+        // 超大 OSS 原图可能超过在线处理限制，保留已加载的小图预览。
+      });
   }, []);
 
   const handlePluginCapture = useCallback(async (payload: PluginCapturePayload | null) => {
@@ -4110,7 +4129,7 @@ export default function QuickCreatePage() {
                                     type="button"
                                     onClick={(event) => {
                                       event.stopPropagation();
-                                      previewMaterialImage(image.imageUrl);
+                                      previewMaterialImage(image.imageUrl, image.thumbnailUrl);
                                     }}
                                     className={`inline-flex ${cardControlSizeClass} items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/75 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-white/18 hover:text-white`}
                                     title="查看大图"
@@ -4376,25 +4395,25 @@ export default function QuickCreatePage() {
         )}
       </div>
 
-      {previewImageUrl && createPortal(
+      {previewImage && createPortal(
         <div
           className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/92 px-6 py-6"
-          onClick={() => setPreviewImageUrl(null)}
+          onClick={() => setPreviewImage(null)}
         >
           <button
             type="button"
             onClick={(event) => {
               event.stopPropagation();
-              setPreviewImageUrl(null);
+              setPreviewImage(null);
             }}
             className="absolute right-6 top-6 flex h-11 w-11 items-center justify-center rounded-full border border-white/12 bg-white/10 text-2xl leading-none text-white backdrop-blur-xl transition-colors hover:bg-white/20"
             title="关闭预览"
           >
             ×
           </button>
-          <div className="relative flex h-[90vh] w-[92vw] max-w-[92vw] items-center justify-center" onClick={() => setPreviewImageUrl(null)}>
+          <div className="relative flex h-[90vh] w-[92vw] max-w-[92vw] items-center justify-center" onClick={() => setPreviewImage(null)}>
             <SafeImage
-              src={previewImageUrl}
+              src={previewImage.displayUrl}
               alt="素材大图预览"
               fill
               sizes="92vw"
