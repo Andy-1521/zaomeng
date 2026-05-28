@@ -55,7 +55,8 @@ export interface TaskOutputsResponse {
 }
 
 export type RunningHubClownConfig = {
-  webappId: string;
+  webappId?: string;
+  workflowId?: string;
   imageNodeId: string;
   imageFieldName: string;
   promptNodeId?: string;
@@ -88,17 +89,19 @@ function getEnvValue(key: string) {
 
 export function getRunningHubClownConfig(): RunningHubClownConfig | null {
   const webappId = getEnvValue('RUNNINGHUB_CLOWN_WEBAPP_ID');
+  const workflowId = getEnvValue('RUNNINGHUB_CLOWN_WORKFLOW_ID');
   const imageNodeId = getEnvValue('RUNNINGHUB_CLOWN_IMAGE_NODE_ID');
   const imageFieldName = getEnvValue('RUNNINGHUB_CLOWN_IMAGE_FIELD_NAME');
   const promptNodeId = getEnvValue('RUNNINGHUB_CLOWN_PROMPT_NODE_ID');
   const promptFieldName = getEnvValue('RUNNINGHUB_CLOWN_PROMPT_FIELD_NAME');
 
-  if (!webappId || !imageNodeId || !imageFieldName) {
+  if ((!webappId && !workflowId) || !imageNodeId || !imageFieldName) {
     return null;
   }
 
   return {
-    webappId,
+    webappId: webappId || undefined,
+    workflowId: workflowId || undefined,
     imageNodeId,
     imageFieldName,
     promptNodeId: promptNodeId || undefined,
@@ -278,12 +281,18 @@ export async function createClownTask(imageUrl: string): Promise<string> {
 
   try {
     const response = await axios.post<CreateTaskResponse>(
-      `${BASE_URL}/task/openapi/ai-app/run`,
-      {
-        webappId: config.webappId,
-        apiKey: API_KEY,
-        nodeInfoList,
-      },
+      config.workflowId ? `${BASE_URL}/task/openapi/create` : `${BASE_URL}/task/openapi/ai-app/run`,
+      config.workflowId
+        ? {
+            workflowId: config.workflowId,
+            apiKey: API_KEY,
+            nodeInfoList,
+          }
+        : {
+            webappId: config.webappId,
+            apiKey: API_KEY,
+            nodeInfoList,
+          },
       {
         headers: {
           'Content-Type': 'application/json',

@@ -87,15 +87,15 @@
 
 ## RunningHub Clown 工作流配置
 
-Clown 彩色选区图需要先在 RunningHub 创建专用语义/实例分割应用，再把节点配置写入本地和生产 `.env.local`：
+Clown 彩色选区图需要先在 RunningHub 创建专用语义/实例分割工作流或 AI 应用，再把节点配置写入本地和生产 `.env.local`：
 
-- `RUNNINGHUB_CLOWN_WEBAPP_ID`
+- `RUNNINGHUB_CLOWN_WEBAPP_ID` 或 `RUNNINGHUB_CLOWN_WORKFLOW_ID`
 - `RUNNINGHUB_CLOWN_IMAGE_NODE_ID`
 - `RUNNINGHUB_CLOWN_IMAGE_FIELD_NAME`
 - 可选：`RUNNINGHUB_CLOWN_PROMPT_NODE_ID`
 - 可选：`RUNNINGHUB_CLOWN_PROMPT_FIELD_NAME`
 
-工作流输入是彩绘提取结果图 URL，输出应是一张同画幅的纯色分区 PNG。第一版只允许 RunningHub 直接输出 PNG；如果后续工作流改为输出多张 mask，需要再补后端 mask 合成逻辑。未配置这些变量时，接口会明确提示未配置且不扣积分。
+工作流输入是彩绘提取结果图 URL，输出应是一张同画幅的纯色分区 PNG。优先使用 RunningHub 工作流 ID 调 `/task/openapi/create`；如果发布成 AI 应用，则使用 WebApp ID 调 `/task/openapi/ai-app/run`。第一版只允许 RunningHub 直接输出 PNG；如果后续工作流改为输出多张 mask，需要再补 RunningHub 工作流内的 mask 合成节点。未配置这些变量时，接口会明确提示未配置且不扣积分。
 
 ## 生产发布要点
 
