@@ -50,8 +50,9 @@
 - 彩绘提取成功后 PSD 状态为 `pending`，用户在右侧订单记录中手动点击生成 PSD。
 - PSD 入口是 `/api/color-extraction/generate-psd`，单独预扣积分，失败只退 PSD 积分，不影响已成功彩绘结果。
 - Clown 彩色选区图入口是 `/api/color-extraction/generate-clown`，只允许订单本人或管理员在彩绘提取成功订单上手动触发，固定收 10 积分，失败只退 Clown 积分，不影响原彩绘结果和 PSD。
-- 默认 Clown 图基于彩绘提取结果图调用 RunningHub 专用分割工作流，输出 PNG 保存到 OSS，并把 `clownUrl`、`clownThumbnailUrl`、`clownGenerationStatus` 等字段写入订单 `requestParams`；不会自动加入图库。
-- GPT Clown 实验图使用同一接口传 `variant: "gpt"`，通过 Psydo `gpt-image-2` 图像编辑生成彩色选区图，再由后端做固定色板量化和小噪点平滑；结果写入 `clownGptUrl`、`clownGptThumbnailUrl`、`clownGptGenerationStatus`，用于本地对比验收。
+- 默认 Clown 图基于彩绘提取结果图调用 RunningHub 专用分割工作流，后端对 mask 做二值化、闭运算、连通块去噪、重复 mask 去重和区域数量限制，输出 PNG 保存到 OSS，并把 `clownUrl`、`clownThumbnailUrl`、`clownGenerationStatus` 等字段写入订单 `requestParams`；不会自动加入图库。
+- 如果 RunningHub/SAM 返回空 mask，后端会自动改用彩绘结果图低分辨率平滑量化兜底，生成坐标对齐的纯色分区 PNG，并记录 `clownWorkflowMode=source-quantize-fallback`。
+- GPT Clown 实验分支使用同一接口传 `variant: "gpt"`，但因实测会重绘导致对不齐，用户界面不展示该入口，不作为默认方案。
 - 未配置 RunningHub Clown 工作流时，接口返回“Clown 分割工作流未配置”，不扣积分；Clown 不走本地算法兜底。
 
 ## 其他功能流程

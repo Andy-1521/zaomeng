@@ -19,6 +19,11 @@ const CLOWN_POINTS = getGenerateClownPoints();
 const CLOWN_PROCESSING_STALE_MS = 12 * 60 * 1000;
 const MASK_DOWNLOAD_LIMIT = 64;
 const MASK_PIXEL_THRESHOLD = 16;
+const MASK_MAX_REGIONS = 32;
+const MASK_MIN_COMPONENT_AREA_RATIO = 0.00003;
+const MASK_MIN_AREA_RATIO = 0.00008;
+const MASK_DUPLICATE_OVERLAP_RATIO = 0.9;
+const MASK_DUPLICATE_AREA_RATIO = 0.55;
 const BACKGROUND_RGB: [number, number, number] = [12, 16, 24];
 const GPT_CLOWN_TIMEOUT_MS = 300000;
 const GPT_CLOWN_PROMPT = [
@@ -56,6 +61,12 @@ const CLOWN_PALETTE: Array<[number, number, number]> = [
   [170, 120, 255],
   [255, 155, 85],
 ];
+
+type CleanedMaskFrame = {
+  pixels: Uint8Array;
+  area: number;
+  index: number;
+};
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && /timeout|超时|ETIMEDOUT|AbortError/i.test(error.message)) {
@@ -249,6 +260,177 @@ function colorKeyAt(buffer: Buffer, pixelIndex: number) {
   return `${buffer[offset]},${buffer[offset + 1]},${buffer[offset + 2]}`;
 }
 
+function binaryDilate(mask: Uint8Array, width: number, height: number) {
+  const output = new Uint8Array(mask.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const pixelIndex = y * width + x;
+      if (mask[pixelIndex]) {
+        output[pixelIndex] = 1;
+        continue;
+      }
+
+      let hasNeighbor = false;
+      for (let ny = Math.max(0, y - 1); ny <= Math.min(height - 1, y + 1) && !hasNeighbor; ny += 1) {
+        for (let nx = Math.max(0, x - 1); nx <= Math.min(width - 1, x + 1); nx += 1) {
+          if (mask[ny * width + nx]) {
+            hasNeighbor = true;
+            break;
+          }
+        }
+      }
+      output[pixelIndex] = hasNeighbor ? 1 : 0;
+    }
+  }
+  return output;
+}
+
+function binaryErode(mask: Uint8Array, width: number, height: number) {
+  const output = new Uint8Array(mask.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const pixelIndex = y * width + x;
+      if (!mask[pixelIndex]) continue;
+
+      let allNeighbors = true;
+      for (let ny = Math.max(0, y - 1); ny <= Math.min(height - 1, y + 1) && allNeighbors; ny += 1) {
+        for (let nx = Math.max(0, x - 1); nx <= Math.min(width - 1, x + 1); nx += 1) {
+          if (!mask[ny * width + nx]) {
+            allNeighbors = false;
+            break;
+          }
+        }
+      }
+      output[pixelIndex] = allNeighbors ? 1 : 0;
+    }
+  }
+  return output;
+}
+
+function closeBinaryMask(mask: Uint8Array, width: number, height: number) {
+  return binaryErode(binaryDilate(mask, width, height), width, height);
+}
+
+function removeSmallMaskComponents(mask: Uint8Array, width: number, height: number, minComponentArea: number) {
+  const totalPixels = width * height;
+  const visited = new Uint8Array(totalPixels);
+  const output = new Uint8Array(totalPixels);
+  const queue = new Int32Array(totalPixels);
+  const component: number[] = [];
+  let keptArea = 0;
+
+  for (let start = 0; start < totalPixels; start += 1) {
+    if (!mask[start] || visited[start]) continue;
+
+    let head = 0;
+    let tail = 0;
+    component.length = 0;
+    queue[tail] = start;
+    tail += 1;
+    visited[start] = 1;
+
+    while (head < tail) {
+      const pixelIndex = queue[head];
+      head += 1;
+      component.push(pixelIndex);
+
+      const x = pixelIndex % width;
+      const y = Math.floor(pixelIndex / width);
+      const neighbors = [
+        x > 0 ? pixelIndex - 1 : -1,
+        x < width - 1 ? pixelIndex + 1 : -1,
+        y > 0 ? pixelIndex - width : -1,
+        y < height - 1 ? pixelIndex + width : -1,
+      ];
+
+      for (const neighbor of neighbors) {
+        if (neighbor < 0 || visited[neighbor] || !mask[neighbor]) continue;
+        visited[neighbor] = 1;
+        queue[tail] = neighbor;
+        tail += 1;
+      }
+    }
+
+    if (component.length >= minComponentArea) {
+      keptArea += component.length;
+      for (const pixelIndex of component) {
+        output[pixelIndex] = 1;
+      }
+    }
+  }
+
+  return {
+    pixels: output,
+    area: keptArea,
+  };
+}
+
+function toCleanedMaskFrame(
+  pixels: Buffer,
+  width: number,
+  height: number,
+  index: number,
+  minComponentArea: number,
+  minMaskArea: number,
+): CleanedMaskFrame | null {
+  const binary = new Uint8Array(pixels.length);
+  for (let i = 0; i < pixels.length; i += 1) {
+    binary[i] = pixels[i] > MASK_PIXEL_THRESHOLD ? 1 : 0;
+  }
+
+  const closed = closeBinaryMask(binary, width, height);
+  let cleaned = removeSmallMaskComponents(closed, width, height, minComponentArea);
+  if (cleaned.area < minMaskArea) {
+    cleaned = removeSmallMaskComponents(binary, width, height, Math.max(16, Math.floor(minComponentArea / 3)));
+  }
+  if (cleaned.area < Math.max(48, Math.floor(minMaskArea / 3))) {
+    return null;
+  }
+
+  return {
+    pixels: cleaned.pixels,
+    area: cleaned.area,
+    index,
+  };
+}
+
+function countMaskIntersection(a: Uint8Array, b: Uint8Array) {
+  let intersection = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] && b[i]) intersection += 1;
+  }
+  return intersection;
+}
+
+function selectDistinctMaskFrames(maskFrames: CleanedMaskFrame[]) {
+  const selected: CleanedMaskFrame[] = [];
+  const sortedMasks = [...maskFrames].sort((a, b) => b.area - a.area);
+
+  for (const mask of sortedMasks) {
+    let isDuplicate = false;
+    for (const existing of selected) {
+      const intersection = countMaskIntersection(mask.pixels, existing.pixels);
+      const smallerArea = Math.min(mask.area, existing.area);
+      const largerArea = Math.max(mask.area, existing.area);
+      const overlapRatio = smallerArea > 0 ? intersection / smallerArea : 0;
+      const areaRatio = largerArea > 0 ? smallerArea / largerArea : 0;
+      if (overlapRatio >= MASK_DUPLICATE_OVERLAP_RATIO && areaRatio >= MASK_DUPLICATE_AREA_RATIO) {
+        isDuplicate = true;
+        break;
+      }
+    }
+
+    if (!isDuplicate) {
+      selected.push(mask);
+    }
+    if (selected.length >= MASK_MAX_REGIONS) {
+      break;
+    }
+  }
+
+  return selected;
+}
+
 function fillSmallBackgroundIslands(output: Buffer, assigned: Uint8Array, width: number, height: number) {
   const totalPixels = width * height;
   const visited = new Uint8Array(totalPixels);
@@ -368,19 +550,19 @@ async function composeClownPngFromMasks(maskUrls: string[], request: NextRequest
     throw new Error('Clown mask尺寸无效');
   }
 
-  const maskFrames: Array<{ pixels: Buffer; area: number; index: number }> = [];
+  const totalPixels = width * height;
+  const minComponentArea = Math.max(96, Math.floor(totalPixels * MASK_MIN_COMPONENT_AREA_RATIO));
+  const minMaskArea = Math.max(180, Math.floor(totalPixels * MASK_MIN_AREA_RATIO));
+  const maskFrames: CleanedMaskFrame[] = [];
   for (let index = 0; index < masks.length; index += 1) {
     const pixels = await sharp(masks[index], { failOnError: false })
       .resize(width, height, { fit: 'fill' })
       .greyscale()
       .raw()
       .toBuffer();
-    let area = 0;
-    for (let i = 0; i < pixels.length; i += 1) {
-      if (pixels[i] > MASK_PIXEL_THRESHOLD) area += 1;
-    }
-    if (area > 8) {
-      maskFrames.push({ pixels, area, index });
+    const maskFrame = toCleanedMaskFrame(pixels, width, height, index, minComponentArea, minMaskArea);
+    if (maskFrame) {
+      maskFrames.push(maskFrame);
     }
   }
 
@@ -397,11 +579,11 @@ async function composeClownPngFromMasks(maskUrls: string[], request: NextRequest
     output[offset + 2] = BACKGROUND_RGB[2];
   }
 
-  const sortedMasks = maskFrames.sort((a, b) => b.area - a.area);
+  const sortedMasks = selectDistinctMaskFrames(maskFrames);
   sortedMasks.forEach((mask, sortedIndex) => {
     const color = CLOWN_PALETTE[sortedIndex % CLOWN_PALETTE.length];
     for (let i = 0; i < mask.pixels.length; i += 1) {
-      if (mask.pixels[i] <= MASK_PIXEL_THRESHOLD) continue;
+      if (!mask.pixels[i]) continue;
       const offset = i * 3;
       output[offset] = color[0];
       output[offset + 1] = color[1];
@@ -411,6 +593,7 @@ async function composeClownPngFromMasks(maskUrls: string[], request: NextRequest
   });
 
   fillSmallBackgroundIslands(output, assigned, width, height);
+  smoothSmallColorIslands(output, width, height, 0.00022, 64);
 
   const buffer = await sharp(output, {
     raw: {
@@ -424,7 +607,85 @@ async function composeClownPngFromMasks(maskUrls: string[], request: NextRequest
 
   return {
     buffer,
-    maskCount: maskFrames.length,
+    maskCount: sortedMasks.length,
+  };
+}
+
+async function generateQuantizedClownFromSource(imageUrl: string, request: NextRequest) {
+  const image = await downloadSafeRemoteImage(imageUrl, {
+    timeoutMs: 90000,
+    maxBytes: 80 * 1024 * 1024,
+    allowLocalMaterialFile: true,
+    localMaterialOrigin: request.nextUrl.origin,
+  });
+  const metadata = await sharp(image.buffer, { failOnError: false }).metadata();
+  const width = metadata.width || 0;
+  const height = metadata.height || 0;
+  if (!width || !height) {
+    throw new Error('无法读取彩绘结果图尺寸');
+  }
+
+  const workingWidth = Math.min(width, 420);
+  const workingHeight = Math.max(1, Math.round(height * (workingWidth / width)));
+  const quantizedBuffer = await sharp(image.buffer, { failOnError: false })
+    .rotate()
+    .resize(workingWidth, workingHeight, { fit: 'fill' })
+    .median(13)
+    .blur(1.2)
+    .png({ palette: true, colors: 10, dither: 0 })
+    .toBuffer();
+  const raw = await sharp(quantizedBuffer, { failOnError: false })
+    .resize(width, height, { fit: 'fill', kernel: sharp.kernel.nearest })
+    .removeAlpha()
+    .toColorspace('srgb')
+    .raw()
+    .toBuffer();
+
+  const colorCounts = new Map<string, number>();
+  for (let i = 0; i < raw.length; i += 3) {
+    const key = `${raw[i]},${raw[i + 1]},${raw[i + 2]}`;
+    colorCounts.set(key, (colorCounts.get(key) || 0) + 1);
+  }
+
+  const sourceColors = [...colorCounts.entries()].sort((a, b) => b[1] - a[1]).map(([key]) => key);
+  const mappedColors = new Map<string, [number, number, number]>();
+  sourceColors.forEach((key, index) => {
+    mappedColors.set(key, index === 0 ? BACKGROUND_RGB : CLOWN_PALETTE[(index - 1) % CLOWN_PALETTE.length]);
+  });
+
+  const output = Buffer.alloc(width * height * 3);
+  for (let i = 0; i < raw.length; i += 3) {
+    const pixelIndex = i / 3;
+    const offset = pixelIndex * 3;
+    const key = `${raw[i]},${raw[i + 1]},${raw[i + 2]}`;
+    const color = mappedColors.get(key) || BACKGROUND_RGB;
+    output[offset] = color[0];
+    output[offset + 1] = color[1];
+    output[offset + 2] = color[2];
+  }
+
+  smoothSmallColorIslands(output, width, height, 0.0012, 180);
+
+  const colors = new Set<string>();
+  for (let i = 0; i < output.length; i += 3) {
+    colors.add(`${output[i]},${output[i + 1]},${output[i + 2]}`);
+  }
+
+  const buffer = await sharp(output, {
+    raw: {
+      width,
+      height,
+      channels: 3,
+    },
+  })
+    .png({ compressionLevel: 9, palette: false })
+    .toBuffer();
+
+  return {
+    buffer,
+    sourceWidth: width,
+    sourceHeight: height,
+    colorCount: colors.size,
   };
 }
 
@@ -455,10 +716,10 @@ function nearestPaletteColor(r: number, g: number, b: number) {
   return best;
 }
 
-function smoothSmallColorIslands(output: Buffer, width: number, height: number) {
+function smoothSmallColorIslands(output: Buffer, width: number, height: number, maxAreaRatio = 0.0006, minArea = 96) {
   const totalPixels = width * height;
   const visited = new Uint8Array(totalPixels);
-  const maxFillArea = Math.max(96, Math.floor(totalPixels * 0.0006));
+  const maxFillArea = Math.max(minArea, Math.floor(totalPixels * maxAreaRatio));
   const queue = new Int32Array(totalPixels);
   const component: number[] = [];
   const neighborColorCounts = new Map<string, number>();
@@ -725,9 +986,21 @@ export async function POST(request: NextRequest) {
     const clownResult = activeVariant === 'gpt'
       ? null
       : await generateClownWithRunningHub(extractionImageUrl);
-    const composedClown = clownResult?.maskUrls?.length
-      ? await composeClownPngFromMasks(clownResult.maskUrls, request)
-      : null;
+    let composedClown: Awaited<ReturnType<typeof composeClownPngFromMasks>> | null = null;
+    let quantizedFallback: Awaited<ReturnType<typeof generateQuantizedClownFromSource>> | null = null;
+    let fallbackReason = '';
+    if (clownResult?.maskUrls?.length) {
+      try {
+        composedClown = await composeClownPngFromMasks(clownResult.maskUrls, request);
+      } catch (composeError) {
+        if (composeError instanceof Error && /mask为空|未返回可用mask输出/i.test(composeError.message)) {
+          fallbackReason = composeError.message;
+          quantizedFallback = await generateQuantizedClownFromSource(extractionImageUrl, request);
+        } else {
+          throw composeError;
+        }
+      }
+    }
     const gptClown = activeVariant === 'gpt'
       ? await generateGptClownWithPsydo(extractionImageUrl, request)
       : null;
@@ -735,9 +1008,11 @@ export async function POST(request: NextRequest) {
       ? await persistClownPngBuffer(gptClown.buffer, `${orderNumber}-gpt`, request)
       : composedClown
         ? await persistClownPngBuffer(composedClown.buffer, orderNumber, request)
-        : clownResult?.outputUrl
-          ? await persistRunningHubClownPng(clownResult.outputUrl, orderNumber, request)
-          : null;
+        : quantizedFallback
+          ? await persistClownPngBuffer(quantizedFallback.buffer, orderNumber, request)
+          : clownResult?.outputUrl
+            ? await persistRunningHubClownPng(clownResult.outputUrl, orderNumber, request)
+            : null;
 
     if (!persisted) {
       throw new Error('Clown 工作流未返回可用PNG输出');
@@ -771,8 +1046,12 @@ export async function POST(request: NextRequest) {
           clownGenerationError: undefined,
           clownTaskId: clownResult?.taskId,
           clownProvider: 'runninghub',
-          clownWorkflowMode: clownResult?.maskUrls?.length ? 'sam3-mask-compose' : 'direct-png',
+          clownWorkflowMode: quantizedFallback ? 'source-quantize-fallback' : clownResult?.maskUrls?.length ? 'sam3-mask-compose-cleaned' : 'direct-png',
           clownMaskCount: composedClown?.maskCount,
+          clownFallbackReason: fallbackReason || undefined,
+          clownColorCount: quantizedFallback?.colorCount,
+          clownSourceWidth: quantizedFallback?.sourceWidth,
+          clownSourceHeight: quantizedFallback?.sourceHeight,
           clownPoints,
           clownPointsCharged: true,
           clownGeneratedAt: new Date().toISOString(),

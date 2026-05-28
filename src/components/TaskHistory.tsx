@@ -870,7 +870,6 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   const [deletingOrder, setDeletingOrder] = useState<string | null>(null);
   const [generatingPsdOrders, setGeneratingPsdOrders] = useState<Set<string>>(new Set());
   const [generatingClownOrders, setGeneratingClownOrders] = useState<Set<string>>(new Set());
-  const [generatingGptClownOrders, setGeneratingGptClownOrders] = useState<Set<string>>(new Set());
   const [retryingOrder, setRetryingOrder] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState<FilterType>('all');
   const [statusFilter, setStatusFilter] = useState<TaskCenterFilter>('all');
@@ -1341,7 +1340,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       return;
     }
 
-    const setGeneratingOrders = isGptVariant ? setGeneratingGptClownOrders : setGeneratingClownOrders;
+    const setGeneratingOrders = setGeneratingClownOrders;
     setGeneratingOrders((current) => new Set(current).add(task.orderId!));
     try {
       const response = await fetch('/api/color-extraction/generate-clown', {
@@ -1859,13 +1858,6 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                           ? generatingClownOrders.has(task.orderId) || Boolean(clownProcessingIsFresh)
                           : Boolean(clownProcessingIsFresh);
                         const clownPoints = task.clownPoints || getGenerateClownPoints();
-                        const gptClownProcessingIsFresh = task.clownGptGenerationStatus === 'processing'
-                          && task.clownGptGenerationStartedAt
-                          && Date.now() - task.clownGptGenerationStartedAt <= CLOWN_PROCESSING_STALE_MS;
-                        const isGptClownGenerating = task.orderId
-                          ? generatingGptClownOrders.has(task.orderId) || Boolean(gptClownProcessingIsFresh)
-                          : Boolean(gptClownProcessingIsFresh);
-                        const gptClownPoints = task.clownGptPoints || getGenerateClownPoints();
 
                         const canDelete = task.status !== '处理中';
 
@@ -1978,28 +1970,6 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                                               <span>生成Clown</span>
                                               <span className="text-fuchsia-100/45">·</span>
                                               <PointsIconLabel points={clownPoints} iconClassName="h-3 w-3" />
-                                            </span>
-                                          )}
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (task.clownGptUrl) {
-                                              openClownUrl(task, 'gpt');
-                                            } else {
-                                              void handleGenerateClown(task, 'gpt');
-                                            }
-                                          }}
-                                          disabled={isGptClownGenerating}
-                                          className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${task.clownGptUrl ? 'border-emerald-300/20 bg-emerald-500/12 text-emerald-200 hover:bg-emerald-500/20' : 'border-amber-300/22 bg-amber-500/14 text-amber-100 hover:bg-amber-500/22'}`}
-                                          title={isGptClownGenerating ? 'GPT Clown生成中' : task.clownGptUrl ? '下载GPT Clown彩色选区图' : task.clownGptGenerationStatus === 'processing' ? '上次生成中断，点击重新生成GPT Clown图' : `点击生成GPT Clown图（${formatPointsLabel(gptClownPoints)}）`}
-                                        >
-                                          {isGptClownGenerating ? 'GPT生成中' : task.clownGptUrl ? '下载GPT图' : task.clownGptGenerationStatus === 'processing' ? '重新生成GPT' : (
-                                            <span className="inline-flex items-center gap-1.5">
-                                              <span>生成GPT图</span>
-                                              <span className="text-amber-100/45">·</span>
-                                              <PointsIconLabel points={gptClownPoints} iconClassName="h-3 w-3" />
                                             </span>
                                           )}
                                         </button>
