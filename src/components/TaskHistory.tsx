@@ -43,11 +43,6 @@ export interface TaskRecord {
   psdGenerationStatus?: PsdGenerationStatus;
   psdGenerationStartedAt?: number;
   psdPoints?: number;
-  smartPsdUrl?: string;
-  smartPsdGenerationStatus?: PsdGenerationStatus;
-  smartPsdGenerationStartedAt?: number;
-  smartPsdLayerCount?: number;
-  smartPsdMaskCount?: number;
   clownUrl?: string;
   clownThumbnailUrl?: string;
   clownGenerationStatus?: ClownGenerationStatus;
@@ -94,11 +89,6 @@ type RequestParamsObject = {
   psdGenerationStatus?: PsdGenerationStatus;
   psdGenerationStartedAt?: string | number;
   psdPoints?: number;
-  smartPsdUrl?: string;
-  smartPsdGenerationStatus?: PsdGenerationStatus;
-  smartPsdGenerationStartedAt?: string | number;
-  smartPsdLayerCount?: number;
-  smartPsdMaskCount?: number;
   clownUrl?: string;
   clownThumbnailUrl?: string;
   clownGenerationStatus?: ClownGenerationStatus;
@@ -644,16 +634,6 @@ export const forceRefreshCache = (userId?: string) => {
           ? new Date(rawPsdGenerationStartedAt).getTime()
           : undefined;
       const psdPoints = params?.psdPoints;
-      const smartPsdUrl = typeof params?.smartPsdUrl === 'string' ? params.smartPsdUrl : '';
-      const smartPsdGenerationStatus = params?.smartPsdGenerationStatus;
-      const rawSmartPsdGenerationStartedAt = params?.smartPsdGenerationStartedAt;
-      const smartPsdGenerationStartedAt = typeof rawSmartPsdGenerationStartedAt === 'number'
-        ? rawSmartPsdGenerationStartedAt
-        : typeof rawSmartPsdGenerationStartedAt === 'string'
-          ? new Date(rawSmartPsdGenerationStartedAt).getTime()
-          : undefined;
-      const smartPsdLayerCount = typeof params?.smartPsdLayerCount === 'number' ? params.smartPsdLayerCount : undefined;
-      const smartPsdMaskCount = typeof params?.smartPsdMaskCount === 'number' ? params.smartPsdMaskCount : undefined;
       const clownUrl = typeof params?.clownUrl === 'string' ? params.clownUrl : '';
       const clownThumbnailUrl = typeof params?.clownThumbnailUrl === 'string' ? params.clownThumbnailUrl : '';
       const clownGenerationStatus = params?.clownGenerationStatus;
@@ -811,11 +791,6 @@ export const forceRefreshCache = (userId?: string) => {
         psdGenerationStatus,
         psdGenerationStartedAt: Number.isFinite(psdGenerationStartedAt) ? psdGenerationStartedAt : undefined,
         psdPoints,
-        smartPsdUrl,
-        smartPsdGenerationStatus,
-        smartPsdGenerationStartedAt: Number.isFinite(smartPsdGenerationStartedAt) ? smartPsdGenerationStartedAt : undefined,
-        smartPsdLayerCount,
-        smartPsdMaskCount,
         clownUrl,
         clownThumbnailUrl,
         clownGenerationStatus,
@@ -894,7 +869,6 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   const [previewImage, setPreviewImage] = useState<PreviewImageState | null>(null);
   const [deletingOrder, setDeletingOrder] = useState<string | null>(null);
   const [generatingPsdOrders, setGeneratingPsdOrders] = useState<Set<string>>(new Set());
-  const [generatingSmartPsdOrders, setGeneratingSmartPsdOrders] = useState<Set<string>>(new Set());
   const [generatingClownOrders, setGeneratingClownOrders] = useState<Set<string>>(new Set());
   const [retryingOrder, setRetryingOrder] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState<FilterType>('all');
@@ -1342,59 +1316,6 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     }
   };
 
-  const handleGenerateSmartPsd = async (task: TaskRecord) => {
-    if (!task.orderId) {
-      showToast('订单号缺失，无法生成智能PSD', 'error');
-      return;
-    }
-
-    const smartPsdProcessingIsFresh = task.smartPsdGenerationStatus === 'processing'
-      && task.smartPsdGenerationStartedAt
-      && Date.now() - task.smartPsdGenerationStartedAt <= PSD_PROCESSING_STALE_MS;
-
-    if (smartPsdProcessingIsFresh) {
-      showToast('智能PSD正在生成中，请稍后查看', 'info');
-      return;
-    }
-
-    const resultImage = getFirstImage(task.imageUrl);
-    if (!isImageValue(resultImage)) {
-      showToast('该订单暂无可用于智能分层的结果图', 'error');
-      return;
-    }
-
-    setGeneratingSmartPsdOrders((current) => new Set(current).add(task.orderId!));
-    try {
-      const response = await fetch('/api/color-extraction/generate-smart-psd', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ orderNumber: task.orderId }),
-      });
-
-      const result = await response.json() as {
-        success?: boolean;
-        message?: string;
-        error?: string;
-      };
-      if (!result.success) {
-        throw new Error(toUserFacingErrorMessage(result.error, '智能PSD生成失败，请重试'));
-      }
-
-      showToast(result.message || '智能PSD生成成功', 'success');
-      await loadTasks();
-    } catch (error) {
-      console.error('[TaskHistory] 生成智能PSD失败:', error);
-      showToast(toUserFacingErrorFromUnknown(error, '智能PSD生成失败，请重试'), 'error');
-    } finally {
-      setGeneratingSmartPsdOrders((current) => {
-        const next = new Set(current);
-        next.delete(task.orderId!);
-        return next;
-      });
-    }
-  };
-
   const handleGenerateClown = async (task: TaskRecord, variant: 'runninghub' | 'gpt' = 'runninghub') => {
     if (!task.orderId) {
       showToast('订单号缺失，无法生成Clown图', 'error');
@@ -1581,21 +1502,6 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
     window.open(task.psdUrl, '_blank');
     showToast('已在新标签页打开下载链接', 'info');
-  };
-
-  const openSmartPsdUrl = (task: TaskRecord) => {
-    if (!task.smartPsdUrl) {
-      showToast('智能PSD文件尚未生成完成', 'error');
-      return;
-    }
-
-    if (typeof task.smartPsdUrl !== 'string' || !task.smartPsdUrl.startsWith('http')) {
-      showToast('智能PSD链接无效', 'error');
-      return;
-    }
-
-    window.open(task.smartPsdUrl, '_blank');
-    showToast('已在新标签页打开智能PSD下载链接', 'info');
   };
 
   const openClownUrl = (task: TaskRecord, variant: 'runninghub' | 'gpt' = 'runninghub') => {
@@ -1945,12 +1851,6 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                           ? generatingPsdOrders.has(task.orderId) || Boolean(psdProcessingIsFresh)
                           : Boolean(psdProcessingIsFresh);
                         const psdPoints = task.psdPoints || getGeneratePsdPoints();
-                        const smartPsdProcessingIsFresh = task.smartPsdGenerationStatus === 'processing'
-                          && task.smartPsdGenerationStartedAt
-                          && Date.now() - task.smartPsdGenerationStartedAt <= PSD_PROCESSING_STALE_MS;
-                        const isSmartPsdGenerating = task.orderId
-                          ? generatingSmartPsdOrders.has(task.orderId) || Boolean(smartPsdProcessingIsFresh)
-                          : Boolean(smartPsdProcessingIsFresh);
                         const clownProcessingIsFresh = task.clownGenerationStatus === 'processing'
                           && task.clownGenerationStartedAt
                           && Date.now() - task.clownGenerationStartedAt <= CLOWN_PROCESSING_STALE_MS;
@@ -2048,27 +1948,6 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                                               <span>生成PSD</span>
                                               <span className="text-violet-100/45">·</span>
                                               <PointsIconLabel points={psdPoints} iconClassName="h-3 w-3" />
-                                            </span>
-                                          )}
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (task.smartPsdUrl) {
-                                              openSmartPsdUrl(task);
-                                            } else {
-                                              void handleGenerateSmartPsd(task);
-                                            }
-                                          }}
-                                          disabled={isSmartPsdGenerating}
-                                          className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${task.smartPsdUrl ? 'border-emerald-300/22 bg-emerald-500/12 text-emerald-200 hover:bg-emerald-500/20' : 'border-sky-300/22 bg-sky-500/14 text-sky-100 hover:bg-sky-500/22'}`}
-                                          title={isSmartPsdGenerating ? '智能PSD生成中' : task.smartPsdUrl ? `下载智能PSD${task.smartPsdLayerCount ? `（${task.smartPsdLayerCount}层）` : ''}` : task.smartPsdGenerationStatus === 'processing' ? '上次生成中断，点击重新生成智能PSD' : '实验功能：按多实例mask生成PSD分层'}
-                                        >
-                                          {isSmartPsdGenerating ? '智能PSD中' : task.smartPsdUrl ? `智能PSD${task.smartPsdLayerCount ? ` ${task.smartPsdLayerCount}层` : ''}` : task.smartPsdGenerationStatus === 'processing' ? '重新智能PSD' : (
-                                            <span className="inline-flex items-center gap-1.5">
-                                              <span>智能PSD</span>
-                                              <span className="text-sky-100/45">Beta</span>
                                             </span>
                                           )}
                                         </button>
