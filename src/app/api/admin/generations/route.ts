@@ -22,6 +22,7 @@ function mapToolFilter(toolFilter: string): string[] {
   if (toolFilter === '去除水印') return ['去除水印', '去水印'];
   if (toolFilter === '高清+扩图') return ['高清+扩图', '高清+扩图2', 'AI扩图', '去除水印', '去水印'];
   if (toolFilter === '高清放大') return ['高清放大'];
+  if (toolFilter === '移除背景') return ['移除背景'];
   return [toolFilter];
 }
 

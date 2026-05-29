@@ -11,7 +11,7 @@ import { parseColorExtractionModeMeta, type ColorExtractionMode } from '@/lib/co
 import { toUserFacingErrorFromUnknown, toUserFacingErrorMessage } from '@/lib/userFacingError';
 import { formatPointsLabel, getGeneratePsdPoints } from '@/lib/pricing';
 
-export type TabType = 'color-extraction' | 'watermark' | 'hd-upscale' | 'custom' | 'ai-generate' | 'smart-edit';
+export type TabType = 'color-extraction' | 'watermark' | 'hd-upscale' | 'remove-background' | 'custom' | 'ai-generate' | 'smart-edit';
 export type FilterType = 'all' | TabType;
 type TaskCenterFilter = 'all' | 'processing' | 'success' | 'failed';
 export type TaskStatus = '处理中' | '成功' | '失败' | '超时' | '部分成功';
@@ -22,7 +22,7 @@ type TaskHistoryUpdatedEventDetail = {
 const PSD_PROCESSING_STALE_MS = 12 * 60 * 1000;
 const TASK_HISTORY_PAGE_SIZE = 80;
 
-const TASK_FILTER_VALUES: FilterType[] = ['all', 'color-extraction', 'ai-generate', 'smart-edit', 'watermark', 'hd-upscale'];
+const TASK_FILTER_VALUES: FilterType[] = ['all', 'color-extraction', 'ai-generate', 'smart-edit', 'watermark', 'hd-upscale', 'remove-background'];
 
 export interface TaskRecord {
   id: string;
@@ -712,6 +712,9 @@ export const forceRefreshCache = (userId?: string) => {
       } else if (item.toolPage === '高清放大' || item.description?.includes('高清放大') || item.orderNumber?.startsWith('HD-')) {
         tab = 'hd-upscale';
         tabName = '高清放大';
+      } else if (item.toolPage === '移除背景' || item.description?.includes('移除背景') || item.orderNumber?.startsWith('RB-')) {
+        tab = 'remove-background';
+        tabName = '移除背景';
       } else if (item.toolPage === '去水印') {
         // 兼容性处理：旧数据可能使用'去水印'
         tab = 'watermark';
@@ -1115,6 +1118,12 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4-4 4 4m-4-4v9m8-16l4 4-4 4m4-4H7" />
           </svg>
         );
+      case 'remove-background':
+        return (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16M8 4v16M16 4v16" />
+          </svg>
+        );
       case 'ai-generate':
         return (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1499,6 +1508,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       'smart-edit': '智能改图',
       'watermark': '高清+扩图',
       'hd-upscale': '高清放大',
+      'remove-background': '移除背景',
       'custom': '其他历史',
     };
     return labels[filter] || filter;

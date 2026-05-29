@@ -2,7 +2,7 @@ import type { SmartEditResolution } from '@/lib/smartEditSize';
 
 export type { SmartEditResolution } from '@/lib/smartEditSize';
 
-export type PaidActionId = 'color-extraction' | 'generate-psd' | 'ai-generate' | 'outpaint-upsampling' | 'hd-upscale' | 'smart-edit';
+export type PaidActionId = 'color-extraction' | 'generate-psd' | 'ai-generate' | 'outpaint-upsampling' | 'hd-upscale' | 'remove-background' | 'smart-edit';
 
 type StandardResolution = SmartEditResolution;
 
@@ -15,6 +15,7 @@ const AI_GENERATE_POINTS: Record<StandardResolution, number> = {
 };
 const OUTPAINT_UPSAMPLING_POINTS = 30;
 const HD_UPSCALE_POINTS = 5;
+const REMOVE_BACKGROUND_POINTS = 5;
 const SMART_EDIT_POINTS: Record<StandardResolution, number> = {
   '1k': 30,
   '2k': 30,
@@ -39,6 +40,10 @@ export function getOutpaintUpsamplingPoints() {
 
 export function getHdUpscalePoints() {
   return HD_UPSCALE_POINTS;
+}
+
+export function getRemoveBackgroundPoints() {
+  return REMOVE_BACKGROUND_POINTS;
 }
 
 export function getSmartEditPoints(resolution: SmartEditResolution) {

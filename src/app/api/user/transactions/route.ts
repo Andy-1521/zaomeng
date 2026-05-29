@@ -50,10 +50,13 @@ function shouldUseProxyThumbnail(transaction: { orderNumber?: string | null; too
   return Boolean(
     transaction.orderNumber?.startsWith('HDO-')
     || transaction.orderNumber?.startsWith('HD-')
+    || transaction.orderNumber?.startsWith('RB-')
     || transaction.toolPage === '高清+扩图'
     || transaction.toolPage === '高清放大'
+    || transaction.toolPage === '移除背景'
     || transaction.description?.includes('高清+扩图')
     || transaction.description?.includes('高清放大')
+    || transaction.description?.includes('移除背景')
   );
 }
 

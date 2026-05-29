@@ -8,7 +8,7 @@ import CropEditorPanel from '@/components/CropEditorPanel';
 import LocalEditPanel from '@/components/LocalEditPanel';
 import PointsIconLabel from '@/components/PointsIconLabel';
 import { useUser } from '@/contexts/UserContext';
-import { formatPointsLabel, getAiGeneratePoints, getColorExtractionPoints, getHdUpscalePoints, getOutpaintUpsamplingPoints, getSmartEditPoints } from '@/lib/pricing';
+import { formatPointsLabel, getAiGeneratePoints, getColorExtractionPoints, getHdUpscalePoints, getOutpaintUpsamplingPoints, getRemoveBackgroundPoints, getSmartEditPoints } from '@/lib/pricing';
 import { isSmartEditAspectRatioOption, isSmartEditResolution, type SmartEditAspectRatioOption, type SmartEditResolution } from '@/lib/smartEditSize';
 import { showToast } from '@/lib/toast';
 import { toUserFacingErrorFromUnknown, toUserFacingErrorMessage } from '@/lib/userFacingError';
@@ -70,7 +70,7 @@ type OrderResultCard = {
 
 type MaterialFilter = 'all' | 'today' | 'yesterday' | 'earlier';
 type MaterialScope = 'all' | 'favorite' | 'uncategorized' | `folder:${string}`;
-type GalleryActionId = 'color-extraction' | 'ai-generate' | 'outpaint-upsampling' | 'hd-upscale';
+type GalleryActionId = 'color-extraction' | 'ai-generate' | 'outpaint-upsampling' | 'hd-upscale' | 'remove-background';
 type LibraryView = 'gallery' | 'orders';
 type PreviewImageState = {
   originalUrl: string;
@@ -289,6 +289,19 @@ const galleryActions: GalleryAction[] = [
     preview: (
       <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-black/20">
         <Image src="/assets/remove-watermark-demo.jpg" alt="高清放大示例" width={128} height={140} className="w-full h-full object-cover" />
+      </div>
+    ),
+  },
+  {
+    id: 'remove-background',
+    label: '移除背景',
+    description: '输出透明底PNG',
+    points: getRemoveBackgroundPoints(),
+    className: 'bg-gradient-to-r from-slate-700 to-zinc-600 hover:from-slate-600 hover:to-zinc-500',
+    tag: '5积分',
+    preview: (
+      <div className="w-32 h-full min-h-[140px] rounded-lg flex items-center justify-center overflow-hidden bg-[linear-gradient(45deg,rgba(255,255,255,.16)_25%,transparent_25%,transparent_75%,rgba(255,255,255,.16)_75%),linear-gradient(45deg,rgba(255,255,255,.16)_25%,transparent_25%,transparent_75%,rgba(255,255,255,.16)_75%)] bg-[length:18px_18px] bg-[position:0_0,9px_9px]">
+        <Image src="/assets/phone-case-demo.jpg" alt="移除背景示例" width={128} height={140} className="w-full h-full object-contain" />
       </div>
     ),
   },
@@ -2795,6 +2808,44 @@ export default function QuickCreatePage() {
     }
   }, [dispatchTaskHistoryUpdated, syncPoints, user?.id]);
 
+  const startRemoveBackground = useCallback(async (imageUrl: string) => {
+    if (!user?.id) return false;
+    try {
+      const response = await fetch('/api/remove-background/run', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, imageUrl }),
+      });
+      const data = await response.json().catch(() => ({} as {
+        success?: boolean;
+        message?: string;
+        data?: { orderId?: string; remainingPoints?: number };
+      }));
+      if (!response.ok) {
+        const errorMessage = toUserFacingErrorMessage(data.message || '暂时未能完成处理，请稍后重试', '暂时未能完成处理，请稍后重试');
+        throw new Error(errorMessage);
+      }
+
+      if (typeof data.data?.remainingPoints === 'number') {
+        syncPoints(data.data.remainingPoints);
+      }
+      const orderId = data.data?.orderId?.trim();
+      if (orderId) {
+        trackedProcessingOrdersRef.current = { ...trackedProcessingOrdersRef.current, [orderId]: Date.now() };
+        setHasProcessingOrders(true);
+      }
+      dispatchTaskHistoryUpdated();
+      dispatchTaskHistoryUpdated(500);
+      return true;
+    } catch (error) {
+      console.error('[素材库] 移除背景执行失败:', error);
+      dispatchTaskHistoryUpdated();
+      showToast(toUserFacingErrorFromUnknown(error, '暂时未能完成处理，请稍后重试'), 'error');
+      return false;
+    }
+  }, [dispatchTaskHistoryUpdated, syncPoints, user?.id]);
+
   const startAiGenerate = useCallback((imageUrl: string, prompt: string, options: {
     aspectRatio: SmartEditAspectRatioOption;
     resolution: SmartEditResolution;
@@ -2904,11 +2955,23 @@ export default function QuickCreatePage() {
         showToast(`已提交 ${submittedCount} 张图片到高清放大`, 'info');
       }
 
+      if (actionId === 'remove-background') {
+        const hasEnoughPoints = await ensureEnoughPoints(getRemoveBackgroundPoints() * selectedImageList.length);
+        if (!hasEnoughPoints) return;
+        let submittedCount = 0;
+        for (const imageUrl of selectedImageList) {
+          if (await startRemoveBackground(imageUrl)) {
+            submittedCount += 1;
+          }
+        }
+        showToast(`已提交 ${submittedCount} 张图片到移除背景`, 'info');
+      }
+
       clearSelectionState();
     } finally {
       setProcessingAction(null);
     }
-  }, [clearSelectionState, ensureEnoughColorExtractionPoints, ensureEnoughPoints, ensureUserReady, selectedImageList, startColorExtraction, startHdUpscale, startOutpaintUpsampling]);
+  }, [clearSelectionState, ensureEnoughColorExtractionPoints, ensureEnoughPoints, ensureUserReady, selectedImageList, startColorExtraction, startHdUpscale, startOutpaintUpsampling, startRemoveBackground]);
 
   const submitAiGenerate = useCallback(async () => {
     const prompt = aiPrompt.trim();

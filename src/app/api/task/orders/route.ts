@@ -47,10 +47,13 @@ function shouldUseProxyThumbnail(order: { orderNumber?: string | null; toolPage?
   return Boolean(
     order.orderNumber?.startsWith('HDO-')
     || order.orderNumber?.startsWith('HD-')
+    || order.orderNumber?.startsWith('RB-')
     || order.toolPage === '高清+扩图'
     || order.toolPage === '高清放大'
+    || order.toolPage === '移除背景'
     || order.description?.includes('高清+扩图')
     || order.description?.includes('高清放大')
+    || order.description?.includes('移除背景')
   );
 }
 
