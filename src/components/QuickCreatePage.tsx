@@ -362,6 +362,8 @@ const AI_RESOLUTION_OPTIONS: Array<{ value: SmartEditResolution; label: string; 
 
 const UNCATEGORIZED_FOLDER_VALUE = '__uncategorized__';
 const PROCESSING_ORDER_POLL_TTL_MS = 20 * 60 * 1000;
+const ORDER_RESULTS_MIN_REFRESH_INTERVAL_MS = 2500;
+const PROCESSING_ORDER_POLL_INTERVAL_MS = 6000;
 const MATERIAL_UPLOAD_CONCURRENCY = 3;
 const MATERIAL_UPLOAD_TIMEOUT_MS = 180_000;
 const MATERIAL_UPLOAD_COMPLETE_TIMEOUT_MS = 8_000;
@@ -1162,6 +1164,8 @@ export default function QuickCreatePage() {
   const locallyInsertedMaterialIdsRef = useRef<Set<string>>(new Set());
   const requestedLatestCaptureRef = useRef(false);
   const isPageLeavingRef = useRef(false);
+  const orderResultsInFlightRef = useRef<Promise<void> | null>(null);
+  const lastOrderResultsLoadedAtRef = useRef(0);
   const imageRetryAttemptsRef = useRef<Record<string, number>>({});
   const imageRetryTimersRef = useRef<Record<string, number>>({});
   const uploadPlaceholderObjectUrlsRef = useRef<Record<string, string>>({});
@@ -1694,10 +1698,7 @@ export default function QuickCreatePage() {
     });
   }, []);
 
-  const loadOrderResults = useCallback(async (options?: { silent?: boolean }) => {
-    const requestId = orderResultsRequestIdRef.current + 1;
-    orderResultsRequestIdRef.current = requestId;
-
+  const loadOrderResults = useCallback(async (options?: { silent?: boolean; force?: boolean }) => {
     if (!user?.id) {
       setOrderResults([]);
       setHasProcessingOrders(false);
@@ -1707,7 +1708,23 @@ export default function QuickCreatePage() {
       return;
     }
 
-    try {
+    const now = Date.now();
+    if (
+      !options?.force
+      && hasLoadedOrderResultsRef.current
+      && now - lastOrderResultsLoadedAtRef.current < ORDER_RESULTS_MIN_REFRESH_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    if (orderResultsInFlightRef.current) {
+      return orderResultsInFlightRef.current;
+    }
+
+    const requestId = orderResultsRequestIdRef.current + 1;
+    orderResultsRequestIdRef.current = requestId;
+
+    const request = (async () => {
       const response = await fetch('/api/task/orders?limit=160', { credentials: 'include' });
       const data = await parseJsonApiResponse<{ success?: boolean; message?: string; data?: RawOrderRecord[] }>(response, '刷新订单记录失败，请重试');
       if (!response.ok || !data.success || !Array.isArray(data.data)) {
@@ -1771,11 +1788,22 @@ export default function QuickCreatePage() {
 
       setOrderResults(cards);
       hasLoadedOrderResultsRef.current = true;
+      lastOrderResultsLoadedAtRef.current = Date.now();
+    })();
+
+    orderResultsInFlightRef.current = request;
+
+    try {
+      await request;
     } catch (error) {
       console.error('[订单库] 加载失败:', error);
       setHasProcessingOrders(false);
       if (!options?.silent) {
         showToast(toUserFacingErrorFromUnknown(error, '刷新订单记录失败，请重试'), 'error');
+      }
+    } finally {
+      if (orderResultsInFlightRef.current === request) {
+        orderResultsInFlightRef.current = null;
       }
     }
   }, [syncPoints, user?.id]);
@@ -3422,7 +3450,7 @@ export default function QuickCreatePage() {
 
     const intervalId = window.setInterval(() => {
       void loadOrderResults({ silent: true });
-    }, 4000);
+    }, PROCESSING_ORDER_POLL_INTERVAL_MS);
 
     return () => window.clearInterval(intervalId);
   }, [hasProcessingOrders, loadOrderResults, user?.id]);
