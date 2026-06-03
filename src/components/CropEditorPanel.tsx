@@ -5,7 +5,7 @@ import Image, { type ImageLoaderProps, type ImageProps } from 'next/image';
 import { showToast } from '@/lib/toast';
 import { toUserFacingErrorFromUnknown, toUserFacingErrorMessage } from '@/lib/userFacingError';
 
-type AspectRatio = 'free' | '1:1' | '4:5' | '16:9';
+type AspectRatio = 'free' | '1:1' | '3:4' | '4:3' | '4:5' | '9:16' | '16:9';
 type CropHandle = 'move' | 'top' | 'right' | 'bottom' | 'left' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 type OutputSizeMode = 'crop' | 'custom';
 
@@ -29,7 +29,10 @@ type Props = {
 const aspectRatios: Array<[AspectRatio, string]> = [
   ['free', '自由'],
   ['1:1', '1:1'],
+  ['3:4', '3:4'],
+  ['4:3', '4:3'],
   ['4:5', '4:5'],
+  ['9:16', '9:16'],
   ['16:9', '16:9'],
 ];
 
@@ -41,7 +44,10 @@ const SafeImage = forwardRef<HTMLImageElement, Omit<ImageProps, 'loader'>>(funct
 
 function getRatioValue(aspectRatio: AspectRatio): number | null {
   if (aspectRatio === '1:1') return 1;
+  if (aspectRatio === '3:4') return 3 / 4;
+  if (aspectRatio === '4:3') return 4 / 3;
   if (aspectRatio === '4:5') return 4 / 5;
+  if (aspectRatio === '9:16') return 9 / 16;
   if (aspectRatio === '16:9') return 16 / 9;
   return null;
 }
@@ -112,6 +118,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
   const [crop, setCrop] = useState<CropBox>({ x: 12, y: 12, width: 76, height: 76 });
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
   const [isExporting, setIsExporting] = useState(false);
+  const [isDraggingCrop, setIsDraggingCrop] = useState(false);
   const [outputSizeMode, setOutputSizeMode] = useState<OutputSizeMode>('crop');
   const [customOutputWidth, setCustomOutputWidth] = useState('');
   const [customOutputHeight, setCustomOutputHeight] = useState('');
@@ -193,6 +200,14 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
     setCrop((prev) => fitCropToAspectRatio(prev, aspectRatio));
   }, [aspectRatio]);
 
+  const centerCrop = useCallback(() => {
+    setCrop((prev) => ({
+      ...prev,
+      x: Math.max(0, (100 - prev.width) / 2),
+      y: Math.max(0, (100 - prev.height) / 2),
+    }));
+  }, []);
+
   const updateCrop = useCallback((handle: CropHandle, deltaX: number, deltaY: number, origin: CropBox) => {
     const minSize = 10;
     const ratio = getRatioValue(aspectRatio);
@@ -261,6 +276,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
 
     const handlePointerUp = () => {
       dragStateRef.current = null;
+      setIsDraggingCrop(false);
     };
 
     window.addEventListener('pointermove', handlePointerMove);
@@ -275,6 +291,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
   const startDrag = useCallback((handle: CropHandle, event: React.PointerEvent) => {
     event.preventDefault();
     event.stopPropagation();
+    setIsDraggingCrop(true);
     dragStateRef.current = {
       handle,
       startX: event.clientX,
@@ -332,256 +349,284 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
   }, [crop, destination, flipHorizontal, flipVertical, imageUrl, onClose, onComplete, orderNumber, resolvedOutputSize.height, resolvedOutputSize.width, rotation, scale, sourceImageUrl, toolLabel]);
 
   return (
-    <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/65 backdrop-blur-sm px-4">
-      <div className="w-full max-w-5xl rounded-3xl border border-white/12 bg-[#09090b]/95 p-6 shadow-2xl">
-        <div className="flex items-center justify-between gap-4 mb-5">
-          <div>
-            <h3 className="text-2xl font-semibold text-white">裁切工具</h3>
-            <p className="text-white/50 mt-1">支持缩放、旋转和比例裁切，拖动四边、四角或整块区域进行调整</p>
-            <p className="mt-1 text-xs text-white/34">{destination === 'orders' ? '当前结果将保存在订单记录中' : '当前结果将保存在素材库中'}</p>
+    <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-[#030306]/88 px-4 py-4 backdrop-blur-md">
+      <div className="flex max-h-[calc(100vh-32px)] w-full max-w-6xl flex-col overflow-hidden rounded-[1.6rem] border border-white/12 bg-[#08080d]/98 shadow-[0_28px_90px_rgba(0,0,0,0.58)]">
+        <div className="flex items-center justify-between gap-4 border-b border-white/10 px-5 py-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-xl font-semibold text-white">裁切工具</h3>
+              <span className="rounded-full border border-white/10 bg-white/[0.06] px-2.5 py-1 text-xs text-white/50">
+                {destination === 'orders' ? '保存到订单记录' : '保存到素材库'}
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2 text-xs text-white/40">
+              <span>{naturalSize.width || '--'} x {naturalSize.height || '--'} px</span>
+              <span>裁切 {cropPixelSize.width || '--'} x {cropPixelSize.height || '--'} px</span>
+              <span>导出 {resolvedOutputSize.width || '--'} x {resolvedOutputSize.height || '--'} px</span>
+            </div>
           </div>
-          <button onClick={onClose} className="text-white/55 hover:text-white transition-colors">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <button
+            onClick={onClose}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.06] text-white/55 transition-colors hover:bg-white/[0.12] hover:text-white"
+            title="关闭"
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[340px_minmax(0,1fr)] gap-6">
-          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 space-y-4">
-            <div>
-              <p className="text-sm text-white/55 mb-2">裁切比例</p>
-              <div className="flex flex-wrap gap-2">
-                {aspectRatios.map(([key, label]) => (
+        <div className="grid flex-1 grid-cols-1 overflow-y-auto md:min-h-0 md:grid-cols-[300px_minmax(0,1fr)] md:overflow-hidden">
+          <aside className="border-b border-white/10 bg-white/[0.025] px-4 py-4 md:min-h-0 md:overflow-y-auto md:border-b-0 md:border-r">
+            <div className="space-y-4">
+              <section className="rounded-2xl border border-white/10 bg-black/22 p-3.5">
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="text-sm font-medium text-white/78">比例</p>
                   <button
-                    key={key}
-                    onClick={() => {
-                      setAspectRatio(key);
-                      setCrop((prev) => fitCropToAspectRatio(prev, key));
-                    }}
-                    className={`px-3 py-2 rounded-xl text-sm transition-colors ${aspectRatio === key ? 'bg-purple-500/24 border border-purple-400/40 text-purple-200' : 'bg-white/8 border border-white/10 text-white/65 hover:bg-white/14 hover:text-white'}`}
+                    onClick={centerCrop}
+                    className="rounded-full border border-white/10 bg-white/[0.06] px-2.5 py-1 text-xs text-white/55 transition-colors hover:bg-white/[0.12] hover:text-white"
                   >
-                    {label}
+                    居中
                   </button>
-                ))}
-              </div>
-            </div>
+                </div>
+                <div className="grid grid-cols-4 gap-2">
+                  {aspectRatios.map(([key, label]) => (
+                    <button
+                      key={key}
+                      onClick={() => {
+                        setAspectRatio(key);
+                        setCrop((prev) => fitCropToAspectRatio(prev, key));
+                      }}
+                      className={`h-9 rounded-xl border text-sm transition-colors ${aspectRatio === key ? 'border-fuchsia-300/50 bg-fuchsia-400/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.06] text-white/62 hover:bg-white/[0.12] hover:text-white'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </section>
 
-            <div>
-              <div className="flex items-center justify-between mb-2 text-sm text-white/55">
-                <span>画面缩放</span>
-                <span>{Math.round(scale * 100)}%</span>
-              </div>
-              <input
-                type="range"
-                min="0.5"
-                max="2"
-                step="0.01"
-                value={scale}
-                onChange={(event) => setScale(Number(event.target.value))}
-                className="w-full"
-              />
-            </div>
+              <section className="rounded-2xl border border-white/10 bg-black/22 p-3.5">
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span className="font-medium text-white/78">缩放</span>
+                  <span className="text-white/42">{Math.round(scale * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="2"
+                  step="0.01"
+                  value={scale}
+                  onChange={(event) => setScale(Number(event.target.value))}
+                  className="w-full accent-fuchsia-400"
+                />
+              </section>
 
-            <div>
-              <div className="flex items-center justify-between mb-2 text-sm text-white/55">
-                <span>旋转</span>
-                <span>{Math.round(rotation)}°</span>
-              </div>
-              <input
-                type="range"
-                min="-180"
-                max="180"
-                step="1"
-                value={rotation}
-                onChange={(event) => setRotation(normalizeSignedRotation(Number(event.target.value)))}
-                className="mb-3 w-full"
-              />
-              <div className="flex flex-wrap gap-2">
-                <button onClick={() => rotateImage(-90)} className="rounded-lg border border-white/10 bg-white/8 px-2.5 py-1.5 text-xs text-white/70 hover:bg-white/14 hover:text-white transition-colors">
-                  左转90°
-                </button>
-                <button onClick={() => rotateImage(180)} className="rounded-lg border border-white/10 bg-white/8 px-2.5 py-1.5 text-xs text-white/70 hover:bg-white/14 hover:text-white transition-colors">
-                  转180°
-                </button>
-                <button onClick={() => rotateImage(90)} className="rounded-lg border border-white/10 bg-white/8 px-2.5 py-1.5 text-xs text-white/70 hover:bg-white/14 hover:text-white transition-colors">
-                  右转90°
-                </button>
-                <button onClick={() => setRotation(0)} className="rounded-lg border border-white/10 bg-white/8 px-2.5 py-1.5 text-xs text-white/70 hover:bg-white/14 hover:text-white transition-colors">
-                  还原
-                </button>
-              </div>
-            </div>
+              <section className="rounded-2xl border border-white/10 bg-black/22 p-3.5">
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span className="font-medium text-white/78">旋转</span>
+                  <span className="text-white/42">{Math.round(rotation)}°</span>
+                </div>
+                <input
+                  type="range"
+                  min="-180"
+                  max="180"
+                  step="1"
+                  value={rotation}
+                  onChange={(event) => setRotation(normalizeSignedRotation(Number(event.target.value)))}
+                  className="mb-3 w-full accent-fuchsia-400"
+                />
+                <div className="grid grid-cols-4 gap-2">
+                  {[
+                    ['左90', () => rotateImage(-90)],
+                    ['180', () => rotateImage(180)],
+                    ['右90', () => rotateImage(90)],
+                    ['归零', () => setRotation(0)],
+                  ].map(([label, action]) => (
+                    <button
+                      key={String(label)}
+                      onClick={action as () => void}
+                      className="h-8 rounded-lg border border-white/10 bg-white/[0.06] text-xs text-white/62 transition-colors hover:bg-white/[0.12] hover:text-white"
+                    >
+                      {String(label)}
+                    </button>
+                  ))}
+                </div>
+              </section>
 
-            <div>
-              <p className="text-sm text-white/55 mb-2">翻转</p>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => setFlipHorizontal((current) => !current)}
-                  className={`rounded-xl border px-3 py-2 text-sm transition-colors ${flipHorizontal ? 'border-purple-400/45 bg-purple-500/22 text-purple-100' : 'border-white/10 bg-white/8 text-white/70 hover:bg-white/14 hover:text-white'}`}
-                >
-                  水平翻转
-                </button>
-                <button
-                  onClick={() => setFlipVertical((current) => !current)}
-                  className={`rounded-xl border px-3 py-2 text-sm transition-colors ${flipVertical ? 'border-purple-400/45 bg-purple-500/22 text-purple-100' : 'border-white/10 bg-white/8 text-white/70 hover:bg-white/14 hover:text-white'}`}
-                >
-                  垂直翻转
-                </button>
-              </div>
-            </div>
+              <section className="rounded-2xl border border-white/10 bg-black/22 p-3.5">
+                <p className="mb-3 text-sm font-medium text-white/78">翻转</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setFlipHorizontal((current) => !current)}
+                    className={`h-9 rounded-xl border text-sm transition-colors ${flipHorizontal ? 'border-fuchsia-300/50 bg-fuchsia-400/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.06] text-white/62 hover:bg-white/[0.12] hover:text-white'}`}
+                  >
+                    水平
+                  </button>
+                  <button
+                    onClick={() => setFlipVertical((current) => !current)}
+                    className={`h-9 rounded-xl border text-sm transition-colors ${flipVertical ? 'border-fuchsia-300/50 bg-fuchsia-400/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.06] text-white/62 hover:bg-white/[0.12] hover:text-white'}`}
+                  >
+                    垂直
+                  </button>
+                </div>
+              </section>
 
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-3 text-xs text-white/45 leading-6">
-              <p>当前裁切框</p>
-              <p>X: {crop.x.toFixed(1)}%</p>
-              <p>Y: {crop.y.toFixed(1)}%</p>
-              <p>宽: {crop.width.toFixed(1)}%</p>
-              <p>高: {crop.height.toFixed(1)}%</p>
-              <p>取景缩放: {Math.round(scale * 100)}%</p>
-            </div>
+              <section className="rounded-2xl border border-white/10 bg-black/22 p-3.5">
+                <p className="mb-3 text-sm font-medium text-white/78">输出</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setOutputSizeMode('crop')}
+                    className={`h-9 rounded-xl border text-sm transition-colors ${outputSizeMode === 'crop' ? 'border-fuchsia-300/50 bg-fuchsia-400/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.06] text-white/62 hover:bg-white/[0.12] hover:text-white'}`}
+                  >
+                    裁切尺寸
+                  </button>
+                  <button
+                    onClick={() => {
+                      setOutputSizeMode('custom');
+                      if (!customOutputWidth) setCustomOutputWidth(String(cropPixelSize.width || ''));
+                      if (!customOutputHeight) setCustomOutputHeight(String(cropPixelSize.height || ''));
+                    }}
+                    className={`h-9 rounded-xl border text-sm transition-colors ${outputSizeMode === 'custom' ? 'border-fuchsia-300/50 bg-fuchsia-400/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.06] text-white/62 hover:bg-white/[0.12] hover:text-white'}`}
+                  >
+                    自定义
+                  </button>
+                </div>
 
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-3 space-y-3">
-              <div>
-                <p className="text-sm text-white/55">输出画布</p>
-                <p className="mt-1 text-xs text-white/35">可直接沿用当前裁切像素，或手动指定导出宽高，类似 PS 调整画布大小。</p>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => setOutputSizeMode('crop')}
-                  className={`rounded-xl border px-3 py-2 text-sm transition-colors ${outputSizeMode === 'crop' ? 'border-purple-400/40 bg-purple-500/22 text-purple-100' : 'border-white/10 bg-white/8 text-white/70 hover:bg-white/14 hover:text-white'}`}
-                >
-                  跟随裁切
-                </button>
-                <button
-                  onClick={() => {
-                    setOutputSizeMode('custom');
-                    if (!customOutputWidth) setCustomOutputWidth(String(cropPixelSize.width || ''));
-                    if (!customOutputHeight) setCustomOutputHeight(String(cropPixelSize.height || ''));
+                {outputSizeMode === 'custom' && (
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <label className="rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2">
+                      <span className="mb-1 block text-xs text-white/35">宽</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="12000"
+                        inputMode="numeric"
+                        value={customOutputWidth}
+                        onChange={(event) => setCustomOutputWidth(event.target.value.replace(/[^\d]/g, ''))}
+                        className="w-full bg-transparent text-base font-semibold text-white outline-none"
+                        placeholder={String(cropPixelSize.width || '')}
+                      />
+                    </label>
+                    <label className="rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2">
+                      <span className="mb-1 block text-xs text-white/35">高</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="12000"
+                        inputMode="numeric"
+                        value={customOutputHeight}
+                        onChange={(event) => setCustomOutputHeight(event.target.value.replace(/[^\d]/g, ''))}
+                        className="w-full bg-transparent text-base font-semibold text-white outline-none"
+                        placeholder={String(cropPixelSize.height || '')}
+                      />
+                    </label>
+                  </div>
+                )}
+              </section>
+            </div>
+          </aside>
+
+          <div className="relative min-h-[360px] overflow-hidden bg-[#050507] md:min-h-[520px]">
+            <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:26px_26px]" />
+            <div className="relative flex h-full min-h-[360px] items-center justify-center p-5 md:min-h-[520px] lg:p-8">
+              <div className="relative flex h-full w-full items-center justify-center rounded-2xl border border-white/10 bg-black/35 p-4 shadow-inner">
+                <div
+                  ref={viewportRef}
+                  className="relative max-h-[420px] w-full max-w-[680px] overflow-hidden rounded-xl border border-white/12 bg-black/60 md:max-h-[min(650px,calc(100vh-210px))]"
+                  style={{
+                    aspectRatio: previewAspectRatio,
+                    maxWidth: rotatedSize.width > 0 && rotatedSize.height > 0 && rotatedSize.height > rotatedSize.width ? '430px' : '680px',
                   }}
-                  className={`rounded-xl border px-3 py-2 text-sm transition-colors ${outputSizeMode === 'custom' ? 'border-purple-400/40 bg-purple-500/22 text-purple-100' : 'border-white/10 bg-white/8 text-white/70 hover:bg-white/14 hover:text-white'}`}
                 >
-                  自定义画布
-                </button>
+                  <SafeImage
+                    ref={imageRef}
+                    src={imageUrl}
+                    alt="裁切中的素材"
+                    width={naturalSize.width || 1200}
+                    height={naturalSize.height || 1200}
+                    className="absolute left-1/2 top-1/2 object-fill"
+                    onLoad={(event) => {
+                      setNaturalSize({
+                        width: event.currentTarget.naturalWidth,
+                        height: event.currentTarget.naturalHeight,
+                      });
+                    }}
+                    style={{
+                      ...rotatedImageStyle,
+                      transformOrigin: 'center center',
+                    }}
+                  />
+
+                  <div
+                    className={`absolute cursor-move border-2 shadow-[0_0_0_9999px_rgba(0,0,0,0.42)] transition-colors ${isDraggingCrop ? 'border-white' : 'border-fuchsia-300'}`}
+                    style={{
+                      left: `${crop.x}%`,
+                      top: `${crop.y}%`,
+                      width: `${crop.width}%`,
+                      height: `${crop.height}%`,
+                    }}
+                    onPointerDown={(event) => startDrag('move', event)}
+                  >
+                    <div className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3">
+                      {Array.from({ length: 9 }).map((_, index) => (
+                        <span key={index} className="border border-white/16" />
+                      ))}
+                    </div>
+                    <div className="pointer-events-none absolute left-2 top-2 rounded-md border border-black/30 bg-black/62 px-2 py-1 text-xs font-medium text-white shadow-lg backdrop-blur">
+                      {cropPixelSize.width || '--'} x {cropPixelSize.height || '--'} px
+                    </div>
+                    {([
+                      ['top-left', 'left-0 top-0 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize'],
+                      ['top', 'left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize'],
+                      ['top-right', 'right-0 top-0 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize'],
+                      ['right', 'right-0 top-1/2 translate-x-1/2 -translate-y-1/2 cursor-ew-resize'],
+                      ['bottom-right', 'right-0 bottom-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize'],
+                      ['bottom', 'left-1/2 bottom-0 -translate-x-1/2 translate-y-1/2 cursor-ns-resize'],
+                      ['bottom-left', 'left-0 bottom-0 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize'],
+                      ['left', 'left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize'],
+                    ] as Array<[CropHandle, string]>).map(([handle, className]) => (
+                      <span
+                        key={handle}
+                        className={`absolute h-4 w-4 rounded-full border border-white/65 bg-fuchsia-300 shadow-[0_0_0_3px_rgba(0,0,0,0.26)] ${className}`}
+                        onPointerDown={(event) => startDrag(handle, event)}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="pointer-events-none absolute inset-0 ring-1 ring-white/10" />
+                </div>
               </div>
-
-              {outputSizeMode === 'custom' && (
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="rounded-xl border border-white/10 bg-white/8 px-3 py-2">
-                    <span className="mb-1 block text-xs text-white/40">宽度</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="12000"
-                      inputMode="numeric"
-                      value={customOutputWidth}
-                      onChange={(event) => setCustomOutputWidth(event.target.value.replace(/[^\d]/g, ''))}
-                      className="w-full bg-transparent text-lg font-semibold text-white outline-none"
-                      placeholder={String(cropPixelSize.width || '')}
-                    />
-                  </label>
-                  <label className="rounded-xl border border-white/10 bg-white/8 px-3 py-2">
-                    <span className="mb-1 block text-xs text-white/40">高度</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="12000"
-                      inputMode="numeric"
-                      value={customOutputHeight}
-                      onChange={(event) => setCustomOutputHeight(event.target.value.replace(/[^\d]/g, ''))}
-                      className="w-full bg-transparent text-lg font-semibold text-white outline-none"
-                      placeholder={String(cropPixelSize.height || '')}
-                    />
-                  </label>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl border border-white/10 bg-white/8 px-3 py-2">
-                  <span className="block text-xs text-white/40 mb-1">宽度</span>
-                  <span className="text-lg font-semibold text-white">{resolvedOutputSize.width || '--'} px</span>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-white/8 px-3 py-2">
-                  <span className="block text-xs text-white/40 mb-1">高度</span>
-                  <span className="text-lg font-semibold text-white">{resolvedOutputSize.height || '--'} px</span>
-                </div>
-              </div>
-              <p className="text-xs text-white/35">
-                {resolvedOutputSize.isCustom ? '当前将按自定义画布尺寸导出。' : '当前按裁切框在原图中的实际像素导出。'}
-              </p>
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <button onClick={resetCrop} className="flex-1 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/16 text-white/75 transition-colors">
-                重置
-              </button>
-              <button
-                onClick={exportCroppedImage}
-                disabled={isExporting}
-                className="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isExporting ? '导出中...' : '完成并生成'}
-              </button>
             </div>
           </div>
+        </div>
 
-          <div className="rounded-2xl border border-white/10 bg-black/35 p-5 flex items-center justify-center overflow-hidden min-h-[520px]">
-            <div
-              ref={viewportRef}
-              className="relative max-h-[620px] w-full max-w-[620px] overflow-hidden rounded-2xl border border-white/10 bg-black/40"
-              style={{
-                aspectRatio: previewAspectRatio,
-                maxWidth: rotatedSize.width > 0 && rotatedSize.height > 0 && rotatedSize.height > rotatedSize.width ? '420px' : '620px',
-              }}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 bg-[#0b0b12]/96 px-5 py-4">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-white/45">
+            <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5">X {crop.x.toFixed(1)}%</span>
+            <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5">Y {crop.y.toFixed(1)}%</span>
+            <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5">缩放 {Math.round(scale * 100)}%</span>
+            <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5">旋转 {Math.round(rotation)}°</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={resetCrop}
+              className="rounded-xl border border-white/10 bg-white/[0.06] px-4 py-2.5 text-sm font-medium text-white/70 transition-colors hover:bg-white/[0.12] hover:text-white"
             >
-              <SafeImage
-                ref={imageRef}
-                src={imageUrl}
-                alt="裁切中的素材"
-                width={naturalSize.width || 1200}
-                height={naturalSize.height || 1200}
-                className="absolute left-1/2 top-1/2 object-fill"
-                onLoad={(event) => {
-                  setNaturalSize({
-                    width: event.currentTarget.naturalWidth,
-                    height: event.currentTarget.naturalHeight,
-                  });
-                }}
-                style={{
-                  ...rotatedImageStyle,
-                  transformOrigin: 'center center',
-                }}
-              />
-
-              <div
-                className="absolute border-2 border-fuchsia-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)] cursor-move"
-                style={{
-                  left: `${crop.x}%`,
-                  top: `${crop.y}%`,
-                  width: `${crop.width}%`,
-                  height: `${crop.height}%`,
-                }}
-                onPointerDown={(event) => startDrag('move', event)}
-              >
-                {([
-                  ['top-left', 'left-0 top-0 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize'],
-                  ['top', 'left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize'],
-                  ['top-right', 'right-0 top-0 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize'],
-                  ['right', 'right-0 top-1/2 translate-x-1/2 -translate-y-1/2 cursor-ew-resize'],
-                  ['bottom-right', 'right-0 bottom-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize'],
-                  ['bottom', 'left-1/2 bottom-0 -translate-x-1/2 translate-y-1/2 cursor-ns-resize'],
-                  ['bottom-left', 'left-0 bottom-0 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize'],
-                  ['left', 'left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize'],
-                ] as Array<[CropHandle, string]>).map(([handle, className]) => (
-                  <span
-                    key={handle}
-                    className={`absolute h-4 w-4 rounded-full bg-fuchsia-400 border border-white/40 ${className}`}
-                    onPointerDown={(event) => startDrag(handle, event)}
-                  />
-                ))}
-              </div>
-
-              <div className="absolute inset-0 ring-1 ring-white/10 pointer-events-none" />
-            </div>
+              重置
+            </button>
+            <button
+              onClick={onClose}
+              className="rounded-xl border border-white/10 bg-white/[0.06] px-4 py-2.5 text-sm font-medium text-white/70 transition-colors hover:bg-white/[0.12] hover:text-white"
+            >
+              取消
+            </button>
+            <button
+              onClick={exportCroppedImage}
+              disabled={isExporting}
+              className="min-w-[132px] rounded-xl bg-gradient-to-r from-fuchsia-500 to-blue-500 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_14px_32px_rgba(59,130,246,0.24)] transition-all hover:from-fuchsia-400 hover:to-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isExporting ? '导出中...' : '完成并生成'}
+            </button>
           </div>
         </div>
       </div>
