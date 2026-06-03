@@ -13,6 +13,8 @@ const IMAGE_RESULT_DOWNLOAD_MAX_BYTES = 80 * 1024 * 1024;
 const IMAGE_EDIT_TIMEOUT_MS = 300000;
 const IMAGE_EDIT_MAX_ATTEMPTS = 2;
 const IMAGE_EDIT_RETRY_DELAY_MS = 1500;
+const IMAGE_SOURCE_DOWNLOAD_MAX_ATTEMPTS = 4;
+const IMAGE_SOURCE_DOWNLOAD_RETRY_DELAY_MS = 2000;
 const IMAGE_EDIT_PRIMARY_FALLBACK_TIMEOUT_MS = 60000;
 const RUNNINGHUB_MIN_FALLBACK_TIMEOUT_MS = 30000;
 const RUNNINGHUB_IMAGE_TO_IMAGE_URL = 'https://www.runninghub.cn/openapi/v2/rhart-image-g-2/image-to-image';
@@ -194,6 +196,11 @@ function isTransientRunningHubError(error: unknown) {
   return /fetch failed|ECONNRESET|ETIMEDOUT|timeout|AbortError|502|503|504/i.test(error.message);
 }
 
+function isTransientImageDownloadError(error: unknown) {
+  if (!(error instanceof Error)) return true;
+  return /fetch failed|下载图片超时|ECONNRESET|ETIMEDOUT|timeout|AbortError|502|503|504/i.test(error.message);
+}
+
 function getFallbackAwarePrimaryTimeoutMs(totalTimeoutMs: number) {
   if (!getRunningHubApiKey()) return totalTimeoutMs;
   return Math.min(totalTimeoutMs, IMAGE_EDIT_PRIMARY_FALLBACK_TIMEOUT_MS);
@@ -368,6 +375,25 @@ async function fetchRunningHubResultBuffer(resultUrl: string, deadlineAt: number
   throw lastError instanceof Error ? lastError : new ImageEditTimeoutError('RunningHub备用通道结果图下载超时');
 }
 
+async function fetchSourceImageBufferWithRetry(imageUrl: string, localMaterialOrigin?: string | null) {
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= IMAGE_SOURCE_DOWNLOAD_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await fetchImageBuffer(imageUrl, IMAGE_DOWNLOAD_MAX_BYTES, localMaterialOrigin);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= IMAGE_SOURCE_DOWNLOAD_MAX_ATTEMPTS || !isTransientImageDownloadError(error)) {
+        break;
+      }
+      console.warn(`[Psydo图像编辑] 源图下载失败，准备重试 ${attempt}/${IMAGE_SOURCE_DOWNLOAD_MAX_ATTEMPTS}: ${getErrorMessage(error)}`);
+      await sleep(IMAGE_SOURCE_DOWNLOAD_RETRY_DELAY_MS * attempt);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('源图下载失败');
+}
+
 async function runRunningHubFallbackFromUrl(
   params: ImageEditFormParams,
   imageUrl: string,
@@ -493,10 +519,35 @@ async function runImageEditWithTarget(
 }
 
 export async function runPsydoImageEditWithMetaFromUrl(params: ImageEditParams): Promise<{ buffer: Buffer; meta: ImageEditMeta }> {
-  const sourceBuffer = await fetchImageBuffer(params.imageUrl, IMAGE_DOWNLOAD_MAX_BYTES, params.localMaterialOrigin);
-  const normalizedBuffer = await sharp(sourceBuffer).rotate().png().toBuffer();
+  const startedAt = Date.now();
 
-  return runPsydoImageEditWithMetaFromPreparedBuffer(params, normalizedBuffer, params.imageUrl);
+  try {
+    const sourceBuffer = await fetchSourceImageBufferWithRetry(params.imageUrl, params.localMaterialOrigin);
+    const normalizedBuffer = await sharp(sourceBuffer).rotate().png().toBuffer();
+
+    return runPsydoImageEditWithMetaFromPreparedBuffer(params, normalizedBuffer, params.imageUrl);
+  } catch (error) {
+    if (!shouldUseRunningHubFallback(error)) {
+      throw error;
+    }
+
+    console.warn(`[Psydo图像编辑] 源图下载/预处理失败，直接切换 RunningHub 备用通道: ${getErrorMessage(error)}`);
+    const totalTimeoutMs = params.timeoutMs || IMAGE_EDIT_TIMEOUT_MS;
+    const fallbackTimeoutMs = getRemainingFallbackTimeoutMs(totalTimeoutMs, startedAt);
+    const buffer = await runRunningHubFallbackFromUrl({
+      ...params,
+      timeoutMs: fallbackTimeoutMs,
+    }, params.imageUrl, Buffer.alloc(1));
+
+    return {
+      buffer,
+      meta: {
+        model: 'rhart-image-g-2',
+        baseUrl: RUNNINGHUB_IMAGE_TO_IMAGE_URL,
+        targetName: 'runninghub-fallback',
+      },
+    };
+  }
 }
 
 export async function runPsydoImageEditWithMetaFromPreparedBuffer(
