@@ -24,8 +24,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: false, error: '未登录' }, { status: 401 })
   }
 
-  const folders = await materialFolderManager.getUserFolders(userId)
-  return NextResponse.json({ success: true, data: folders })
+  try {
+    const folders = await materialFolderManager.getUserFolders(userId)
+    return NextResponse.json({ success: true, data: folders })
+  } catch (error) {
+    console.error('[素材文件夹] 加载失败:', error)
+    return NextResponse.json({ success: false, error: '文件夹加载失败，请稍后重试' }, { status: 500 })
+  }
 }
 
 export async function POST(request: NextRequest) {

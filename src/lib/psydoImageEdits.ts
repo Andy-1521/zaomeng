@@ -5,6 +5,7 @@ import {
   getOpenAICompatImageModel,
 } from '@/lib/openaiCompatible';
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
+import { uploadToCozeStorage } from '@/lib/dualStorage';
 
 const IMAGE_DOWNLOAD_TIMEOUT_MS = 30000;
 const IMAGE_DOWNLOAD_MAX_BYTES = 30 * 1024 * 1024;
@@ -12,6 +13,13 @@ const IMAGE_RESULT_DOWNLOAD_MAX_BYTES = 80 * 1024 * 1024;
 const IMAGE_EDIT_TIMEOUT_MS = 300000;
 const IMAGE_EDIT_MAX_ATTEMPTS = 2;
 const IMAGE_EDIT_RETRY_DELAY_MS = 1500;
+const IMAGE_EDIT_PRIMARY_FALLBACK_TIMEOUT_MS = 60000;
+const RUNNINGHUB_MIN_FALLBACK_TIMEOUT_MS = 30000;
+const RUNNINGHUB_IMAGE_TO_IMAGE_URL = 'https://www.runninghub.cn/openapi/v2/rhart-image-g-2/image-to-image';
+const RUNNINGHUB_QUERY_URL = 'https://www.runninghub.cn/openapi/v2/query';
+const RUNNINGHUB_FALLBACK_CHECK_INTERVAL_MS = 5000;
+const RUNNINGHUB_QUERY_RETRY_DELAY_MS = 3000;
+const RUNNINGHUB_RESULT_DOWNLOAD_RETRY_DELAY_MS = 5000;
 
 type ImageEditTarget = {
   name: 'primary';
@@ -41,10 +49,21 @@ type ImageEditResponse = {
   data?: Array<{ b64_json?: string; url?: string }>;
 };
 
+type ImageEditTargetName = ImageEditTarget['name'] | 'runninghub-fallback';
+
 type ImageEditMeta = {
   model: string;
   baseUrl: string;
-  targetName: ImageEditTarget['name'];
+  targetName: ImageEditTargetName;
+};
+
+type RunningHubImageToImageResponse = {
+  taskId?: string;
+  status?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  results?: unknown;
+  failedReason?: unknown;
 };
 
 export class ImageEditTimeoutError extends Error {
@@ -159,6 +178,227 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function getRunningHubApiKey() {
+  return process.env.RUNNINGHUB_API_KEY || '';
+}
+
+function shouldUseRunningHubFallback(error: unknown) {
+  if (!getRunningHubApiKey()) return false;
+  if (isImageEditTimeoutError(error)) return true;
+  if (!(error instanceof Error)) return true;
+  return /不支持该模型|invalid_request_error|upstream_error|Upstream service temporarily unavailable|fetch failed|502|503|504/i.test(error.message);
+}
+
+function isTransientRunningHubError(error: unknown) {
+  if (!(error instanceof Error)) return true;
+  return /fetch failed|ECONNRESET|ETIMEDOUT|timeout|AbortError|502|503|504/i.test(error.message);
+}
+
+function getFallbackAwarePrimaryTimeoutMs(totalTimeoutMs: number) {
+  if (!getRunningHubApiKey()) return totalTimeoutMs;
+  return Math.min(totalTimeoutMs, IMAGE_EDIT_PRIMARY_FALLBACK_TIMEOUT_MS);
+}
+
+function getRemainingFallbackTimeoutMs(totalTimeoutMs: number, startedAt: number) {
+  const remainingMs = totalTimeoutMs - (Date.now() - startedAt);
+  return Math.max(RUNNINGHUB_MIN_FALLBACK_TIMEOUT_MS, remainingMs);
+}
+
+function inferRunningHubAspectRatio(params: ImageEditFormParams, normalizedBuffer: Buffer) {
+  if (params.aspectRatio && params.aspectRatio !== 'auto') {
+    return params.aspectRatio;
+  }
+
+  if (params.size) {
+    const match = params.size.match(/^(\d+)x(\d+)$/);
+    if (match) {
+      const width = Number(match[1]);
+      const height = Number(match[2]);
+      if (width > 0 && height > 0) {
+        const ratio = width / height;
+        if (Math.abs(ratio - 1) < 0.08) return '1:1';
+        if (ratio > 1.65) return '16:9';
+        if (ratio > 1.25) return '4:3';
+        if (ratio < 0.62) return '9:16';
+        if (ratio < 0.82) return '3:4';
+      }
+    }
+  }
+
+  return normalizedBuffer.length > 0 ? '1:1' : '1:1';
+}
+
+function inferRunningHubResolution(params: ImageEditFormParams) {
+  if (!params.size) return '1k';
+  const match = params.size.match(/^(\d+)x(\d+)$/);
+  if (!match) return '1k';
+  const longEdge = Math.max(Number(match[1]), Number(match[2]));
+  if (longEdge >= 1800) return '2k';
+  return '1k';
+}
+
+function extractRunningHubResultUrls(value: unknown): string[] {
+  if (!value) return [];
+  if (typeof value === 'string') {
+    return value.startsWith('http://') || value.startsWith('https://') ? [value] : [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(extractRunningHubResultUrls);
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return [
+      ...extractRunningHubResultUrls(record.url),
+      ...extractRunningHubResultUrls(record.imageUrl),
+      ...extractRunningHubResultUrls(record.image_url),
+      ...extractRunningHubResultUrls(record.resultUrl),
+      ...extractRunningHubResultUrls(record.results),
+      ...extractRunningHubResultUrls(record.data),
+    ];
+  }
+  return [];
+}
+
+async function createRunningHubImageToImageTask(params: ImageEditFormParams, imageUrl: string, normalizedBuffer: Buffer) {
+  const apiKey = getRunningHubApiKey();
+  if (!apiKey) {
+    throw new Error('缺少 RUNNINGHUB_API_KEY');
+  }
+
+  const response = await fetch(RUNNINGHUB_IMAGE_TO_IMAGE_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      imageUrls: [imageUrl],
+      prompt: params.prompt,
+      aspectRatio: inferRunningHubAspectRatio(params, normalizedBuffer),
+      resolution: inferRunningHubResolution(params),
+    }),
+  });
+
+  const text = await response.text();
+  let data: RunningHubImageToImageResponse;
+  try {
+    data = JSON.parse(text) as RunningHubImageToImageResponse;
+  } catch {
+    throw new Error(`RunningHub备用通道返回格式异常: ${text.slice(0, 200)}`);
+  }
+
+  if (!response.ok || data.errorCode) {
+    throw new Error(`RunningHub备用通道创建失败: ${data.errorMessage || data.errorCode || text.slice(0, 200)}`);
+  }
+
+  if (!data.taskId) {
+    throw new Error('RunningHub备用通道未返回任务ID');
+  }
+
+  return data.taskId;
+}
+
+async function queryRunningHubTask(taskId: string) {
+  let response: Response;
+  try {
+    response = await fetch(RUNNINGHUB_QUERY_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getRunningHubApiKey()}`,
+      },
+      body: JSON.stringify({ taskId }),
+    });
+  } catch (error) {
+    if (isTransientRunningHubError(error)) {
+      return {
+        status: 'PENDING',
+        errorMessage: getErrorMessage(error),
+        results: [],
+      };
+    }
+    throw error;
+  }
+
+  const text = await response.text();
+  let data: RunningHubImageToImageResponse;
+  try {
+    data = JSON.parse(text) as RunningHubImageToImageResponse;
+  } catch {
+    throw new Error(`RunningHub备用通道查询返回格式异常: ${text.slice(0, 200)}`);
+  }
+
+  if (!response.ok || data.errorCode) {
+    return {
+      status: 'FAILED',
+      errorMessage: data.errorMessage || data.errorCode || text.slice(0, 200),
+      results: [],
+    };
+  }
+
+  return {
+    status: data.status || '',
+    errorMessage: data.errorMessage || '',
+    results: data.results || [],
+  };
+}
+
+async function fetchRunningHubResultBuffer(resultUrl: string, deadlineAt: number) {
+  let lastError: unknown = null;
+  let attempt = 0;
+
+  while (Date.now() < deadlineAt) {
+    attempt += 1;
+    try {
+      return await fetchImageBuffer(resultUrl, IMAGE_RESULT_DOWNLOAD_MAX_BYTES);
+    } catch (error) {
+      lastError = error;
+      if (!isTransientRunningHubError(error)) {
+        break;
+      }
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 0) {
+        break;
+      }
+      console.warn(`[RunningHub备用通道] 结果图下载失败，准备重试第 ${attempt + 1} 次: ${getErrorMessage(error)}`);
+      await sleep(Math.min(RUNNINGHUB_RESULT_DOWNLOAD_RETRY_DELAY_MS, remainingMs));
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new ImageEditTimeoutError('RunningHub备用通道结果图下载超时');
+}
+
+async function runRunningHubFallbackFromUrl(
+  params: ImageEditFormParams,
+  imageUrl: string,
+  normalizedBuffer: Buffer,
+): Promise<Buffer> {
+  const timeoutMs = params.timeoutMs || IMAGE_EDIT_TIMEOUT_MS;
+  const startedAt = Date.now();
+  const deadlineAt = startedAt + timeoutMs;
+  const taskId = await createRunningHubImageToImageTask(params, imageUrl, normalizedBuffer);
+  console.warn(`[RunningHub备用通道] 图像编辑任务已创建: ${taskId}`);
+
+  while (Date.now() < deadlineAt) {
+    const task = await queryRunningHubTask(taskId);
+    if (task.status === 'SUCCESS') {
+      const [resultUrl] = extractRunningHubResultUrls(task.results);
+      if (!resultUrl) {
+        throw new Error('RunningHub备用通道成功但未返回图片URL');
+      }
+      return fetchRunningHubResultBuffer(resultUrl, deadlineAt);
+    }
+
+    if (task.status === 'FAILED') {
+      throw new Error(`RunningHub备用通道任务失败: ${task.errorMessage || '未知错误'}`);
+    }
+
+    await sleep(task.errorMessage ? RUNNINGHUB_QUERY_RETRY_DELAY_MS : RUNNINGHUB_FALLBACK_CHECK_INTERVAL_MS);
+  }
+
+  throw new ImageEditTimeoutError(`RunningHub备用通道超时（${timeoutMs}ms）`);
+}
+
 export async function runPsydoImageEditFromUrl(params: ImageEditParams): Promise<Buffer> {
   const result = await runPsydoImageEditWithMetaFromUrl(params);
   return result.buffer;
@@ -256,21 +496,54 @@ export async function runPsydoImageEditWithMetaFromUrl(params: ImageEditParams):
   const sourceBuffer = await fetchImageBuffer(params.imageUrl, IMAGE_DOWNLOAD_MAX_BYTES, params.localMaterialOrigin);
   const normalizedBuffer = await sharp(sourceBuffer).rotate().png().toBuffer();
 
-  return runPsydoImageEditWithMetaFromPreparedBuffer(params, normalizedBuffer);
+  return runPsydoImageEditWithMetaFromPreparedBuffer(params, normalizedBuffer, params.imageUrl);
 }
 
 export async function runPsydoImageEditWithMetaFromPreparedBuffer(
   params: PreparedImageEditParams,
   normalizedBuffer: Buffer,
+  fallbackImageUrl?: string,
 ): Promise<{ buffer: Buffer; meta: ImageEditMeta }> {
   const target = getImageEditTarget();
-  const buffer = await runImageEditWithTarget(params, normalizedBuffer, target);
-  return {
-    buffer,
-    meta: {
-      model: target.model,
-      baseUrl: target.baseUrl,
-      targetName: target.name,
-    },
-  };
+  const startedAt = Date.now();
+  const totalTimeoutMs = params.timeoutMs || IMAGE_EDIT_TIMEOUT_MS;
+  const primaryTimeoutMs = getFallbackAwarePrimaryTimeoutMs(totalTimeoutMs);
+  try {
+    const buffer = await runImageEditWithTarget({
+      ...params,
+      timeoutMs: primaryTimeoutMs,
+    }, normalizedBuffer, target);
+    return {
+      buffer,
+      meta: {
+        model: target.model,
+        baseUrl: target.baseUrl,
+        targetName: target.name,
+      },
+    };
+  } catch (error) {
+    if (!shouldUseRunningHubFallback(error)) {
+      throw error;
+    }
+
+    console.warn(`[Psydo图像编辑] 主通道失败，切换 RunningHub 备用通道: ${getErrorMessage(error)}`);
+    const fallbackTimeoutMs = getRemainingFallbackTimeoutMs(totalTimeoutMs, startedAt);
+    const imageUrl = fallbackImageUrl || await uploadToCozeStorage(
+      normalizedBuffer,
+      `runninghub-fallback/inputs/${Date.now()}-${Math.floor(Math.random() * 10000)}.png`,
+      'image/png',
+    );
+    const buffer = await runRunningHubFallbackFromUrl({
+      ...params,
+      timeoutMs: fallbackTimeoutMs,
+    }, imageUrl, normalizedBuffer);
+    return {
+      buffer,
+      meta: {
+        model: 'rhart-image-g-2',
+        baseUrl: RUNNINGHUB_IMAGE_TO_IMAGE_URL,
+        targetName: 'runninghub-fallback',
+      },
+    };
+  }
 }

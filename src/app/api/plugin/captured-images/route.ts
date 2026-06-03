@@ -72,31 +72,36 @@ export async function GET(request: NextRequest) {
     ...(scope.startsWith('folder:') ? { folderId: scope.slice('folder:'.length) } : {}),
   }
 
-  const [images, total] = await Promise.all([
-    capturedImageManager.getUserCapturedImages(userId, { limit, offset, filters }),
-    capturedImageManager.countUserCapturedImages(userId, filters),
-  ])
+  try {
+    const [images, total] = await Promise.all([
+      capturedImageManager.getUserCapturedImages(userId, { limit, offset, filters }),
+      capturedImageManager.countUserCapturedImages(userId, filters),
+    ])
 
-  const displayableImages = images.filter((image) => isLikelyDisplayableImage(image.imageUrl))
-  const data = await Promise.all(displayableImages.map(async (image) => {
-    const thumbnailUrl = await getAliyunOSSThumbnailUrlFromUrl(image.imageUrl, 512).catch(() => null)
-    return {
-      ...image,
-      ...(thumbnailUrl ? { thumbnailUrl } : {}),
-    }
-  }))
+    const displayableImages = images.filter((image) => isLikelyDisplayableImage(image.imageUrl))
+    const data = await Promise.all(displayableImages.map(async (image) => {
+      const thumbnailUrl = await getAliyunOSSThumbnailUrlFromUrl(image.imageUrl, 512).catch(() => null)
+      return {
+        ...image,
+        ...(thumbnailUrl ? { thumbnailUrl } : {}),
+      }
+    }))
 
-  return NextResponse.json({
-    success: true,
-    data,
-    pagination: {
-      limit,
-      offset,
-      total,
-      hasMore: offset + images.length < total,
-      nextOffset: offset + images.length,
-    },
-  })
+    return NextResponse.json({
+      success: true,
+      data,
+      pagination: {
+        limit,
+        offset,
+        total,
+        hasMore: offset + images.length < total,
+        nextOffset: offset + images.length,
+      },
+    })
+  } catch (error) {
+    console.error('[插件图库] 加载失败:', error)
+    return NextResponse.json({ success: false, error: '素材库加载失败，请稍后重试' }, { status: 500 })
+  }
 }
 
 export async function DELETE(request: NextRequest) {

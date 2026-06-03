@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Image, { type ImageLoaderProps, type ImageProps } from 'next/image';
+import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useUser } from '@/contexts/UserContext';
 
@@ -13,6 +14,27 @@ const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
 
 function SafeImage({ alt, ...props }: Omit<ImageProps, 'loader'>) {
   return <Image {...props} alt={alt} loader={passthroughImageLoader} unoptimized />;
+}
+
+function scheduleIdleTask(callback: () => void, timeout = 900) {
+  if (typeof window === 'undefined') return () => undefined;
+
+  let idleId: number | null = null;
+  const timerId = globalThis.setTimeout(() => {
+    if ('requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(callback, { timeout });
+      return;
+    }
+
+    callback();
+  }, timeout);
+
+  return () => {
+    globalThis.clearTimeout(timerId);
+    if (idleId !== null) {
+      window.cancelIdleCallback(idleId);
+    }
+  };
 }
 
 export default function Navbar({ showUserMenu = true }: NavbarProps) {
@@ -36,10 +58,6 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
 
   const pluginNeedsUpdate = pluginReady && latestPluginVersion && (!pluginVersion || compareVersions(pluginVersion, latestPluginVersion) < 0);
 
-  const handlePluginClick = () => {
-    router.push('/plugin');
-  };
-
   const handleLogoClick = () => {
     if (pathname === '/home') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -58,6 +76,8 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
     router.prefetch('/home');
     router.prefetch('/plugin');
     router.prefetch('/profile');
+    router.prefetch('/profile?tab=recharge');
+    router.prefetch('/admin/generations');
 
     const handler = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
@@ -68,19 +88,25 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
       }
     };
 
-    fetch('/api/plugin/version', { credentials: 'include' })
-      .then((response) => response.ok ? response.json() : null)
-      .then((result) => {
-        const version = result?.data?.version;
-        if (typeof version === 'string' && version.trim()) {
-          setLatestPluginVersion(version);
-        }
-      })
-      .catch(() => undefined);
+    const cancelDeferredPluginStatus = scheduleIdleTask(() => {
+      fetch('/api/plugin/version', { credentials: 'include' })
+        .then((response) => response.ok ? response.json() : null)
+        .then((result) => {
+          const version = result?.data?.version;
+          if (typeof version === 'string' && version.trim()) {
+            setLatestPluginVersion(version);
+          }
+        })
+        .catch(() => undefined);
+
+      window.postMessage({ source: 'zaomeng-web', type: 'ZAOMENG_EXTENSION_PING' }, window.location.origin);
+    }, 1800);
 
     window.addEventListener('message', handler);
-    window.postMessage({ source: 'zaomeng-web', type: 'ZAOMENG_EXTENSION_PING' }, window.location.origin);
-    return () => window.removeEventListener('message', handler);
+    return () => {
+      cancelDeferredPluginStatus();
+      window.removeEventListener('message', handler);
+    };
   }, [router]);
 
   return (
@@ -107,9 +133,9 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
         {showUserMenu && user && (
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
             <div className="group relative hidden sm:block">
-              <button
-                type="button"
-                onClick={handlePluginClick}
+              <Link
+                href="/plugin"
+                prefetch
                 className={`px-3 py-1.5 rounded-full border text-xs flex items-center gap-2 transition-colors ${
                   pluginNeedsUpdate
                     ? 'bg-amber-500/15 border-amber-500/35 text-amber-200 hover:bg-amber-500/20'
@@ -120,7 +146,7 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
               >
                 <span className={`w-2 h-2 rounded-full ${pluginNeedsUpdate ? 'bg-amber-300' : pluginReady ? 'bg-green-400' : 'bg-white/40'}`}></span>
                 插件{pluginNeedsUpdate ? '需更新' : pluginReady ? '已连接' : '未连接'}
-              </button>
+              </Link>
               <div className="absolute right-0 top-full z-[90] mt-2 w-80 rounded-2xl border border-white/15 bg-black/85 p-4 text-xs text-white/70 opacity-0 invisible transition-all group-hover:visible group-hover:opacity-100 backdrop-blur-xl">
                 <p className="text-white font-medium mb-2">插件下载与安装</p>
                 {pluginNeedsUpdate ? (
@@ -136,19 +162,20 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
                   <li>选择解压后的 `zaomeng-capture` 目录</li>
                 </ol>
                 <p className="mt-3 text-white/45">安装后刷新网站页面，再去目标网页右键保存图片到造梦AI。</p>
-                <button
-                  type="button"
-                  onClick={handlePluginClick}
+                <Link
+                  href="/plugin"
+                  prefetch
                   className="mt-3 inline-flex items-center justify-center rounded-xl border border-white/12 bg-white/[0.06] px-3 py-2 text-white transition-colors hover:bg-white/[0.12]"
                 >
                   前往插件页面
-                </button>
+                </Link>
               </div>
             </div>
 
             {/* 用户头像和用户名 */}
-            <button
-              onClick={() => router.push('/profile')}
+            <Link
+              href="/profile"
+              prefetch
               className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] p-1 backdrop-blur-md transition-all hover:border-white/18 hover:bg-white/[0.12] sm:gap-3 sm:py-1 sm:pl-1 sm:pr-4"
             >
               <SafeImage
@@ -159,18 +186,18 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
                 className="h-8 w-8 rounded-full border-2 border-purple-500/30 object-cover sm:h-9 sm:w-9"
               />
               <span className="hidden max-w-[180px] truncate font-medium text-white sm:inline">{user.username}</span>
-            </button>
+            </Link>
 
             {/* 积分显示 */}
-            <button
-              type="button"
-              onClick={() => router.push('/profile?tab=recharge')}
+            <Link
+              href="/profile?tab=recharge"
+              prefetch
               className="flex items-center gap-1.5 rounded-full border border-yellow-500/25 bg-yellow-500/12 px-2.5 py-1.5 transition-colors hover:bg-yellow-500/18 sm:px-3"
               title="前往积分兑换"
             >
               <Image src="/points-icon.png" alt="积分" width={16} height={16} className="h-4 w-4" />
               <span className="text-sm text-yellow-300">{user.points}</span>
-            </button>
+            </Link>
 
             {/* 退出登录按钮 */}
             <button

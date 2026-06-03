@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import dynamic from 'next/dynamic';
 import Image, { type ImageLoaderProps, type ImageProps } from 'next/image';
 import { addTaskRecord, getCachedTasks, updateTaskRecordStatus } from '@/components/TaskHistory';
-import CropEditorPanel from '@/components/CropEditorPanel';
-import LocalEditPanel from '@/components/LocalEditPanel';
 import PointsIconLabel from '@/components/PointsIconLabel';
 import { useUser } from '@/contexts/UserContext';
 import { formatPointsLabel, getAiGeneratePoints, getColorExtractionPoints, getHdUpscalePoints, getOutpaintUpsamplingPoints, getRemoveBackgroundPoints, getSmartEditPoints } from '@/lib/pricing';
@@ -231,9 +230,10 @@ type DuplicateReviewState = {
   selectedIds: Set<string>;
 };
 
+const MATERIAL_INITIAL_PAGE_SIZE = 20;
 const MATERIAL_PAGE_SIZE = 60;
 const EMPTY_CAPTURED_IMAGES_PAGINATION: CapturedImagesPagination = {
-  limit: MATERIAL_PAGE_SIZE,
+  limit: MATERIAL_INITIAL_PAGE_SIZE,
   offset: 0,
   total: 0,
   hasMore: false,
@@ -307,6 +307,27 @@ const galleryActions: GalleryAction[] = [
   },
 ];
 
+function scheduleIdleTask(callback: () => void, timeout = 900) {
+  if (typeof window === 'undefined') return () => undefined;
+
+  let idleId: number | null = null;
+  const timerId = globalThis.setTimeout(() => {
+    if ('requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(callback, { timeout });
+      return;
+    }
+
+    callback();
+  }, timeout);
+
+  return () => {
+    globalThis.clearTimeout(timerId);
+    if (idleId !== null) {
+      window.cancelIdleCallback(idleId);
+    }
+  };
+}
+
 const editorActions: EditorAction[] = [
   { id: 'edit-image', label: '裁切工具' },
   { id: 'local-edit', label: '智能改图', points: getSmartEditPoints('2k') },
@@ -356,6 +377,16 @@ const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
 function SafeImage({ alt, ...props }: Omit<ImageProps, 'loader'>) {
   return <Image {...props} alt={alt} loader={passthroughImageLoader} unoptimized />;
 }
+
+const CropEditorPanel = dynamic(() => import('@/components/CropEditorPanel'), {
+  ssr: false,
+  loading: () => null,
+});
+
+const LocalEditPanel = dynamic(() => import('@/components/LocalEditPanel'), {
+  ssr: false,
+  loading: () => null,
+});
 
 function getActionTotalPoints(action: GalleryAction, aiResolution: SmartEditResolution, imageCount: number) {
   const points = action.id === 'ai-generate' ? getAiGeneratePoints(aiResolution) : action.points;
@@ -543,6 +574,17 @@ async function canvasToBlob(canvas: HTMLCanvasElement, mimeType: string, quality
   return new Promise<Blob | null>((resolve) => {
     canvas.toBlob((blob) => resolve(blob), mimeType, quality);
   });
+}
+
+async function parseJsonApiResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
+  const text = await response.text().catch(() => '');
+  if (!text.trim()) return {} as T;
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(fallbackMessage);
+  }
 }
 
 async function prepareImageFileForUpload(file: File): Promise<PreparedUploadFile> {
@@ -1113,6 +1155,7 @@ export default function QuickCreatePage() {
   const orderResultsRequestIdRef = useRef(0);
   const hasLoadedMaterialsRef = useRef(false);
   const hasLoadedOrderResultsRef = useRef(false);
+  const loadingMaterialKeysRef = useRef<Set<string>>(new Set());
   const prefetchedMaterialKeysRef = useRef<Set<string>>(new Set());
   const prefetchedMaterialPaginationRef = useRef<Map<string, CapturedImagesPagination>>(new Map());
   const prefetchingMaterialKeysRef = useRef<Set<string>>(new Set());
@@ -1430,10 +1473,15 @@ export default function QuickCreatePage() {
     const offset = options?.offset ?? 0;
     const append = options?.append === true;
     const preserveCurrent = options?.preserveCurrent === true;
+    const pageSize = append ? MATERIAL_PAGE_SIZE : MATERIAL_INITIAL_PAGE_SIZE;
+    const requestKey = `${materialScope}:${materialFilter}:${offset}:${pageSize}:${append ? 'append' : 'replace'}:${preserveCurrent ? 'preserve' : 'fresh'}`;
+    if (loadingMaterialKeysRef.current.has(requestKey)) return;
+    loadingMaterialKeysRef.current.add(requestKey);
     const requestId = materialRequestIdRef.current + 1;
     materialRequestIdRef.current = requestId;
 
     if (!user?.id) {
+      loadingMaterialKeysRef.current.delete(requestKey);
       hasLoadedMaterialsRef.current = false;
       prefetchedMaterialKeysRef.current.clear();
       prefetchedMaterialPaginationRef.current.clear();
@@ -1455,14 +1503,14 @@ export default function QuickCreatePage() {
 
     try {
       const params = new URLSearchParams({
-        limit: String(MATERIAL_PAGE_SIZE),
+        limit: String(pageSize),
         offset: String(offset),
         scope: materialScope,
         date: materialFilter,
         timezoneOffset: String(new Date().getTimezoneOffset()),
       });
       const response = await fetch(`/api/plugin/captured-images?${params.toString()}`, { credentials: 'include' });
-      const data = await response.json() as CapturedImagesResponse;
+      const data = await parseJsonApiResponse<CapturedImagesResponse>(response, '素材库加载失败');
       if (!response.ok || !data.success || !Array.isArray(data.data)) {
         throw new Error(toUserFacingErrorMessage(data.error || data.message, '素材库加载失败'));
       }
@@ -1471,7 +1519,7 @@ export default function QuickCreatePage() {
 
       const pagination = data.pagination;
       const nextPagination: CapturedImagesPagination = {
-        limit: Number(pagination?.limit ?? MATERIAL_PAGE_SIZE),
+        limit: Number(pagination?.limit ?? pageSize),
         offset: Number(pagination?.offset ?? offset),
         total: Number(pagination?.total ?? data.data.length),
         hasMore: Boolean(pagination?.hasMore),
@@ -1505,6 +1553,7 @@ export default function QuickCreatePage() {
     } catch (error) {
       console.error('[素材库] 加载失败:', error);
     } finally {
+      loadingMaterialKeysRef.current.delete(requestKey);
       if (requestId === materialRequestIdRef.current) {
         setIsLoadingMaterials(false);
         setIsLoadingMoreMaterials(false);
@@ -1560,18 +1609,18 @@ export default function QuickCreatePage() {
 
     try {
       const params = new URLSearchParams({
-        limit: String(MATERIAL_PAGE_SIZE),
+        limit: String(MATERIAL_INITIAL_PAGE_SIZE),
         offset: '0',
         scope,
         date: materialFilter,
         timezoneOffset: String(new Date().getTimezoneOffset()),
       });
       const response = await fetch(`/api/plugin/captured-images?${params.toString()}`, { credentials: 'include' });
-      const data = await response.json() as CapturedImagesResponse;
+      const data = await parseJsonApiResponse<CapturedImagesResponse>(response, '素材库预取失败');
       if (!response.ok || !data.success || !Array.isArray(data.data)) return;
       const pagination = data.pagination;
       const nextPagination: CapturedImagesPagination = {
-        limit: Number(pagination?.limit ?? MATERIAL_PAGE_SIZE),
+        limit: Number(pagination?.limit ?? MATERIAL_INITIAL_PAGE_SIZE),
         offset: Number(pagination?.offset ?? 0),
         total: Number(pagination?.total ?? data.data.length),
         hasMore: Boolean(pagination?.hasMore),
@@ -1660,7 +1709,7 @@ export default function QuickCreatePage() {
 
     try {
       const response = await fetch('/api/task/orders?limit=160', { credentials: 'include' });
-      const data = await response.json() as { success?: boolean; message?: string; data?: RawOrderRecord[] };
+      const data = await parseJsonApiResponse<{ success?: boolean; message?: string; data?: RawOrderRecord[] }>(response, '刷新订单记录失败，请重试');
       if (!response.ok || !data.success || !Array.isArray(data.data)) {
         throw new Error(toUserFacingErrorMessage(data.message, '刷新订单记录失败，请重试'));
       }
@@ -1734,7 +1783,7 @@ export default function QuickCreatePage() {
   const loadMaterialFolders = useCallback(async () => {
     try {
       const response = await fetch('/api/material-folders', { credentials: 'include' });
-      const data = await response.json();
+      const data = await parseJsonApiResponse<{ success?: boolean; data?: MaterialFolder[] }>(response, '加载文件夹失败');
       if (!response.ok || !data.success || !Array.isArray(data.data)) return;
       setMaterialFolders(data.data);
     } catch (error) {
@@ -3150,10 +3199,11 @@ export default function QuickCreatePage() {
   }, [closeDropdowns]);
 
   useEffect(() => {
-    window.postMessage({ source: 'zaomeng-web', type: 'ZAOMENG_EXTENSION_PING' }, window.location.origin);
-    queueMicrotask(() => {
+    const cancelDeferredHomeSetup = scheduleIdleTask(() => {
+      window.postMessage({ source: 'zaomeng-web', type: 'ZAOMENG_EXTENSION_PING' }, window.location.origin);
       void loadMaterialFolders();
-    });
+    }, 900);
+    return cancelDeferredHomeSetup;
   }, [loadMaterialFolders]);
 
   useEffect(() => {
@@ -3302,16 +3352,19 @@ export default function QuickCreatePage() {
       ...Object.fromEntries(cachedProcessingTasks.map((task) => [task.orderId as string, task.time || Date.now()])),
     };
     setHasProcessingOrders(true);
-    void loadOrderResults({ silent: true });
+    const cancelProcessingOrderRefresh = scheduleIdleTask(() => {
+      void loadOrderResults({ silent: true });
+    }, 1800);
+    return cancelProcessingOrderRefresh;
   }, [loadOrderResults, user?.id]);
 
   useEffect(() => {
-    if (!user?.id || hasLoadedOrderResultsRef.current) return;
+    if (!user?.id || libraryView !== 'orders' || hasLoadedOrderResultsRef.current) return;
     const timerId = window.setTimeout(() => {
       void loadOrderResults({ silent: true });
-    }, 500);
+    }, 120);
     return () => window.clearTimeout(timerId);
-  }, [loadOrderResults, user?.id]);
+  }, [libraryView, loadOrderResults, user?.id]);
 
   useEffect(() => {
     clearSelectionState();
@@ -3326,25 +3379,29 @@ export default function QuickCreatePage() {
 
   useEffect(() => {
     if (!user?.id || materialFilter !== 'all' || !hasLoadedMaterialsRef.current) return;
-    void prefetchMaterialScope('favorite');
+    const cancelFavoritePrefetch = scheduleIdleTask(() => {
+      void prefetchMaterialScope('favorite');
+    }, 1400);
+    return cancelFavoritePrefetch;
   }, [capturedImages.length, materialFilter, prefetchMaterialScope, user?.id]);
 
   useEffect(() => {
     const handleTaskUpdate = () => {
+      if (libraryView !== 'orders' && !hasProcessingOrders) return;
       void loadOrderResults();
     };
 
     window.addEventListener('taskHistoryUpdated', handleTaskUpdate);
     return () => window.removeEventListener('taskHistoryUpdated', handleTaskUpdate);
-  }, [loadOrderResults]);
+  }, [hasProcessingOrders, libraryView, loadOrderResults]);
 
   useEffect(() => {
-    if (orderResults.length === 0) return;
+    if (libraryView !== 'orders' || orderResults.length === 0) return;
 
     const urls = orderResults
       .map((image) => getDisplayImageUrl(image.thumbnailUrl || image.imageUrl))
       .filter((url) => url && !preloadedOrderThumbnailUrlsRef.current.has(url))
-      .slice(0, 80);
+      .slice(0, 24);
 
     for (const url of urls) {
       preloadedOrderThumbnailUrlsRef.current.add(url);
@@ -3352,7 +3409,7 @@ export default function QuickCreatePage() {
       img.decoding = 'async';
       img.src = url;
     }
-  }, [orderResults]);
+  }, [libraryView, orderResults]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -3869,10 +3926,35 @@ export default function QuickCreatePage() {
         />
 
         {libraryView === 'gallery' && isLoadingMaterials && capturedImages.length === 0 ? (
-          <div className="rounded-[2rem] border border-white/[0.08] bg-white/[0.025] p-14 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-            <div className="mx-auto mb-5 h-10 w-10 animate-spin rounded-full border-2 border-white/10 border-t-purple-300/80" />
-            <p className="text-base font-medium text-white/70">素材加载中...</p>
-            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-white/40">正在按当前文件夹和日期筛选加载第一页素材。</p>
+          <div className="mb-8 space-y-5">
+            <div className="flex items-center gap-3">
+              <div className="h-7 w-20 animate-pulse rounded-full bg-white/[0.08]" />
+              <div className="h-6 w-16 animate-pulse rounded-full border border-white/[0.08] bg-white/[0.035]" />
+            </div>
+            <div className="flex items-start justify-center" style={{ gap: `${thumbnailGap}px` }}>
+              {Array.from({ length: columnCount }, (_, columnIndex) => (
+                <div
+                  key={`material-skeleton-column-${columnIndex}`}
+                  className="min-w-0 space-y-5"
+                  style={{ width: `${thumbnailSize}px`, maxWidth: `${thumbnailSize}px` }}
+                >
+                  {Array.from({ length: 2 }, (_, itemIndex) => {
+                    const height = Math.max(180, Math.min(360, thumbnailSize * (0.78 + ((columnIndex + itemIndex) % 3) * 0.16)));
+                    return (
+                      <div
+                        key={`material-skeleton-card-${columnIndex}-${itemIndex}`}
+                        className="relative overflow-hidden rounded-[1.35rem] border border-white/[0.08] bg-white/[0.035]"
+                        style={{ height }}
+                      >
+                        <div className="absolute inset-0 animate-pulse bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.08),transparent)]" />
+                        <div className="absolute left-3 top-3 h-7 w-7 rounded-full bg-white/[0.08]" />
+                        <div className="absolute bottom-3 left-3 h-3 w-20 rounded-full bg-white/[0.08]" />
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
           </div>
         ) : isLibraryEmpty ? (
           <div className="rounded-[2rem] border border-white/[0.08] bg-white/[0.025] p-14 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">

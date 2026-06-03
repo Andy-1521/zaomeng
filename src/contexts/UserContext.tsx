@@ -26,6 +26,17 @@ interface UserContextType {
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
+async function parseJsonApiResponse<T>(response: Response): Promise<T | null> {
+  const text = await response.text().catch(() => '');
+  if (!text.trim()) return null;
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
+
 export function UserProvider({ children }: { children: ReactNode }) {
   const [user, setUserState] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -109,11 +120,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
         method: 'GET',
         credentials: 'include',
       });
-      const data = await response.json();
-      if (data.success && data.data) {
+      const data = await parseJsonApiResponse<{ success?: boolean; data?: User }>(response);
+      const refreshedUser = data?.success ? data.data : null;
+      if (refreshedUser) {
         setUserState(prev => {
-          if (!prev) return data.data;
-          const updated = { ...prev, ...data.data };
+          if (!prev) return refreshedUser;
+          const updated = { ...prev, ...refreshedUser };
           const hasChanged =
             updated.id !== prev.id ||
             updated.username !== prev.username ||

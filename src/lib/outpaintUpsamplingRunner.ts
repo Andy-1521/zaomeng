@@ -335,7 +335,7 @@ export async function runOutpaintUpsamplingRoute(request: NextRequest, options: 
         let final4kResult: Final4kResult | null = null;
         let imageEditMeta: {
           model: string;
-          targetName: 'primary';
+          targetName: string;
           baseUrl: string;
         } | null = null;
         console.log(`[${options.logPrefix}] 步骤2: 调用 gpt-image-2 扩图`);

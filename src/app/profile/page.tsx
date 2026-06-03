@@ -9,7 +9,6 @@ import PointsIconLabel from '@/components/PointsIconLabel';
 import RechargePanel from '@/components/RechargePanel';
 import { useUser } from '@/contexts/UserContext';
 import { isRechargeTransaction } from '@/lib/recharge';
-import { showToast } from '@/lib/toast';
 import { toUserFacingErrorMessage } from '@/lib/userFacingError';
 
 type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
@@ -72,7 +71,6 @@ export default function ProfilePage() {
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [isOpeningAdmin, setIsOpeningAdmin] = useState(false);
   const userId = user?.id;
   const username = user?.username || '';
 
@@ -86,6 +84,12 @@ export default function ProfilePage() {
       setActiveTab(tab);
     }
   }, []);
+
+  useEffect(() => {
+    if (user?.isAdmin) {
+      router.prefetch('/admin/generations');
+    }
+  }, [router, user?.isAdmin]);
 
   // 获取用户信息和积分明细
   useEffect(() => {
@@ -162,54 +166,6 @@ export default function ProfilePage() {
 
     return trans.status === '成功';
   });
-
-  const handleOpenAdmin = async () => {
-    if (!user?.id || isOpeningAdmin) {
-      return;
-    }
-
-    if (user.isAdmin) {
-      router.push('/admin/generations');
-      return;
-    }
-
-    setIsOpeningAdmin(true);
-
-    try {
-      const response = await fetch('/api/auth/refresh', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id }),
-      });
-
-      const result = await response.json() as {
-        success?: boolean;
-        data?: { isAdmin?: boolean } & typeof user;
-        message?: string;
-      };
-
-      if (!response.ok || !result.success || !result.data) {
-        showToast(toUserFacingErrorMessage(result.message, '管理员会话校验失败，请重新登录'), 'error');
-        router.push('/login');
-        return;
-      }
-
-      setUser({ ...user, ...result.data });
-
-      if (!result.data.isAdmin) {
-        showToast('当前账号暂无管理员权限', 'error');
-        return;
-      }
-
-      router.push('/admin/generations');
-    } catch (error) {
-      console.error('[Profile] 打开管理员后台失败:', error);
-      showToast('打开管理员后台失败，请稍后重试', 'error');
-    } finally {
-      setIsOpeningAdmin(false);
-    }
-  };
 
   // 获取状态标签
   const getStatusBadge = (status: string) => {
@@ -531,15 +487,14 @@ export default function ProfilePage() {
               </section>
 
               {user.isAdmin && (
-                <button
-                  type="button"
-                  onClick={() => void handleOpenAdmin()}
-                  disabled={isOpeningAdmin}
-                  className="flex w-full items-center justify-between rounded-[1.4rem] border border-violet-300/14 bg-violet-500/[0.05] px-4 py-3.5 text-sm text-white transition hover:bg-violet-500/[0.09] disabled:cursor-not-allowed disabled:opacity-50"
+                <Link
+                  href="/admin/generations"
+                  prefetch
+                  className="flex w-full items-center justify-between rounded-[1.4rem] border border-violet-300/14 bg-violet-500/[0.05] px-4 py-3.5 text-sm text-white transition hover:bg-violet-500/[0.09]"
                 >
-                  <span>{isOpeningAdmin ? '校验权限中...' : '进入管理员后台'}</span>
+                  <span>进入管理员后台</span>
                   <span className="text-white/28">›</span>
-                </button>
+                </Link>
               )}
             </div>
           )}
@@ -619,13 +574,13 @@ export default function ProfilePage() {
                   <h3 className="text-base font-semibold text-white">积分明细</h3>
                   <p className="mt-1 text-sm text-white/38">共 {filteredTransactions.length} / {transactions.length} 条记录</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => router.push('/home')}
+                <Link
+                  href="/home"
+                  prefetch
                   className="shrink-0 rounded-full border border-violet-300/14 bg-violet-500/[0.06] px-4 py-2 text-sm text-violet-100 transition hover:bg-violet-500/[0.12] hover:text-white"
                 >
                   订单记录
-                </button>
+                </Link>
               </div>
 
               <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
