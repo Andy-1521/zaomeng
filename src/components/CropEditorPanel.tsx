@@ -38,6 +38,7 @@ const aspectRatios: Array<[AspectRatio, string]> = [
 ];
 
 const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
+const CROP_SNAP_THRESHOLD = 0.8;
 
 const SafeImage = forwardRef<HTMLImageElement, Omit<ImageProps, 'loader'>>(function SafeImage({ alt, ...props }, ref) {
   return <Image {...props} alt={alt} ref={ref} loader={passthroughImageLoader} unoptimized />;
@@ -99,6 +100,51 @@ function clampCrop(crop: CropBox): CropBox {
   };
 }
 
+function snapValue(value: number, targets: number[], threshold = CROP_SNAP_THRESHOLD) {
+  const target = targets.find((item) => Math.abs(value - item) <= threshold);
+  return typeof target === 'number' ? target : value;
+}
+
+function snapCropToGuides(crop: CropBox): CropBox {
+  const clamped = clampCrop(crop);
+  const centerX = clamped.x + clamped.width / 2;
+  const centerY = clamped.y + clamped.height / 2;
+  let nextX = clamped.x;
+  let nextY = clamped.y;
+
+  const snappedLeft = snapValue(clamped.x, [0]);
+  if (snappedLeft !== clamped.x) {
+    nextX = snappedLeft;
+  }
+
+  const snappedRight = snapValue(clamped.x + clamped.width, [100]);
+  if (snappedRight !== clamped.x + clamped.width) {
+    nextX = snappedRight - clamped.width;
+  }
+
+  const snappedCenterX = snapValue(centerX, [50]);
+  if (snappedCenterX !== centerX) {
+    nextX = snappedCenterX - clamped.width / 2;
+  }
+
+  const snappedTop = snapValue(clamped.y, [0]);
+  if (snappedTop !== clamped.y) {
+    nextY = snappedTop;
+  }
+
+  const snappedBottom = snapValue(clamped.y + clamped.height, [100]);
+  if (snappedBottom !== clamped.y + clamped.height) {
+    nextY = snappedBottom - clamped.height;
+  }
+
+  const snappedCenterY = snapValue(centerY, [50]);
+  if (snappedCenterY !== centerY) {
+    nextY = snappedCenterY - clamped.height / 2;
+  }
+
+  return clampCrop({ ...clamped, x: nextX, y: nextY });
+}
+
 function normalizeSignedRotation(rotation: number) {
   const normalized = ((rotation + 180) % 360 + 360) % 360 - 180;
   return normalized === -180 ? 180 : normalized;
@@ -141,6 +187,8 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
   const [outputSizeMode, setOutputSizeMode] = useState<OutputSizeMode>('crop');
   const [customOutputWidth, setCustomOutputWidth] = useState('');
   const [customOutputHeight, setCustomOutputHeight] = useState('');
+  const [lockOutputRatio, setLockOutputRatio] = useState(true);
+  const [isDirty, setIsDirty] = useState(false);
 
   const rotatedSize = useMemo(() => {
     return getRotatedBoundingSize(naturalSize, rotation);
@@ -202,7 +250,18 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
     };
   }, [cropPixelSize.height, cropPixelSize.width, customOutputHeight, customOutputWidth, outputSizeMode]);
 
+  const cropIsCentered = useMemo(() => {
+    const centerX = crop.x + crop.width / 2;
+    const centerY = crop.y + crop.height / 2;
+    return Math.abs(centerX - 50) <= 0.4 && Math.abs(centerY - 50) <= 0.4;
+  }, [crop.height, crop.width, crop.x, crop.y]);
+
+  const markDirty = useCallback(() => {
+    setIsDirty(true);
+  }, []);
+
   const resetCrop = useCallback(() => {
+    markDirty();
     setAspectRatio('free');
     setScale(1);
     setRotation(0);
@@ -212,20 +271,50 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
     setOutputSizeMode('crop');
     setCustomOutputWidth('');
     setCustomOutputHeight('');
-  }, []);
+    setLockOutputRatio(true);
+  }, [markDirty]);
 
   const rotateImage = useCallback((delta: number) => {
+    markDirty();
     setRotation((prev) => normalizeSignedRotation(prev + delta));
     setCrop((prev) => fitCropToAspectRatio(prev, aspectRatio, naturalSize));
-  }, [aspectRatio, naturalSize]);
+  }, [aspectRatio, markDirty, naturalSize]);
 
   const centerCrop = useCallback(() => {
+    markDirty();
     setCrop((prev) => ({
       ...prev,
       x: Math.max(0, (100 - prev.width) / 2),
       y: Math.max(0, (100 - prev.height) / 2),
     }));
-  }, []);
+  }, [markDirty]);
+
+  const closeWithConfirm = useCallback(() => {
+    if (isDirty && !isExporting && !window.confirm('放弃本次裁切修改吗？')) {
+      return;
+    }
+    onClose();
+  }, [isDirty, isExporting, onClose]);
+
+  const updateCustomOutputWidth = useCallback((value: string) => {
+    const sanitized = value.replace(/[^\d]/g, '');
+    markDirty();
+    setCustomOutputWidth(sanitized);
+    if (!lockOutputRatio || cropPixelSize.width <= 0 || cropPixelSize.height <= 0) return;
+    const width = Number(sanitized);
+    if (!Number.isFinite(width) || width <= 0) return;
+    setCustomOutputHeight(String(Math.max(1, Math.round((width * cropPixelSize.height) / cropPixelSize.width))));
+  }, [cropPixelSize.height, cropPixelSize.width, lockOutputRatio, markDirty]);
+
+  const updateCustomOutputHeight = useCallback((value: string) => {
+    const sanitized = value.replace(/[^\d]/g, '');
+    markDirty();
+    setCustomOutputHeight(sanitized);
+    if (!lockOutputRatio || cropPixelSize.width <= 0 || cropPixelSize.height <= 0) return;
+    const height = Number(sanitized);
+    if (!Number.isFinite(height) || height <= 0) return;
+    setCustomOutputWidth(String(Math.max(1, Math.round((height * cropPixelSize.width) / cropPixelSize.height))));
+  }, [cropPixelSize.height, cropPixelSize.width, lockOutputRatio, markDirty]);
 
   const updateCrop = useCallback((handle: CropHandle, deltaX: number, deltaY: number, origin: CropBox) => {
     const minSize = 10;
@@ -235,7 +324,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
     if (handle === 'move') {
       next.x = Math.max(0, Math.min(100 - origin.width, origin.x + deltaX));
       next.y = Math.max(0, Math.min(100 - origin.height, origin.y + deltaY));
-      setCrop(next);
+      setCrop(snapCropToGuides(next));
       return;
     }
 
@@ -276,7 +365,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
       }
     }
 
-    setCrop(clampCrop(next));
+    setCrop(snapCropToGuides(next));
   }, [aspectRatio, naturalSize]);
 
   useEffect(() => {
@@ -310,6 +399,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
   const startDrag = useCallback((handle: CropHandle, event: React.PointerEvent) => {
     event.preventDefault();
     event.stopPropagation();
+    markDirty();
     setIsDraggingCrop(true);
     dragStateRef.current = {
       handle,
@@ -317,7 +407,27 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
       startY: event.clientY,
       origin: crop,
     };
-  }, [crop]);
+  }, [crop, markDirty]);
+
+  const handleCropKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    const movementByKey: Partial<Record<string, [number, number]>> = {
+      ArrowLeft: [-1, 0],
+      ArrowRight: [1, 0],
+      ArrowUp: [0, -1],
+      ArrowDown: [0, 1],
+    };
+    const movement = movementByKey[event.key];
+    if (!movement) return;
+
+    event.preventDefault();
+    const step = event.shiftKey ? 2 : 0.5;
+    markDirty();
+    setCrop((prev) => snapCropToGuides({
+      ...prev,
+      x: prev.x + movement[0] * step,
+      y: prev.y + movement[1] * step,
+    }));
+  }, [markDirty]);
 
   const exportCroppedImage = useCallback(async () => {
     const image = imageRef.current;
@@ -385,7 +495,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={closeWithConfirm}
             className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.06] text-white/55 transition-colors hover:bg-white/[0.12] hover:text-white"
             title="关闭"
           >
@@ -413,6 +523,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
                     <button
                       key={key}
                       onClick={() => {
+                        markDirty();
                         setAspectRatio(key);
                         setCrop((prev) => fitCropToAspectRatio(prev, key, naturalSize));
                       }}
@@ -435,7 +546,10 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
                   max="2"
                   step="0.01"
                   value={scale}
-                  onChange={(event) => setScale(Number(event.target.value))}
+                  onChange={(event) => {
+                    markDirty();
+                    setScale(Number(event.target.value));
+                  }}
                   className="w-full accent-fuchsia-400"
                 />
               </section>
@@ -451,7 +565,10 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
                   max="180"
                   step="1"
                   value={rotation}
-                  onChange={(event) => setRotation(normalizeSignedRotation(Number(event.target.value)))}
+                  onChange={(event) => {
+                    markDirty();
+                    setRotation(normalizeSignedRotation(Number(event.target.value)));
+                  }}
                   className="mb-3 w-full accent-fuchsia-400"
                 />
                 <div className="grid grid-cols-4 gap-2">
@@ -459,7 +576,10 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
                     ['左90', () => rotateImage(-90)],
                     ['180', () => rotateImage(180)],
                     ['右90', () => rotateImage(90)],
-                    ['归零', () => setRotation(0)],
+                    ['归零', () => {
+                      markDirty();
+                      setRotation(0);
+                    }],
                   ].map(([label, action]) => (
                     <button
                       key={String(label)}
@@ -476,13 +596,19 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
                 <p className="mb-3 text-sm font-medium text-white/78">翻转</p>
                 <div className="grid grid-cols-2 gap-2">
                   <button
-                    onClick={() => setFlipHorizontal((current) => !current)}
+                    onClick={() => {
+                      markDirty();
+                      setFlipHorizontal((current) => !current);
+                    }}
                     className={`h-9 rounded-xl border text-sm transition-colors ${flipHorizontal ? 'border-fuchsia-300/50 bg-fuchsia-400/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.06] text-white/62 hover:bg-white/[0.12] hover:text-white'}`}
                   >
                     水平
                   </button>
                   <button
-                    onClick={() => setFlipVertical((current) => !current)}
+                    onClick={() => {
+                      markDirty();
+                      setFlipVertical((current) => !current);
+                    }}
                     className={`h-9 rounded-xl border text-sm transition-colors ${flipVertical ? 'border-fuchsia-300/50 bg-fuchsia-400/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.06] text-white/62 hover:bg-white/[0.12] hover:text-white'}`}
                   >
                     垂直
@@ -494,51 +620,68 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
                 <p className="mb-3 text-sm font-medium text-white/78">输出</p>
                 <div className="grid grid-cols-2 gap-2">
                   <button
-                    onClick={() => setOutputSizeMode('crop')}
-                    className={`h-8 rounded-xl border text-sm transition-colors ${outputSizeMode === 'crop' ? 'border-fuchsia-300/50 bg-fuchsia-400/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.06] text-white/62 hover:bg-white/[0.12] hover:text-white'}`}
+                    onClick={() => {
+                      markDirty();
+                      setOutputSizeMode('crop');
+                    }}
+                    className={`min-h-9 rounded-xl border px-2 text-sm leading-tight transition-colors ${outputSizeMode === 'crop' ? 'border-fuchsia-300/50 bg-fuchsia-400/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.06] text-white/62 hover:bg-white/[0.12] hover:text-white'}`}
                   >
-                    裁切尺寸
+                    跟随裁切
                   </button>
                   <button
                     onClick={() => {
+                      markDirty();
                       setOutputSizeMode('custom');
                       if (!customOutputWidth) setCustomOutputWidth(String(cropPixelSize.width || ''));
                       if (!customOutputHeight) setCustomOutputHeight(String(cropPixelSize.height || ''));
                     }}
-                    className={`h-8 rounded-xl border text-sm transition-colors ${outputSizeMode === 'custom' ? 'border-fuchsia-300/50 bg-fuchsia-400/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.06] text-white/62 hover:bg-white/[0.12] hover:text-white'}`}
+                    className={`min-h-9 rounded-xl border px-2 text-sm leading-tight transition-colors ${outputSizeMode === 'custom' ? 'border-fuchsia-300/50 bg-fuchsia-400/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.06] text-white/62 hover:bg-white/[0.12] hover:text-white'}`}
                   >
-                    自定义
+                    指定尺寸
                   </button>
                 </div>
 
                 {outputSizeMode === 'custom' && (
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <label className="rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2">
-                      <span className="mb-1 block text-xs text-white/35">宽</span>
-                      <input
-                        type="number"
-                        min="1"
-                        max="12000"
-                        inputMode="numeric"
-                        value={customOutputWidth}
-                        onChange={(event) => setCustomOutputWidth(event.target.value.replace(/[^\d]/g, ''))}
-                        className="w-full bg-transparent text-base font-semibold text-white outline-none"
-                        placeholder={String(cropPixelSize.width || '')}
-                      />
-                    </label>
-                    <label className="rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2">
-                      <span className="mb-1 block text-xs text-white/35">高</span>
-                      <input
-                        type="number"
-                        min="1"
-                        max="12000"
-                        inputMode="numeric"
-                        value={customOutputHeight}
-                        onChange={(event) => setCustomOutputHeight(event.target.value.replace(/[^\d]/g, ''))}
-                        className="w-full bg-transparent text-base font-semibold text-white outline-none"
-                        placeholder={String(cropPixelSize.height || '')}
-                      />
-                    </label>
+                  <div className="mt-3 space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        markDirty();
+                        setLockOutputRatio((current) => !current);
+                      }}
+                      className={`inline-flex w-full items-center justify-between rounded-xl border px-3 py-2 text-xs transition-colors ${lockOutputRatio ? 'border-fuchsia-300/35 bg-fuchsia-400/14 text-fuchsia-100' : 'border-white/10 bg-white/[0.055] text-white/55 hover:bg-white/[0.1] hover:text-white/75'}`}
+                    >
+                      <span>锁定宽高比例</span>
+                      <span>{lockOutputRatio ? '开' : '关'}</span>
+                    </button>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2">
+                        <span className="mb-1 block text-xs text-white/35">宽 px</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="12000"
+                          inputMode="numeric"
+                          value={customOutputWidth}
+                          onChange={(event) => updateCustomOutputWidth(event.target.value)}
+                          className="w-full bg-transparent text-base font-semibold text-white outline-none"
+                          placeholder={String(cropPixelSize.width || '')}
+                        />
+                      </label>
+                      <label className="rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2">
+                        <span className="mb-1 block text-xs text-white/35">高 px</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="12000"
+                          inputMode="numeric"
+                          value={customOutputHeight}
+                          onChange={(event) => updateCustomOutputHeight(event.target.value)}
+                          className="w-full bg-transparent text-base font-semibold text-white outline-none"
+                          placeholder={String(cropPixelSize.height || '')}
+                        />
+                      </label>
+                    </div>
                   </div>
                 )}
               </section>
@@ -576,14 +719,22 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
                     }}
                   />
 
+                  <div className="pointer-events-none absolute inset-0">
+                    <span className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-cyan-200/22" />
+                    <span className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-cyan-200/22" />
+                  </div>
+
                   <div
-                    className={`absolute cursor-move border-2 shadow-[0_0_0_9999px_rgba(0,0,0,0.42)] transition-colors ${isDraggingCrop ? 'border-white' : 'border-fuchsia-300'}`}
+                    className={`absolute cursor-move border-2 shadow-[0_0_0_9999px_rgba(0,0,0,0.42)] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-cyan-200/70 ${isDraggingCrop ? 'border-white' : 'border-fuchsia-300'}`}
                     style={{
                       left: `${crop.x}%`,
                       top: `${crop.y}%`,
                       width: `${crop.width}%`,
                       height: `${crop.height}%`,
                     }}
+                    tabIndex={0}
+                    aria-label="裁切框，可用方向键微调位置，按住 Shift 可大步移动"
+                    onKeyDown={handleCropKeyDown}
                     onPointerDown={(event) => startDrag('move', event)}
                   >
                     <div className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3">
@@ -625,6 +776,9 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
             <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5">Y {crop.y.toFixed(1)}%</span>
             <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5">缩放 {Math.round(scale * 100)}%</span>
             <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5">旋转 {Math.round(rotation)}°</span>
+            <span className={`rounded-full border px-3 py-1.5 ${cropIsCentered ? 'border-cyan-300/30 bg-cyan-400/10 text-cyan-100/80' : 'border-white/10 bg-white/[0.05] text-white/45'}`}>
+              {cropIsCentered ? '已居中' : '未居中'}
+            </span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -634,7 +788,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
               重置
             </button>
             <button
-              onClick={onClose}
+              onClick={closeWithConfirm}
               className="rounded-xl border border-white/10 bg-white/[0.06] px-4 py-2.5 text-sm font-medium text-white/70 transition-colors hover:bg-white/[0.12] hover:text-white"
             >
               取消
@@ -644,7 +798,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
               disabled={isExporting}
               className="min-w-[132px] rounded-xl bg-gradient-to-r from-fuchsia-500 to-blue-500 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_14px_32px_rgba(59,130,246,0.24)] transition-all hover:from-fuchsia-400 hover:to-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isExporting ? '导出中...' : '完成并生成'}
+              {isExporting ? '正在保存...' : '保存裁切图'}
             </button>
           </div>
         </div>

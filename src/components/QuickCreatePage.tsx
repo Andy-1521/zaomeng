@@ -3219,15 +3219,26 @@ export default function QuickCreatePage() {
   }, []);
 
   const handleEditorComplete = useCallback((resultUrl: string) => {
-    void resultUrl;
+    const focusEditedResult = () => {
+      setSelectedImages(new Set([resultUrl]));
+      window.setTimeout(() => {
+        const target = imageButtonRefs.current[resultUrl] || gallerySectionRef.current;
+        target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 450);
+    };
+
     if (imageEditor.destination === 'orders') {
+      setLibraryView('orders');
       void loadOrderResults();
-      showToast('裁切结果已加入订单记录', 'success');
+      focusEditedResult();
+      showToast('裁切结果已加入订单记录，并已选中新图', 'success');
       return;
     }
 
-    void loadCapturedImages();
-    showToast('编辑后的素材已加入素材库', 'success');
+    setLibraryView('gallery');
+    void loadCapturedImages({ preserveCurrent: true });
+    focusEditedResult();
+    showToast('编辑后的素材已加入素材库，并已选中新图', 'success');
   }, [imageEditor.destination, loadCapturedImages, loadOrderResults]);
 
   const handleLocalEditComplete = useCallback((resultUrl: string, meta?: { orderId?: string; status?: string; remainingPoints?: number }) => {
