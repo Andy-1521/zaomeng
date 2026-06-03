@@ -396,9 +396,9 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
         </div>
 
         <div className="grid flex-1 grid-cols-1 overflow-y-auto md:min-h-0 md:grid-cols-[280px_minmax(0,1fr)] md:overflow-hidden">
-          <aside className="border-b border-white/10 bg-white/[0.025] px-3 py-4 md:min-h-0 md:overflow-y-auto md:border-b-0 md:border-r">
-            <div className="space-y-4">
-              <section className="rounded-2xl border border-white/10 bg-black/22 p-3.5">
+          <aside className="border-b border-white/10 bg-white/[0.025] px-3 py-3 md:min-h-0 md:overflow-y-auto md:border-b-0 md:border-r">
+            <div className="space-y-3">
+              <section className="rounded-2xl border border-white/10 bg-black/22 p-3">
                 <div className="mb-3 flex items-center justify-between">
                   <p className="text-sm font-medium text-white/78">比例</p>
                   <button
@@ -408,7 +408,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
                     居中
                   </button>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-4 gap-2">
                   {aspectRatios.map(([key, label]) => (
                     <button
                       key={key}
@@ -416,7 +416,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
                         setAspectRatio(key);
                         setCrop((prev) => fitCropToAspectRatio(prev, key, naturalSize));
                       }}
-                      className={`h-9 rounded-xl border text-sm transition-colors ${aspectRatio === key ? 'border-fuchsia-300/50 bg-fuchsia-400/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.06] text-white/62 hover:bg-white/[0.12] hover:text-white'}`}
+                      className={`h-8 rounded-xl border text-sm transition-colors ${aspectRatio === key ? 'border-fuchsia-300/50 bg-fuchsia-400/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.06] text-white/62 hover:bg-white/[0.12] hover:text-white'}`}
                     >
                       {label}
                     </button>
@@ -424,7 +424,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
                 </div>
               </section>
 
-              <section className="rounded-2xl border border-white/10 bg-black/22 p-3.5">
+              <section className="rounded-2xl border border-white/10 bg-black/22 p-3">
                 <div className="mb-2 flex items-center justify-between text-sm">
                   <span className="font-medium text-white/78">缩放</span>
                   <span className="text-white/42">{Math.round(scale * 100)}%</span>
@@ -440,7 +440,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
                 />
               </section>
 
-              <section className="rounded-2xl border border-white/10 bg-black/22 p-3.5">
+              <section className="rounded-2xl border border-white/10 bg-black/22 p-3">
                 <div className="mb-2 flex items-center justify-between text-sm">
                   <span className="font-medium text-white/78">旋转</span>
                   <span className="text-white/42">{Math.round(rotation)}°</span>
@@ -472,7 +472,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
                 </div>
               </section>
 
-              <section className="rounded-2xl border border-white/10 bg-black/22 p-3.5">
+              <section className="rounded-2xl border border-white/10 bg-black/22 p-3">
                 <p className="mb-3 text-sm font-medium text-white/78">翻转</p>
                 <div className="grid grid-cols-2 gap-2">
                   <button
@@ -490,12 +490,12 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
                 </div>
               </section>
 
-              <section className="rounded-2xl border border-white/10 bg-black/22 p-3.5">
+              <section className="rounded-2xl border border-white/10 bg-black/22 p-3">
                 <p className="mb-3 text-sm font-medium text-white/78">输出</p>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => setOutputSizeMode('crop')}
-                    className={`h-9 rounded-xl border text-sm transition-colors ${outputSizeMode === 'crop' ? 'border-fuchsia-300/50 bg-fuchsia-400/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.06] text-white/62 hover:bg-white/[0.12] hover:text-white'}`}
+                    className={`h-8 rounded-xl border text-sm transition-colors ${outputSizeMode === 'crop' ? 'border-fuchsia-300/50 bg-fuchsia-400/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.06] text-white/62 hover:bg-white/[0.12] hover:text-white'}`}
                   >
                     裁切尺寸
                   </button>
@@ -505,7 +505,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
                       if (!customOutputWidth) setCustomOutputWidth(String(cropPixelSize.width || ''));
                       if (!customOutputHeight) setCustomOutputHeight(String(cropPixelSize.height || ''));
                     }}
-                    className={`h-9 rounded-xl border text-sm transition-colors ${outputSizeMode === 'custom' ? 'border-fuchsia-300/50 bg-fuchsia-400/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.06] text-white/62 hover:bg-white/[0.12] hover:text-white'}`}
+                    className={`h-8 rounded-xl border text-sm transition-colors ${outputSizeMode === 'custom' ? 'border-fuchsia-300/50 bg-fuchsia-400/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.06] text-white/62 hover:bg-white/[0.12] hover:text-white'}`}
                   >
                     自定义
                   </button>
