@@ -5,7 +5,7 @@ import Image, { type ImageLoaderProps, type ImageProps } from 'next/image';
 import { showToast } from '@/lib/toast';
 import { toUserFacingErrorFromUnknown, toUserFacingErrorMessage } from '@/lib/userFacingError';
 
-type AspectRatio = 'free' | '1:1' | '3:4' | '4:3' | '4:5' | '9:16' | '16:9';
+type AspectRatio = 'free' | 'original' | '1:1' | '3:4' | '4:3' | '4:5' | '9:16' | '16:9';
 type CropHandle = 'move' | 'top' | 'right' | 'bottom' | 'left' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 type OutputSizeMode = 'crop' | 'custom';
 
@@ -28,6 +28,7 @@ type Props = {
 
 const aspectRatios: Array<[AspectRatio, string]> = [
   ['free', '自由'],
+  ['original', '原图'],
   ['1:1', '1:1'],
   ['3:4', '3:4'],
   ['4:3', '4:3'],
@@ -42,7 +43,10 @@ const SafeImage = forwardRef<HTMLImageElement, Omit<ImageProps, 'loader'>>(funct
   return <Image {...props} alt={alt} ref={ref} loader={passthroughImageLoader} unoptimized />;
 });
 
-function getRatioValue(aspectRatio: AspectRatio): number | null {
+function getRatioValue(aspectRatio: AspectRatio, naturalSize?: { width: number; height: number }): number | null {
+  if (aspectRatio === 'original') {
+    return naturalSize && naturalSize.width > 0 && naturalSize.height > 0 ? naturalSize.width / naturalSize.height : null;
+  }
   if (aspectRatio === '1:1') return 1;
   if (aspectRatio === '3:4') return 3 / 4;
   if (aspectRatio === '4:3') return 4 / 3;
@@ -52,18 +56,33 @@ function getRatioValue(aspectRatio: AspectRatio): number | null {
   return null;
 }
 
-function fitCropToAspectRatio(crop: CropBox, aspectRatio: AspectRatio): CropBox {
-  const ratio = getRatioValue(aspectRatio);
+function fitCropToAspectRatio(crop: CropBox, aspectRatio: AspectRatio, naturalSize?: { width: number; height: number }): CropBox {
+  const ratio = getRatioValue(aspectRatio, naturalSize);
   if (!ratio) return crop;
 
-  const width = Math.min(crop.width, 76);
-  const height = width / ratio;
-  const safeHeight = Math.min(height, 76);
-  const safeWidth = safeHeight * ratio;
+  const centerX = crop.x + crop.width / 2;
+  const centerY = crop.y + crop.height / 2;
+  let safeWidth = Math.min(crop.width, 88);
+  let safeHeight = safeWidth / ratio;
+
+  if (safeHeight > 88) {
+    safeHeight = 88;
+    safeWidth = safeHeight * ratio;
+  }
+
+  if (safeWidth > 100) {
+    safeWidth = 100;
+    safeHeight = safeWidth / ratio;
+  }
+
+  if (safeHeight > 100) {
+    safeHeight = 100;
+    safeWidth = safeHeight * ratio;
+  }
 
   return {
-    x: Math.max(0, Math.min(100 - safeWidth, crop.x)),
-    y: Math.max(0, Math.min(100 - safeHeight, crop.y)),
+    x: Math.max(0, Math.min(100 - safeWidth, centerX - safeWidth / 2)),
+    y: Math.max(0, Math.min(100 - safeHeight, centerY - safeHeight / 2)),
     width: safeWidth,
     height: safeHeight,
   };
@@ -197,8 +216,8 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
 
   const rotateImage = useCallback((delta: number) => {
     setRotation((prev) => normalizeSignedRotation(prev + delta));
-    setCrop((prev) => fitCropToAspectRatio(prev, aspectRatio));
-  }, [aspectRatio]);
+    setCrop((prev) => fitCropToAspectRatio(prev, aspectRatio, naturalSize));
+  }, [aspectRatio, naturalSize]);
 
   const centerCrop = useCallback(() => {
     setCrop((prev) => ({
@@ -210,7 +229,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
 
   const updateCrop = useCallback((handle: CropHandle, deltaX: number, deltaY: number, origin: CropBox) => {
     const minSize = 10;
-    const ratio = getRatioValue(aspectRatio);
+    const ratio = getRatioValue(aspectRatio, naturalSize);
     const next = { ...origin };
 
     if (handle === 'move') {
@@ -258,7 +277,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
     }
 
     setCrop(clampCrop(next));
-  }, [aspectRatio]);
+  }, [aspectRatio, naturalSize]);
 
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
@@ -376,8 +395,8 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
           </button>
         </div>
 
-        <div className="grid flex-1 grid-cols-1 overflow-y-auto md:min-h-0 md:grid-cols-[300px_minmax(0,1fr)] md:overflow-hidden">
-          <aside className="border-b border-white/10 bg-white/[0.025] px-4 py-4 md:min-h-0 md:overflow-y-auto md:border-b-0 md:border-r">
+        <div className="grid flex-1 grid-cols-1 overflow-y-auto md:min-h-0 md:grid-cols-[280px_minmax(0,1fr)] md:overflow-hidden">
+          <aside className="border-b border-white/10 bg-white/[0.025] px-3 py-4 md:min-h-0 md:overflow-y-auto md:border-b-0 md:border-r">
             <div className="space-y-4">
               <section className="rounded-2xl border border-white/10 bg-black/22 p-3.5">
                 <div className="mb-3 flex items-center justify-between">
@@ -389,13 +408,13 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
                     居中
                   </button>
                 </div>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   {aspectRatios.map(([key, label]) => (
                     <button
                       key={key}
                       onClick={() => {
                         setAspectRatio(key);
-                        setCrop((prev) => fitCropToAspectRatio(prev, key));
+                        setCrop((prev) => fitCropToAspectRatio(prev, key, naturalSize));
                       }}
                       className={`h-9 rounded-xl border text-sm transition-colors ${aspectRatio === key ? 'border-fuchsia-300/50 bg-fuchsia-400/18 text-fuchsia-100' : 'border-white/10 bg-white/[0.06] text-white/62 hover:bg-white/[0.12] hover:text-white'}`}
                     >
