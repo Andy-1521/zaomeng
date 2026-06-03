@@ -691,8 +691,8 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
           <div className="relative min-h-[360px] overflow-hidden bg-[#050507] md:min-h-[520px]">
             <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:26px_26px]" />
             <div className="relative flex h-full min-h-[360px] items-center justify-center p-5 md:min-h-[520px] lg:p-8">
-              <div className="relative flex h-full w-full items-center justify-center rounded-[1.35rem] border border-white/12 bg-[#0d0d14]/84 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_22px_70px_rgba(0,0,0,0.34)]">
-                <div className="relative flex h-full w-full max-h-full max-w-full items-center justify-center rounded-[1.15rem] border border-white/12 bg-[#111119] p-3 shadow-[0_18px_44px_rgba(0,0,0,0.36)]">
+              <div className="relative flex h-full w-full items-center justify-center">
+                <div className="relative flex h-full w-full max-h-full max-w-full items-center justify-center">
                 <div
                   ref={viewportRef}
                     className="relative max-h-[420px] w-full max-w-[680px] overflow-hidden rounded-xl border-2 border-white/24 bg-black/72 shadow-[0_0_0_1px_rgba(0,0,0,0.6),0_18px_40px_rgba(0,0,0,0.42)] md:max-h-[min(650px,calc(100vh-240px))]"
