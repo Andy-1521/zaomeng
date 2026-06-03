@@ -74,6 +74,7 @@ type LibraryView = 'gallery' | 'orders';
 type PreviewImageState = {
   originalUrl: string;
   displayUrl: string;
+  downloadFileName: string;
 };
 
 type MaterialFolder = {
@@ -2738,10 +2739,10 @@ export default function QuickCreatePage() {
     });
   };
 
-  const previewMaterialImage = useCallback((imageUrl: string, instantPreviewUrl?: string | null) => {
+  const previewMaterialImage = useCallback((imageUrl: string, instantPreviewUrl?: string | null, downloadFileName?: string) => {
     const originalUrl = getDisplayImageUrl(imageUrl);
     const fallbackUrl = getDisplayImageUrl(instantPreviewUrl || imageUrl);
-    setPreviewImage({ originalUrl, displayUrl: fallbackUrl });
+    setPreviewImage({ originalUrl, displayUrl: fallbackUrl, downloadFileName: downloadFileName || `zaomeng-preview.${getUrlExtension(imageUrl)}` });
 
     fetch(`/api/image/thumbnail-url?url=${encodeURIComponent(originalUrl)}&size=1600`, { credentials: 'include' })
       .then((response) => response.ok ? response.json() : null)
@@ -2756,6 +2757,21 @@ export default function QuickCreatePage() {
         // 超大 OSS 原图可能超过在线处理限制，保留已加载的小图预览。
       });
   }, []);
+
+  useEffect(() => {
+    if (!previewImage) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPreviewImage(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [previewImage]);
 
   const handlePluginCapture = useCallback(async (payload: PluginCapturePayload | null) => {
     if (!payload?.imageUrl) return;
@@ -4235,6 +4251,7 @@ export default function QuickCreatePage() {
                           const isDeletingMaterial = !isOrderCard && deletingMaterialIds.has(image.id);
                           const isFavoritingMaterial = !isOrderCard && favoritingMaterialIds.has(image.id);
                           const isDownloadingImage = downloadingImageUrls.has(image.imageUrl);
+                          const previewDownloadFileName = isOrderCard ? image.downloadFileName : getDownloadFileName(image);
                           const compactCardControls = thumbnailSize < 240 || thumbnailSize * imageRatio < 180;
                           const cardControlSizeClass = compactCardControls ? 'h-7 w-7' : 'h-8 w-8';
                           const cardControlIconClass = compactCardControls ? 'h-3.5 w-3.5' : 'h-4 w-4';
@@ -4406,7 +4423,7 @@ export default function QuickCreatePage() {
                                     type="button"
                                     onClick={(event) => {
                                       event.stopPropagation();
-                                      previewMaterialImage(image.imageUrl, image.thumbnailUrl);
+                                      previewMaterialImage(image.imageUrl, image.thumbnailUrl, previewDownloadFileName);
                                     }}
                                     className={`inline-flex ${cardControlSizeClass} items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/75 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-white/18 hover:text-white`}
                                     title="查看大图"
@@ -4674,21 +4691,63 @@ export default function QuickCreatePage() {
 
       {previewImage && createPortal(
         <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/92 px-6 py-6"
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/92 px-4 py-4"
           onClick={() => setPreviewImage(null)}
         >
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              setPreviewImage(null);
-            }}
-            className="absolute right-6 top-6 flex h-11 w-11 items-center justify-center rounded-full border border-white/12 bg-white/10 text-2xl leading-none text-white backdrop-blur-xl transition-colors hover:bg-white/20"
-            title="关闭预览"
+          <div
+            className="absolute left-4 right-4 top-4 z-10 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/58 px-3 py-2 backdrop-blur-xl sm:left-6 sm:right-6 sm:top-6"
+            onClick={(event) => event.stopPropagation()}
           >
-            ×
-          </button>
-          <div className="relative flex h-[90vh] w-[92vw] max-w-[92vw] items-center justify-center" onClick={() => setPreviewImage(null)}>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-white/82">大图预览</p>
+              <p className="max-w-[56vw] truncate text-xs text-white/38">{previewImage.downloadFileName}</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void downloadImageByUrl(previewImage.originalUrl, previewImage.downloadFileName);
+                }}
+                className="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm font-medium text-white/72 transition-colors hover:bg-white/[0.16] hover:text-white"
+              >
+                下载
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  window.open(previewImage.originalUrl, '_blank', 'noopener,noreferrer');
+                }}
+                className="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm font-medium text-white/72 transition-colors hover:bg-white/[0.16] hover:text-white"
+              >
+                原图
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void navigator.clipboard.writeText(previewImage.originalUrl)
+                    .then(() => showToast('图片链接已复制', 'success'))
+                    .catch(() => showToast('复制失败，请手动打开原图复制', 'error'));
+                }}
+                className="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm font-medium text-white/72 transition-colors hover:bg-white/[0.16] hover:text-white"
+              >
+                复制链接
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setPreviewImage(null);
+                }}
+                className="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm font-medium text-white/72 transition-colors hover:bg-white/[0.16] hover:text-white"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+          <div className="relative flex h-[90vh] w-[94vw] max-w-[94vw] items-center justify-center pt-16" onClick={(event) => event.stopPropagation()}>
             <SafeImage
               src={previewImage.displayUrl}
               alt="素材大图预览"

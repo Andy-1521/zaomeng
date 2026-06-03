@@ -105,6 +105,7 @@ type TaskRecordApiResponse = {
 type PreviewImageState = {
   originalUrl: string;
   displayUrl: string;
+  downloadFileName: string;
 };
 
 const taskRecordCacheByUser = new Map<string, TaskRecord[]>();
@@ -141,6 +142,20 @@ function getImageList(value?: string | string[]): string[] {
 
 function isImageValue(value: string | null): value is string {
   return !!value && (value.startsWith('http://') || value.startsWith('https://') || value.startsWith('/'));
+}
+
+function getUrlExtension(imageUrl: string): string {
+  const cleanUrl = imageUrl.split('?')[0] || '';
+  const match = cleanUrl.match(/\.([a-zA-Z0-9]+)$/);
+  const extension = match?.[1]?.toLowerCase();
+  return extension && extension.length <= 5 ? extension : 'png';
+}
+
+function getTaskPreviewFileName(task: TaskRecord, imageUrl: string, index = 0): string {
+  const orderPart = task.orderId || task.id || 'task';
+  const toolPart = task.tabName || task.tab || 'result';
+  const sanitizedTool = toolPart.replace(/[^\u4e00-\u9fa5a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  return `${sanitizedTool || 'zaomeng'}-${orderPart}-${index + 1}.${getUrlExtension(imageUrl)}`;
 }
 
 function getOrderSuffix(orderId?: string) {
@@ -837,10 +852,14 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   const visibleTasks = historySourceTasks.filter((task) =>
     (filterTab === 'all' || task.tab === filterTab) && matchesTaskCenterFilter(task, statusFilter)
   );
-  const previewResultImage = useCallback((originalUrl: string | null, instantPreviewUrl?: string | null) => {
+  const previewResultImage = useCallback((originalUrl: string | null, instantPreviewUrl?: string | null, downloadFileName?: string) => {
     if (!originalUrl) return;
     const fallbackUrl = instantPreviewUrl || originalUrl;
-    setPreviewImage({ originalUrl, displayUrl: fallbackUrl });
+    setPreviewImage({
+      originalUrl,
+      displayUrl: fallbackUrl,
+      downloadFileName: downloadFileName || `zaomeng-order.${getUrlExtension(originalUrl)}`,
+    });
 
     fetch(`/api/image/thumbnail-url?url=${encodeURIComponent(originalUrl)}&size=1600`, { credentials: 'include' })
       .then((response) => response.ok ? response.json() : null)
@@ -855,6 +874,21 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
         // 超大 OSS 原图可能超过在线处理限制，保留已加载的小图预览。
       });
   }, []);
+
+  useEffect(() => {
+    if (!previewImage) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPreviewImage(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [previewImage]);
   const groupedVisibleTasks = visibleTasks.reduce<Array<{ label: string; tasks: TaskRecord[] }>>((groups, task) => {
     const label = getTaskDateGroup(task.time);
     const existing = groups.find((group) => group.label === label);
@@ -1206,6 +1240,50 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       showToast(successCount === 1 ? '图片下载成功' : `已下载 ${successCount} 张图片`, 'success');
     } catch (error) {
       console.error('下载图片失败:', error);
+      showToast('下载失败，请重试', 'error');
+    }
+  };
+
+  const downloadPreviewImage = async (imageUrl: string, fileName: string) => {
+    if (!imageUrl.startsWith('http')) {
+      showToast('当前图片链接暂不支持下载', 'error');
+      return;
+    }
+
+    try {
+      showToast('正在准备下载...', 'info');
+      const signedResponse = await fetch(`/api/image/download-url?url=${encodeURIComponent(imageUrl)}&filename=${encodeURIComponent(fileName)}`, { credentials: 'include' });
+      if (signedResponse.ok) {
+        const signedResult = await signedResponse.json().catch(() => null) as { success?: boolean; data?: { downloadUrl?: string } } | null;
+        if (signedResult?.success && signedResult.data?.downloadUrl) {
+          const link = document.createElement('a');
+          link.href = signedResult.data.downloadUrl;
+          link.download = fileName;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          showToast('下载已开始', 'success');
+          return;
+        }
+      }
+
+      const response = await fetch(`/api/image/download?url=${encodeURIComponent(imageUrl)}&filename=${encodeURIComponent(fileName)}`, { credentials: 'include' });
+      if (!response.ok) {
+        throw new Error(`下载失败: ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+      showToast('下载已开始', 'success');
+    } catch (error) {
+      console.error('下载预览图失败:', error);
       showToast('下载失败，请重试', 'error');
     }
   };
@@ -1715,6 +1793,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                         const originalResultImage = getFirstImage(task.imageUrl);
                         const resultImage = getFirstImage(task.thumbnailUrl || task.imageUrl);
                         const hasResult = isImageValue(originalResultImage);
+                        const previewFileName = hasResult ? getTaskPreviewFileName(task, originalResultImage) : '';
                         const statusLabel = getTaskStatusLabel(task);
                         const isSuccessTask = task.status === '成功' || task.status === '部分成功' || !task.status;
                         const isFailedTask = task.status === '失败' || task.status === '超时';
@@ -1739,7 +1818,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                           >
                             <div className="flex items-center gap-3">
                               <div className="w-[88px] shrink-0 overflow-hidden rounded-xl border border-white/8 bg-black/30 self-start transition-colors group-hover:border-white/16">
-                                <button type="button" onClick={(e) => { e.stopPropagation(); if (hasResult) previewResultImage(originalResultImage, resultImage); }} className="block w-full text-left">
+                                <button type="button" onClick={(e) => { e.stopPropagation(); if (hasResult) previewResultImage(originalResultImage, resultImage, previewFileName); }} className="block w-full text-left">
                                   {hasResult ? (
                                     <ImageThumbnail src={resultImage || undefined} fallbackSrc={originalResultImage || undefined} alt="结果图" width={88} height={88} thumbnailSize="small" useProcessedThumbnail={!task.thumbnailUrl} className="h-[88px] w-[88px] object-cover transition duration-200 group-hover:scale-[1.02] group-hover:opacity-90" />
                                   ) : (
@@ -1886,24 +1965,69 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       {/* 大图预览弹窗 - 使用 Portal 渲染到 body */}
       {previewImage && createPortal(
         <div
-          className="fixed left-0 right-0 top-0 bottom-0 z-[9999] flex items-center justify-center"
-          style={{ backgroundColor: "rgba(0,0,0,0.9)" }}
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/92 px-4 py-4"
           onClick={() => setPreviewImage(null)}
         >
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setPreviewImage(null);
-            }}
-            className="absolute top-6 right-6 w-10 h-10 bg-white/10 hover:bg-white/20 backdrop-blur-xl rounded-full flex items-center justify-center text-white text-2xl transition-colors z-[10000]"
+          <div
+            className="absolute left-4 right-4 top-4 z-10 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/58 px-3 py-2 backdrop-blur-xl sm:left-6 sm:right-6 sm:top-6"
+            onClick={(event) => event.stopPropagation()}
           >
-            ×
-          </button>
-          <div className="relative flex h-[90vh] w-[90vw] items-center justify-center p-2" onClick={() => setPreviewImage(null)}>
-            <img
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-white/82">订单大图</p>
+              <p className="max-w-[56vw] truncate text-xs text-white/38">{previewImage.downloadFileName}</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void downloadPreviewImage(previewImage.originalUrl, previewImage.downloadFileName);
+                }}
+                className="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm font-medium text-white/72 transition-colors hover:bg-white/[0.16] hover:text-white"
+              >
+                下载
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  window.open(previewImage.originalUrl, '_blank', 'noopener,noreferrer');
+                }}
+                className="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm font-medium text-white/72 transition-colors hover:bg-white/[0.16] hover:text-white"
+              >
+                原图
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void navigator.clipboard.writeText(previewImage.originalUrl)
+                    .then(() => showToast('图片链接已复制', 'success'))
+                    .catch(() => showToast('复制失败，请手动打开原图复制', 'error'));
+                }}
+                className="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm font-medium text-white/72 transition-colors hover:bg-white/[0.16] hover:text-white"
+              >
+                复制链接
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setPreviewImage(null);
+                }}
+                className="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm font-medium text-white/72 transition-colors hover:bg-white/[0.16] hover:text-white"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+          <div className="relative flex h-[90vh] w-[94vw] max-w-[94vw] items-center justify-center pt-16" onClick={(event) => event.stopPropagation()}>
+            <SafeImage
               src={previewImage.displayUrl}
-              alt="预览大图"
-              className="pointer-events-none block max-h-full max-w-full rounded-xl object-contain"
+              alt="订单大图预览"
+              fill
+              sizes="92vw"
+              className="pointer-events-none rounded-2xl object-contain shadow-[0_28px_90px_rgba(0,0,0,0.5)]"
             />
           </div>
         </div>,
