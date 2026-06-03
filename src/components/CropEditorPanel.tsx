@@ -332,7 +332,7 @@ export default function CropEditorPanel({ imageUrl, destination = 'gallery', ord
   }, [crop, destination, flipHorizontal, flipVertical, imageUrl, onClose, onComplete, orderNumber, resolvedOutputSize.height, resolvedOutputSize.width, rotation, scale, sourceImageUrl, toolLabel]);
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/65 backdrop-blur-sm px-4">
+    <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/65 backdrop-blur-sm px-4">
       <div className="w-full max-w-5xl rounded-3xl border border-white/12 bg-[#09090b]/95 p-6 shadow-2xl">
         <div className="flex items-center justify-between gap-4 mb-5">
           <div>

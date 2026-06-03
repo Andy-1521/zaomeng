@@ -373,6 +373,7 @@ const MATERIAL_UPLOAD_RECOVERY_MAX_ATTEMPTS = 12;
 const MATERIAL_UPLOAD_COMPRESS_THRESHOLD_BYTES = 16 * 1024 * 1024;
 const MATERIAL_UPLOAD_HARD_LIMIT_BYTES = 40 * 1024 * 1024;
 const IMAGE_LOAD_RETRY_DELAYS_MS = [500, 1200, 2500, 5000];
+const THUMBNAIL_ACTION_FEEDBACK_MS = 520;
 
 const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
 
@@ -1197,6 +1198,9 @@ export default function QuickCreatePage() {
   const [showAiPromptPanel, setShowAiPromptPanel] = useState(false);
   const [previewImage, setPreviewImage] = useState<PreviewImageState | null>(null);
   const [deletingOrderNumber, setDeletingOrderNumber] = useState<string | null>(null);
+  const [deletingMaterialIds, setDeletingMaterialIds] = useState<Set<string>>(new Set());
+  const [favoritingMaterialIds, setFavoritingMaterialIds] = useState<Set<string>>(new Set());
+  const [downloadingImageUrls, setDownloadingImageUrls] = useState<Set<string>>(new Set());
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiAspectRatio, setAiAspectRatio] = useState<SmartEditAspectRatioOption>('auto');
   const [aiResolution, setAiResolution] = useState<SmartEditResolution>('2k');
@@ -1949,11 +1953,38 @@ export default function QuickCreatePage() {
   }, [capturedImages, materialFilter, materialMatchesCurrentView]);
 
   const toggleMaterialFavorite = useCallback(async (image: CapturedImageRecord) => {
-    const success = await updateMaterials([image.id], { isFavorite: !image.isFavorite });
-    if (success) {
+    if (favoritingMaterialIds.has(image.id)) return;
+
+    const nextFavorite = !image.isFavorite;
+    setFavoritingMaterialIds((prev) => new Set(prev).add(image.id));
+    setCapturedImages((prev) => prev.map((item) => item.id === image.id ? { ...item, isFavorite: nextFavorite } : item));
+
+    try {
+      const response = await fetch('/api/materials/update', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [image.id], isFavorite: nextFavorite }),
+      });
+      const data = await response.json().catch(() => ({} as { success?: boolean; error?: string }));
+      if (!response.ok || !data.success) {
+        throw new Error(toUserFacingErrorMessage(data.error, '更新素材失败，请重试'));
+      }
+
+      prefetchedMaterialKeysRef.current.delete(`favorite:${materialFilter}`);
+      prefetchedMaterialPaginationRef.current.delete(`favorite:${materialFilter}`);
       showToast(image.isFavorite ? '已取消收藏' : '已加入收藏', 'success');
+    } catch (error) {
+      setCapturedImages((prev) => prev.map((item) => item.id === image.id ? { ...item, isFavorite: image.isFavorite } : item));
+      showToast(toUserFacingErrorFromUnknown(error, '更新素材失败，请重试'), 'error');
+    } finally {
+      setFavoritingMaterialIds((prev) => {
+        const next = new Set(prev);
+        next.delete(image.id);
+        return next;
+      });
     }
-  }, [updateMaterials]);
+  }, [favoritingMaterialIds, materialFilter]);
 
   const moveSelectedMaterials = useCallback(async (targetValue: string) => {
     const ids = selectedCapturedImages.map((image) => image.id);
@@ -2391,6 +2422,17 @@ export default function QuickCreatePage() {
   }, [hasDraggedFiles, uploadFiles]);
 
   const removeUploadedImage = async (image: CapturedImageRecord) => {
+    if (deletingMaterialIds.has(image.id)) return;
+
+    setDeletingMaterialIds((prev) => new Set(prev).add(image.id));
+    setCapturedImages((prev) => prev.filter((item) => item.id !== image.id));
+    reduceMaterialsPagination(1);
+    setSelectedImages((prev) => {
+      const next = new Set(prev);
+      next.delete(image.imageUrl);
+      return next;
+    });
+
     try {
       const response = await fetch('/api/plugin/captured-images', {
         method: 'DELETE',
@@ -2400,22 +2442,30 @@ export default function QuickCreatePage() {
       });
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(toUserFacingErrorMessage(data.error, '删除失败，请重试'));
-      setCapturedImages((prev) => prev.filter((item) => item.id !== image.id));
-      reduceMaterialsPagination(1);
     } catch (error) {
+      setCapturedImages((prev) => {
+        if (prev.some((item) => item.id === image.id)) return prev;
+        return [image, ...prev].sort((left, right) => parseMaterialDate(right.createdAt).getTime() - parseMaterialDate(left.createdAt).getTime());
+      });
+      setMaterialsPagination((prev) => ({
+        ...prev,
+        total: prev.total + 1,
+      }));
       showToast(toUserFacingErrorFromUnknown(error, '删除失败，请重试'), 'error');
-      return;
+    } finally {
+      setDeletingMaterialIds((prev) => {
+        const next = new Set(prev);
+        next.delete(image.id);
+        return next;
+      });
     }
-
-    setSelectedImages((prev) => {
-      const next = new Set(prev);
-      next.delete(image.imageUrl);
-      return next;
-    });
   };
 
   const downloadImageByUrl = useCallback(async (imageUrl: string, fileName: string) => {
     const displayImageUrl = getDisplayImageUrl(imageUrl);
+    const feedbackStartedAt = performance.now();
+    setDownloadingImageUrls((prev) => new Set(prev).add(imageUrl));
+
     try {
       const signedResponse = await fetch(`/api/image/download-url?url=${encodeURIComponent(displayImageUrl)}&filename=${encodeURIComponent(fileName)}`, { credentials: 'include' });
       if (signedResponse.ok) {
@@ -2448,6 +2498,20 @@ export default function QuickCreatePage() {
     } catch (error) {
       console.error('[素材库] 图片下载失败:', error);
       window.open(displayImageUrl, '_blank', 'noopener,noreferrer');
+    } finally {
+      const clearDownloadState = () => {
+        setDownloadingImageUrls((prev) => {
+          const next = new Set(prev);
+          next.delete(imageUrl);
+          return next;
+        });
+      };
+      const remainingFeedbackMs = Math.max(0, THUMBNAIL_ACTION_FEEDBACK_MS - (performance.now() - feedbackStartedAt));
+      if (remainingFeedbackMs > 0) {
+        window.setTimeout(clearDownloadState, remainingFeedbackMs);
+        return;
+      }
+      clearDownloadState();
     }
   }, []);
 
@@ -2470,8 +2534,20 @@ export default function QuickCreatePage() {
       return;
     }
 
+    let removedRecords: OrderResultCard[] = [];
+
     try {
       setDeletingOrderNumber(image.orderNumber);
+      setOrderResults((prev) => {
+        removedRecords = prev.filter((item) => item.orderNumber === image.orderNumber);
+        return prev.filter((item) => item.orderNumber !== image.orderNumber);
+      });
+      setSelectedImages((prev) => {
+        const next = new Set(prev);
+        next.delete(image.imageUrl);
+        return next;
+      });
+
       const response = await fetch('/api/user/transactions/delete', {
         method: 'POST',
         credentials: 'include',
@@ -2484,15 +2560,16 @@ export default function QuickCreatePage() {
         throw new Error(toUserFacingErrorMessage(data.message, '删除失败，请重试'));
       }
 
-      setOrderResults((prev) => prev.filter((item) => item.orderNumber !== image.orderNumber));
-      setSelectedImages((prev) => {
-        const next = new Set(prev);
-        next.delete(image.imageUrl);
-        return next;
-      });
       dispatchTaskHistoryUpdated();
       showToast('删除成功', 'success');
     } catch (error) {
+      if (removedRecords.length > 0) {
+        setOrderResults((prev) => {
+          const existingIds = new Set(prev.map((item) => item.id));
+          const restored = [...removedRecords.filter((item) => !existingIds.has(item.id)), ...prev];
+          return restored.sort((left, right) => parseMaterialDate(right.createdAt).getTime() - parseMaterialDate(left.createdAt).getTime());
+        });
+      }
       showToast(toUserFacingErrorFromUnknown(error, '删除失败，请重试'), 'error');
     } finally {
       setDeletingOrderNumber(null);
@@ -3094,6 +3171,8 @@ export default function QuickCreatePage() {
       : null;
 
     if (action === 'edit-image') {
+      closeDropdowns();
+      setShowAiPromptPanel(false);
       setImageEditor({
         open: true,
         mode: 'crop',
@@ -3107,10 +3186,12 @@ export default function QuickCreatePage() {
     }
 
     if (action === 'local-edit') {
+      closeDropdowns();
+      setShowAiPromptPanel(false);
       setLocalEditImageUrl(selectedImageUrl);
       setShowLocalEdit(true);
     }
-  }, [failedImageUrls, libraryView, orderResults, selectedImageList]);
+  }, [closeDropdowns, failedImageUrls, libraryView, orderResults, selectedImageList]);
 
   const closeImageEditor = useCallback(() => {
     setImageEditor({ open: false, mode: 'crop', imageUrl: '', destination: 'gallery' });
@@ -4150,6 +4231,10 @@ export default function QuickCreatePage() {
                           const canDeleteOrder = isOrderCard && image.statusLabel !== '处理中';
                           const orderStatusClass = isOrderCard ? getOrderStatusClass(image.statusLabel) : '';
                           const imageRatio = imageAspectRatios[image.imageUrl] ?? 1;
+                          const isDeletingOrder = isOrderCard && deletingOrderNumber === image.orderNumber;
+                          const isDeletingMaterial = !isOrderCard && deletingMaterialIds.has(image.id);
+                          const isFavoritingMaterial = !isOrderCard && favoritingMaterialIds.has(image.id);
+                          const isDownloadingImage = downloadingImageUrls.has(image.imageUrl);
                           const compactCardControls = thumbnailSize < 240 || thumbnailSize * imageRatio < 180;
                           const cardControlSizeClass = compactCardControls ? 'h-7 w-7' : 'h-8 w-8';
                           const cardControlIconClass = compactCardControls ? 'h-3.5 w-3.5' : 'h-4 w-4';
@@ -4231,7 +4316,7 @@ export default function QuickCreatePage() {
                                   </svg>
                                 </div>
                               )}
-                               <div className={`absolute z-20 flex ${cardControlWrapClass} ${actionControlsVisibilityClass}`}>
+                              <div className={`absolute z-20 flex ${cardControlWrapClass} ${actionControlsVisibilityClass}`}>
                                 {isOrderCard && (
                                   <button
                                     type="button"
@@ -4239,13 +4324,17 @@ export default function QuickCreatePage() {
                                       event.stopPropagation();
                                       void deleteOrderRecord(image);
                                     }}
-                                    disabled={!canDeleteOrder || deletingOrderNumber === image.orderNumber}
+                                    disabled={!canDeleteOrder || isDeletingOrder}
                                     className={`inline-flex ${cardControlSizeClass} items-center justify-center rounded-full border border-red-300/20 bg-red-500/18 text-red-50/80 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-red-500/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-40`}
-                                    title={canDeleteOrder ? '删除订单记录' : '处理中订单不能删除'}
+                                    title={isDeletingOrder ? '删除中' : canDeleteOrder ? '删除订单记录' : '处理中订单不能删除'}
                                   >
-                                    <svg className={cardControlIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
+                                      {isDeletingOrder ? (
+                                        <span className={`${compactCardControls ? 'h-3.5 w-3.5' : 'h-4 w-4'} animate-spin rounded-full border-2 border-current/25 border-t-current`} />
+                                      ) : (
+                                        <svg className={cardControlIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                      )}
                                   </button>
                                 )}
                                 {!isOrderCard && (
@@ -4256,12 +4345,17 @@ export default function QuickCreatePage() {
                                         event.stopPropagation();
                                         void removeUploadedImage(image);
                                       }}
-                                      className={`inline-flex ${cardControlSizeClass} items-center justify-center rounded-full border border-red-300/20 bg-red-500/18 text-red-50/80 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-red-500/40 hover:text-white`}
-                                      title="删除图片"
+                                      disabled={isDeletingMaterial}
+                                      className={`inline-flex ${cardControlSizeClass} items-center justify-center rounded-full border border-red-300/20 bg-red-500/18 text-red-50/80 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-red-500/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-55`}
+                                      title={isDeletingMaterial ? '删除中' : '删除图片'}
                                     >
-                                      <svg className={cardControlIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                      </svg>
+                                      {isDeletingMaterial ? (
+                                        <span className={`${compactCardControls ? 'h-3.5 w-3.5' : 'h-4 w-4'} animate-spin rounded-full border-2 border-current/25 border-t-current`} />
+                                      ) : (
+                                        <svg className={cardControlIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                      )}
                                     </button>
                                     <button
                                       type="button"
@@ -4269,12 +4363,17 @@ export default function QuickCreatePage() {
                                         event.stopPropagation();
                                         void toggleMaterialFavorite(image);
                                       }}
-                                      className={`inline-flex ${cardControlSizeClass} items-center justify-center rounded-full border shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 ${image.isFavorite ? 'border-amber-200/60 bg-amber-400 text-black opacity-100' : 'border-white/15 bg-black/55 text-white/75 hover:bg-white/18 hover:text-white'}`}
-                                      title={image.isFavorite ? '取消收藏' : '加入收藏'}
+                                      disabled={isFavoritingMaterial}
+                                      className={`inline-flex ${cardControlSizeClass} items-center justify-center rounded-full border shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed ${image.isFavorite ? 'border-amber-200/60 bg-amber-400 text-black opacity-100' : 'border-white/15 bg-black/55 text-white/75 hover:bg-white/18 hover:text-white'} ${isFavoritingMaterial ? 'scale-95' : ''}`}
+                                      title={isFavoritingMaterial ? '处理中' : image.isFavorite ? '取消收藏' : '加入收藏'}
                                     >
-                                      <svg className={cardControlIconClass} fill={image.isFavorite ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.48 3.499a.6.6 0 011.04 0l2.2 4.459a.6.6 0 00.452.328l4.92.715a.6.6 0 01.333 1.024l-3.56 3.47a.6.6 0 00-.173.531l.84 4.9a.6.6 0 01-.87.632l-4.4-2.313a.6.6 0 00-.558 0l-4.4 2.313a.6.6 0 01-.87-.632l.84-4.9a.6.6 0 00-.173-.53l-3.56-3.471A.6.6 0 013.9 9.001l4.92-.715a.6.6 0 00.452-.328l2.208-4.459z" />
-                                      </svg>
+                                      {isFavoritingMaterial ? (
+                                        <span className={`${compactCardControls ? 'h-3.5 w-3.5' : 'h-4 w-4'} animate-spin rounded-full border-2 border-current/25 border-t-current`} />
+                                      ) : (
+                                        <svg className={cardControlIconClass} fill={image.isFavorite ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.48 3.499a.6.6 0 011.04 0l2.2 4.459a.6.6 0 00.452.328l4.92.715a.6.6 0 01.333 1.024l-3.56 3.47a.6.6 0 00-.173.531l.84 4.9a.6.6 0 01-.87.632l-4.4-2.313a.6.6 0 00-.558 0l-4.4 2.313a.6.6 0 01-.87-.632l.84-4.9a.6.6 0 00-.173-.53l-3.56-3.471A.6.6 0 013.9 9.001l4.92-.715a.6.6 0 00.452-.328l2.208-4.459z" />
+                                        </svg>
+                                      )}
                                     </button>
                                   </>
                                 )}
@@ -4289,12 +4388,17 @@ export default function QuickCreatePage() {
                                       }
                                       void downloadMaterialImage(image);
                                     }}
-                                    className={`inline-flex ${cardControlSizeClass} items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/75 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-white/18 hover:text-white`}
-                                    title="下载图片"
+                                    disabled={isDownloadingImage}
+                                    className={`inline-flex ${cardControlSizeClass} items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/75 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-white/18 hover:text-white disabled:cursor-wait disabled:opacity-60`}
+                                    title={isDownloadingImage ? '准备下载' : '下载图片'}
                                   >
-                                    <svg className={cardControlIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
-                                    </svg>
+                                    {isDownloadingImage ? (
+                                      <span className={`${compactCardControls ? 'h-3.5 w-3.5' : 'h-4 w-4'} animate-spin rounded-full border-2 border-current/25 border-t-current`} />
+                                    ) : (
+                                      <svg className={cardControlIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
+                                      </svg>
+                                    )}
                                   </button>
                                 )}
                                 {(!isOrderCard || image.isResultImage) && (
@@ -4364,7 +4468,7 @@ export default function QuickCreatePage() {
           </div>
         )}
 
-        {selectedImageList.length > 0 && (actionBarPosition || isCompactActionBar) && (
+        {!imageEditor.open && !showLocalEdit && selectedImageList.length > 0 && (actionBarPosition || isCompactActionBar) && (
           <div
             data-role="selection-action-bar"
             className={`pointer-events-none transition-all duration-150 ${isCompactActionBar ? 'fixed inset-x-3 bottom-4 z-40' : 'fixed z-40'}`}
