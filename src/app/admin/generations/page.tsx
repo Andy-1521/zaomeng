@@ -1290,17 +1290,17 @@ export default function AdminGenerationsPage() {
 
         <Navbar showUserMenu={false} />
 
-        <div className="relative z-10 flex flex-col flex-1 min-h-0 px-6 py-4">
+        <div className="relative z-10 flex flex-col flex-1 min-h-0 px-5 py-3">
         <div className="max-w-7xl mx-auto w-full flex flex-col flex-1 min-h-0">
           {/* Page header */}
-          <div className="mb-4 flex-shrink-0">
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
+          <div className="mb-3 flex-shrink-0">
+            <h1 className="text-xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
               管理员后台
             </h1>
           </div>
 
           {/* Tab switcher */}
-          <div className="flex mb-4 bg-white/10 rounded-lg p-1 border border-white/20 flex-shrink-0">
+          <div className="mb-3 flex flex-shrink-0 rounded-lg border border-white/20 bg-white/10 p-1">
             {[
               { key: 'generations' as TabType, label: '生图记录' },
               { key: 'users' as TabType, label: '用户管理' },
@@ -1313,7 +1313,7 @@ export default function AdminGenerationsPage() {
                   setActiveTab(tab.key);
                   setPage(0);
                 }}
-                className={`flex-1 py-2.5 rounded-md text-sm font-medium transition-all ${
+                className={`flex-1 rounded-md py-2 text-sm font-medium transition-all ${
                   activeTab === tab.key
                     ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-lg shadow-purple-500/30'
                     : 'text-white/40 hover:text-white/70'
@@ -1574,61 +1574,61 @@ export default function AdminGenerationsPage() {
 
           {/* ===== Generations Tab ===== */}
           {activeTab === 'generations' && (
-            <div className="flex-1 min-h-0 flex flex-col gap-4">
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6 flex-shrink-0">
+            <div className="flex-1 min-h-0 flex flex-col gap-3">
+              <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6 flex-shrink-0">
                 <button
                   onClick={handleResetFilters}
-                  className="rounded-2xl border border-white/10 bg-white/[0.05] p-4 text-left transition-colors hover:bg-white/[0.08]"
+                  className="rounded-xl border border-white/10 bg-white/[0.05] p-3 text-left transition-colors hover:bg-white/[0.08]"
                 >
                   <div className="text-xs text-white/45">总订单</div>
-                  <div className="mt-2 text-3xl font-semibold tabular-nums text-white">{globalStats.total || totalStats.total}</div>
-                  <div className="mt-2 text-xs text-white/35">点击重置所有筛选</div>
+                  <div className="mt-1 text-2xl font-semibold tabular-nums text-white">{globalStats.total || totalStats.total}</div>
+                  <div className="mt-1 text-[11px] text-white/35">点击重置筛选</div>
                 </button>
 
                 <button
                   onClick={() => handleQuickFilter(undefined, '处理中')}
-                  className={`rounded-2xl border p-4 text-left transition-colors ${filterStatus === '处理中' ? 'border-sky-400/40 bg-sky-500/10' : 'border-white/10 bg-white/[0.05] hover:bg-white/[0.08]'}`}
+                  className={`rounded-xl border p-3 text-left transition-colors ${filterStatus === '处理中' ? 'border-sky-400/40 bg-sky-500/10' : 'border-white/10 bg-white/[0.05] hover:bg-white/[0.08]'}`}
                 >
                   <div className="text-xs text-white/45">处理中</div>
-                  <div className="mt-2 text-3xl font-semibold tabular-nums text-sky-300">{processingCount}</div>
-                  <div className="mt-2 text-xs text-white/35">优先查看积压订单</div>
+                  <div className="mt-1 text-2xl font-semibold tabular-nums text-sky-300">{processingCount}</div>
+                  <div className="mt-1 text-[11px] text-white/35">积压订单</div>
                 </button>
 
                 <button
                   onClick={() => handleQuickFilter(undefined, '失败')}
-                  className={`rounded-2xl border p-4 text-left transition-colors ${filterStatus === '失败' ? 'border-red-400/40 bg-red-500/10' : 'border-white/10 bg-white/[0.05] hover:bg-white/[0.08]'}`}
+                  className={`rounded-xl border p-3 text-left transition-colors ${filterStatus === '失败' ? 'border-red-400/40 bg-red-500/10' : 'border-white/10 bg-white/[0.05] hover:bg-white/[0.08]'}`}
                 >
                   <div className="text-xs text-white/45">失败</div>
-                  <div className="mt-2 text-3xl font-semibold tabular-nums text-red-300">{totalStats.failureCount}</div>
-                  <div className="mt-2 text-xs text-white/35">快速定位异常任务</div>
+                  <div className="mt-1 text-2xl font-semibold tabular-nums text-red-300">{totalStats.failureCount}</div>
+                  <div className="mt-1 text-[11px] text-white/35">异常任务</div>
                 </button>
 
                 <button
                   onClick={() => handleQuickFilter(undefined, '成功')}
-                  className={`rounded-2xl border p-4 text-left transition-colors ${filterStatus === '成功' ? 'border-emerald-400/40 bg-emerald-500/10' : 'border-white/10 bg-white/[0.05] hover:bg-white/[0.08]'}`}
+                  className={`rounded-xl border p-3 text-left transition-colors ${filterStatus === '成功' ? 'border-emerald-400/40 bg-emerald-500/10' : 'border-white/10 bg-white/[0.05] hover:bg-white/[0.08]'}`}
                 >
                   <div className="text-xs text-white/45">成功率</div>
-                  <div className="mt-2 text-3xl font-semibold tabular-nums text-emerald-300">{successRate}<span className="ml-1 text-base text-emerald-200/70">%</span></div>
-                  <div className="mt-2 text-xs text-white/35">成功 {totalStats.successCount} 单</div>
+                  <div className="mt-1 text-2xl font-semibold tabular-nums text-emerald-300">{successRate}<span className="ml-1 text-sm text-emerald-200/70">%</span></div>
+                  <div className="mt-1 text-[11px] text-white/35">成功 {totalStats.successCount} 单</div>
                 </button>
 
                 <button
                   onClick={() => handleQuickFilter('彩绘提取')}
-                  className={`rounded-2xl border p-4 text-left transition-colors ${filterToolPage === '彩绘提取' ? 'border-violet-400/40 bg-violet-500/10' : 'border-white/10 bg-white/[0.05] hover:bg-white/[0.08]'}`}
+                  className={`rounded-xl border p-3 text-left transition-colors ${filterToolPage === '彩绘提取' ? 'border-violet-400/40 bg-violet-500/10' : 'border-white/10 bg-white/[0.05] hover:bg-white/[0.08]'}`}
                 >
                   <div className="text-xs text-white/45">彩绘提取</div>
-                  <div className="mt-2 text-3xl font-semibold tabular-nums text-violet-200">{totalStats.colorExtractionCount}</div>
-                  <div className="mt-2 text-xs text-white/35">核心工具量级</div>
+                  <div className="mt-1 text-2xl font-semibold tabular-nums text-violet-200">{totalStats.colorExtractionCount}</div>
+                  <div className="mt-1 text-[11px] text-white/35">核心工具</div>
                 </button>
 
-                <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4 text-left">
+                <div className="rounded-xl border border-white/10 bg-white/[0.05] p-3 text-left">
                   <div className="text-xs text-white/45">本页消耗积分</div>
-                  <div className="mt-2 text-3xl font-semibold tabular-nums text-amber-300">{totalPointsConsumed}</div>
-                  <div className="mt-2 text-xs text-white/35">当前列表汇总</div>
+                  <div className="mt-1 text-2xl font-semibold tabular-nums text-amber-300">{totalPointsConsumed}</div>
+                  <div className="mt-1 text-[11px] text-white/35">当前列表</div>
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3 flex-shrink-0">
+              <div className="rounded-xl border border-white/10 bg-white/[0.04] p-2.5 flex-shrink-0">
                 <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
                   <div className="w-full sm:max-w-sm sm:min-w-[220px] sm:flex-1">
                     <input
@@ -1636,7 +1636,7 @@ export default function AdminGenerationsPage() {
                       value={searchKeyword}
                       onChange={(e) => handleSearchInput(e.target.value)}
                       placeholder="搜索用户名、订单号或异常信息..."
-                      className="w-full rounded-xl border border-white/15 bg-black/40 px-4 py-2.5 text-sm text-white placeholder-white/35 focus:outline-none focus:border-purple-500 transition-colors"
+                      className="w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-sm text-white placeholder-white/35 focus:outline-none focus:border-purple-500 transition-colors"
                     />
                   </div>
 
@@ -1697,20 +1697,20 @@ export default function AdminGenerationsPage() {
                         type="date"
                         value={filterStartDate}
                         onChange={(e) => setFilterStartDate(e.target.value)}
-                        className="w-full rounded-xl border border-white/15 bg-black/40 px-4 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500 transition-colors sm:w-auto"
+                        className="w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500 transition-colors sm:w-auto"
                       />
                       <input
                         type="date"
                         value={filterEndDate}
                         onChange={(e) => setFilterEndDate(e.target.value)}
-                        className="w-full rounded-xl border border-white/15 bg-black/40 px-4 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500 transition-colors sm:w-auto"
+                        className="w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500 transition-colors sm:w-auto"
                       />
                       <button
                         onClick={() => {
                           closeDropdowns();
                           triggerRecordSearch();
                         }}
-                        className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 px-4 py-2.5 text-sm font-medium hover:opacity-90 transition-opacity sm:w-auto"
+                        className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 px-4 py-2 text-sm font-medium hover:opacity-90 transition-opacity sm:w-auto"
                       >
                         应用时间
                       </button>
@@ -1719,21 +1719,21 @@ export default function AdminGenerationsPage() {
 
                   <button
                     onClick={handleResetFilters}
-                    className="w-full rounded-xl border border-white/12 px-3 py-2.5 text-sm text-white/65 hover:text-white hover:bg-white/10 transition-colors sm:w-auto"
+                    className="w-full rounded-xl border border-white/12 px-3 py-2 text-sm text-white/65 hover:text-white hover:bg-white/10 transition-colors sm:w-auto"
                   >
                     重置
                   </button>
                 </div>
 
                 {activeToolSummary.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="mt-2 flex flex-wrap gap-2">
                     {activeToolSummary.map((option) => {
                       const active = filterToolPage === option.value;
                       return (
                         <button
                           key={option.value}
                           onClick={() => handleQuickFilter(option.value)}
-                          className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors ${active ? getToolBadgeClass(option.label) : 'border-white/12 bg-white/[0.03] text-white/65 hover:bg-white/[0.08]'}`}
+                          className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs transition-colors ${active ? getToolBadgeClass(option.label) : 'border-white/12 bg-white/[0.03] text-white/65 hover:bg-white/[0.08]'}`}
                         >
                           <span>{option.label}</span>
                           <span className="tabular-nums text-white/55">{option.count}</span>
@@ -1743,7 +1743,7 @@ export default function AdminGenerationsPage() {
                   </div>
                 )}
 
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mt-2 flex flex-wrap gap-2">
                   {diagnosticOptions.map((option) => {
                     const active = filterDiagnostic === option.value;
                     return (
@@ -1751,7 +1751,7 @@ export default function AdminGenerationsPage() {
                         key={option.value}
                         onClick={() => handleQuickFilter(undefined, undefined, option.value)}
                         title={option.description}
-                        className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs transition-colors ${active ? 'border-red-400/35 bg-red-500/10 text-red-100' : 'border-white/12 bg-white/[0.03] text-white/65 hover:bg-white/[0.08]'}`}
+                        className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs transition-colors ${active ? 'border-red-400/35 bg-red-500/10 text-red-100' : 'border-white/12 bg-white/[0.03] text-white/65 hover:bg-white/[0.08]'}`}
                       >
                         {option.label}
                       </button>
@@ -1760,41 +1760,41 @@ export default function AdminGenerationsPage() {
                 </div>
 
                 {(totalStats.failureCount > 0 || totalStats.failureBreakdown.missingResultCount > 0) && (
-                  <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="mt-2 grid gap-2 md:grid-cols-2 lg:grid-cols-4">
                     <button
                       onClick={() => handleQuickFilter(undefined, '失败', 'upstream-error')}
-                      className={`rounded-xl border p-3 text-left transition-colors ${filterDiagnostic === 'upstream-error' ? 'border-red-400/35 bg-red-500/10' : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'}`}
+                      className={`rounded-xl border p-2.5 text-left transition-colors ${filterDiagnostic === 'upstream-error' ? 'border-red-400/35 bg-red-500/10' : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'}`}
                     >
                       <div className="text-xs text-white/45">上游失败</div>
-                      <div className="mt-2 text-2xl font-semibold tabular-nums text-red-200">{totalStats.failureBreakdown.upstreamErrorCount}</div>
-                      <div className="mt-1 text-xs text-white/35">兼容接口或上游返回失败</div>
+                      <div className="mt-1 text-xl font-semibold tabular-nums text-red-200">{totalStats.failureBreakdown.upstreamErrorCount}</div>
+                      <div className="mt-0.5 text-[11px] text-white/35">上游返回失败</div>
                     </button>
 
                     <button
                       onClick={() => handleQuickFilter(undefined, '失败', 'timeout-error')}
-                      className={`rounded-xl border p-3 text-left transition-colors ${filterDiagnostic === 'timeout-error' ? 'border-orange-400/35 bg-orange-500/10' : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'}`}
+                      className={`rounded-xl border p-2.5 text-left transition-colors ${filterDiagnostic === 'timeout-error' ? 'border-orange-400/35 bg-orange-500/10' : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'}`}
                     >
                       <div className="text-xs text-white/45">超时异常</div>
-                      <div className="mt-2 text-2xl font-semibold tabular-nums text-orange-200">{totalStats.failureBreakdown.timeoutErrorCount}</div>
-                      <div className="mt-1 text-xs text-white/35">请求超时、连接中断或卡死</div>
+                      <div className="mt-1 text-xl font-semibold tabular-nums text-orange-200">{totalStats.failureBreakdown.timeoutErrorCount}</div>
+                      <div className="mt-0.5 text-[11px] text-white/35">超时或中断</div>
                     </button>
 
                     <button
                       onClick={() => handleQuickFilter(undefined, undefined, 'missing-result')}
-                      className={`rounded-xl border p-3 text-left transition-colors ${filterDiagnostic === 'missing-result' ? 'border-amber-400/35 bg-amber-500/10' : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'}`}
+                      className={`rounded-xl border p-2.5 text-left transition-colors ${filterDiagnostic === 'missing-result' ? 'border-amber-400/35 bg-amber-500/10' : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'}`}
                     >
                       <div className="text-xs text-white/45">无结果</div>
-                      <div className="mt-2 text-2xl font-semibold tabular-nums text-amber-200">{totalStats.failureBreakdown.missingResultCount}</div>
-                      <div className="mt-1 text-xs text-white/35">成功或处理中但无有效结果图</div>
+                      <div className="mt-1 text-xl font-semibold tabular-nums text-amber-200">{totalStats.failureBreakdown.missingResultCount}</div>
+                      <div className="mt-0.5 text-[11px] text-white/35">无有效结果图</div>
                     </button>
 
                     <button
                       onClick={() => handleQuickFilter(undefined, '失败', 'other-failure')}
-                      className={`rounded-xl border p-3 text-left transition-colors ${filterDiagnostic === 'other-failure' ? 'border-white/25 bg-white/[0.08]' : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'}`}
+                      className={`rounded-xl border p-2.5 text-left transition-colors ${filterDiagnostic === 'other-failure' ? 'border-white/25 bg-white/[0.08]' : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'}`}
                     >
                       <div className="text-xs text-white/45">其他异常</div>
-                      <div className="mt-2 text-2xl font-semibold tabular-nums text-white">{totalStats.failureBreakdown.otherFailureCount}</div>
-                      <div className="mt-1 text-xs text-white/35">未归类失败，需人工排查</div>
+                      <div className="mt-1 text-xl font-semibold tabular-nums text-white">{totalStats.failureBreakdown.otherFailureCount}</div>
+                      <div className="mt-0.5 text-[11px] text-white/35">人工排查</div>
                     </button>
                   </div>
                 )}

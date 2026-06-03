@@ -57,6 +57,24 @@ const workflowItems = [
   },
 ];
 
+const pluginStatusItems = [
+  {
+    label: '当前版本',
+    value: '自动读取安装包',
+    tone: 'text-emerald-100',
+  },
+  {
+    label: '连接状态',
+    value: '安装后刷新自动识别',
+    tone: 'text-cyan-100',
+  },
+  {
+    label: '更新提示',
+    value: '导航栏提示新版',
+    tone: 'text-violet-100',
+  },
+];
+
 const faqItems = [
   {
     question: '导航栏一直显示“插件未连接”',
@@ -140,7 +158,7 @@ export default async function PluginPage() {
               </div>
 
               <div className="border-t border-white/[0.08] bg-white/[0.035] p-5 lg:border-l lg:border-t-0">
-                <div className="h-full rounded-[1.4rem] border border-white/[0.09] bg-[#09090d]/86 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                <div className="flex h-full flex-col rounded-[1.4rem] border border-white/[0.09] bg-[#09090d]/86 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                   <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
                     <div className="flex items-center gap-3">
                       <Image
@@ -151,29 +169,58 @@ export default async function PluginPage() {
                         className="h-10 w-10 rounded-xl border border-purple-300/22 object-cover"
                       />
                       <div>
-                        <p className="text-sm font-semibold text-white">插件连接面板</p>
-                        <p className="mt-0.5 text-xs text-white/42">安装后刷新页面即可识别</p>
+                        <p className="text-sm font-semibold text-white">插件工具面板</p>
+                        <p className="mt-0.5 text-xs text-white/42">采集、同步、更新状态集中查看</p>
                       </div>
                     </div>
                     <span className="rounded-full border border-emerald-300/20 bg-emerald-400/12 px-2.5 py-1 text-xs text-emerald-100">v{version}</span>
                   </div>
 
-                  <div className="mt-4 space-y-3">
-                    {workflowItems.map((item, index) => (
-                      <div key={item.title} className="grid grid-cols-[2.25rem_1fr] gap-3 rounded-[1rem] border border-white/[0.08] bg-white/[0.045] p-3">
-                        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-sm font-semibold text-black">
-                          {index + 1}
-                        </span>
-                        <span>
-                          <span className="block text-sm font-medium text-white/90">{item.title}</span>
-                          <span className="mt-1 block text-xs leading-5 text-white/48">{item.description}</span>
-                        </span>
+                  <div className="mt-4 grid gap-3">
+                    {pluginStatusItems.map((item) => (
+                      <div key={item.label} className="rounded-[1rem] border border-white/[0.08] bg-white/[0.045] px-4 py-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-xs text-white/42">{item.label}</span>
+                          <span className={`text-sm font-medium ${item.tone}`}>{item.label === '当前版本' ? `v${version}` : item.value}</span>
+                        </div>
                       </div>
                     ))}
                   </div>
 
                   <div className="mt-4 rounded-[1rem] border border-cyan-300/16 bg-cyan-400/[0.06] px-4 py-3 text-xs leading-5 text-cyan-50/72">
-                    插件有新版本时，导航栏会提示更新。重新下载并加载新版文件夹即可。
+                    插件只负责把网页图片同步到当前账号素材库。重新安装最新版后，刷新页面即可完成连接识别。
+                  </div>
+
+                  <div className="mt-4 grid gap-2">
+                    <a
+                      href="/api/plugin/download?browser=chromium"
+                      className="inline-flex min-h-11 items-center justify-center rounded-xl bg-white text-sm font-semibold text-black transition hover:bg-white/88"
+                    >
+                      下载最新版插件
+                    </a>
+                    <Link
+                      href="/home"
+                      className="inline-flex min-h-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.055] text-sm font-medium text-white/72 transition hover:bg-white/[0.11] hover:text-white"
+                    >
+                      返回工作台
+                    </Link>
+                  </div>
+
+                  <div className="mt-4 flex-1 rounded-[1rem] border border-white/[0.08] bg-black/24 p-3">
+                    <p className="text-xs font-medium text-white/72">采集流程</p>
+                    <div className="mt-3 space-y-2">
+                      {workflowItems.map((item, index) => (
+                        <div key={item.title} className="grid grid-cols-[1.65rem_1fr] gap-2">
+                          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/[0.09] text-[11px] font-semibold text-white/70">
+                            {index + 1}
+                          </span>
+                          <span>
+                            <span className="block text-xs font-medium text-white/82">{item.title}</span>
+                            <span className="mt-0.5 block text-[11px] leading-4 text-white/42">{item.description}</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>

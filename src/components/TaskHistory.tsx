@@ -1069,6 +1069,12 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   }, [isCollapsed]);
 
   useEffect(() => {
+    window.dispatchEvent(new CustomEvent('taskHistoryPanelState', {
+      detail: { expanded: !isCollapsed },
+    }));
+  }, [isCollapsed]);
+
+  useEffect(() => {
     if (!isCollapsed && !hasLoadedDatabaseRef.current) {
       void loadTasks(userId);
     }

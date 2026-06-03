@@ -53,19 +53,26 @@ export default function RechargePanel({ onRechargeUpdated }: RechargePanelProps)
     <div className="space-y-5">
       <section className="overflow-hidden rounded-[1.4rem] border border-violet-300/14 bg-violet-500/[0.05] backdrop-blur-xl">
         <div className="px-4 py-4">
-          <h3 className="text-xl font-semibold tracking-tight text-white">积分兑换码</h3>
-          <p className="mt-1 text-sm leading-6 text-white/40">当前自动支付暂未开放，请联系管理员获取兑换码后在这里兑换积分。</p>
+          <h3 className="text-xl font-semibold tracking-tight text-white">人工充值通道</h3>
+          <p className="mt-1 text-sm leading-6 text-white/40">当前在线支付暂未开放，可联系管理员获取一次性兑换码后在这里兑换积分。</p>
         </div>
 
         <div className="mx-4 h-px bg-violet-300/10" />
 
         <div className="px-4 py-4">
           <div className="flex min-w-0 flex-col gap-3 rounded-2xl border border-white/10 bg-black/18 px-4 py-4">
-            <p className="text-sm text-white/42">管理员微信</p>
-            <p className="text-lg font-semibold text-white">Kzai-1224</p>
-            <p className="text-sm leading-6 text-white/48">联系管理员并说明需要兑换的积分额度，确认后会给你一串兑换码。</p>
-            <div className="rounded-2xl border border-amber-300/18 bg-amber-400/[0.08] px-3 py-2 text-sm text-amber-100">
-              兑换码只可使用一次，请勿转发给他人。
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-white/78">联系管理员获取兑换码</p>
+                <p className="mt-1 text-sm leading-6 text-white/44">说明要充值的积分额度，确认后会发放一次性兑换码。</p>
+              </div>
+              <div className="rounded-2xl border border-violet-300/18 bg-violet-500/[0.08] px-3 py-2 text-right">
+                <p className="text-xs text-white/38">微信</p>
+                <p className="mt-0.5 text-base font-semibold text-white">Kzai-1224</p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-amber-300/18 bg-amber-400/[0.08] px-3 py-2 text-sm leading-6 text-amber-100">
+              兑换码仅用于当前账号积分入账，只可使用一次，请勿转发给他人。
             </div>
           </div>
         </div>

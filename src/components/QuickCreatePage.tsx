@@ -1197,6 +1197,7 @@ export default function QuickCreatePage() {
   const [processingAction, setProcessingAction] = useState<GalleryActionId | null>(null);
   const [actionBarPosition, setActionBarPosition] = useState<{ top: number; left: number } | null>(null);
   const [showAiPromptPanel, setShowAiPromptPanel] = useState(false);
+  const [isTaskHistoryExpanded, setIsTaskHistoryExpanded] = useState(false);
   const [previewImage, setPreviewImage] = useState<PreviewImageState | null>(null);
   const [deletingOrderNumber, setDeletingOrderNumber] = useState<string | null>(null);
   const [deletingMaterialIds, setDeletingMaterialIds] = useState<Set<string>>(new Set());
@@ -1234,6 +1235,12 @@ export default function QuickCreatePage() {
     const selectedSet = new Set(selectedImageList);
     return capturedImages.filter((image) => selectedSet.has(image.imageUrl));
   }, [capturedImages, selectedImageList]);
+  const selectedPreviewImages = useMemo(() => {
+    if (selectedCapturedImages.length > 0) {
+      return selectedCapturedImages.map((image) => image.thumbnailUrl || image.imageUrl).slice(0, 4);
+    }
+    return selectedImageList.slice(0, 4);
+  }, [selectedCapturedImages, selectedImageList]);
 
   const activeFolderId = materialScope.startsWith('folder:') ? materialScope.slice('folder:'.length) : null;
   const activeFolder = activeFolderId ? materialFolders.find((folder) => folder.id === activeFolderId) || null : null;
@@ -3591,9 +3598,19 @@ export default function QuickCreatePage() {
   }, [thumbnailSize]);
 
   useEffect(() => {
+    const handleTaskHistoryPanelState = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail as { expanded?: boolean } | undefined : undefined;
+      setIsTaskHistoryExpanded(Boolean(detail?.expanded));
+    };
+
+    window.addEventListener('taskHistoryPanelState', handleTaskHistoryPanelState);
+    return () => window.removeEventListener('taskHistoryPanelState', handleTaskHistoryPanelState);
+  }, []);
+
+  useEffect(() => {
     const updateActionBarPosition = () => {
       const container = gallerySectionRef.current;
-      if (isCompactActionBar || !container || selectedImageList.length === 0) {
+      if (isTaskHistoryExpanded || isCompactActionBar || !container || selectedImageList.length === 0) {
         setActionBarPosition(null);
         return;
       }
@@ -3646,10 +3663,10 @@ export default function QuickCreatePage() {
       window.removeEventListener('resize', updateActionBarPosition);
       window.removeEventListener('scroll', updateActionBarPosition, true);
     };
-  }, [isCompactActionBar, selectedImageList, showAiPromptPanel]);
+  }, [isCompactActionBar, isTaskHistoryExpanded, selectedImageList, showAiPromptPanel]);
 
   return (
-    <div className={`flex-1 px-6 py-8 overflow-y-auto ${isCompactActionBar && selectedImageList.length > 0 ? 'pb-40' : ''}`}>
+    <div className={`flex-1 px-6 py-8 overflow-y-auto ${isCompactActionBar && selectedImageList.length > 0 && !isTaskHistoryExpanded ? 'pb-40' : ''}`}>
       {imageEditor.open && imageEditor.mode === 'crop' && (
         <CropEditorPanel
           imageUrl={imageEditor.imageUrl}
@@ -4496,7 +4513,7 @@ export default function QuickCreatePage() {
           </div>
         )}
 
-        {!imageEditor.open && !showLocalEdit && selectedImageList.length > 0 && (actionBarPosition || isCompactActionBar) && (
+        {!imageEditor.open && !showLocalEdit && !isTaskHistoryExpanded && selectedImageList.length > 0 && (actionBarPosition || isCompactActionBar) && (
           <div
             data-role="selection-action-bar"
             className={`pointer-events-none transition-all duration-150 ${isCompactActionBar ? 'fixed inset-x-3 bottom-4 z-40' : 'fixed z-40'}`}
@@ -4511,13 +4528,38 @@ export default function QuickCreatePage() {
             )}
             <div className={`pointer-events-auto rounded-[1.7rem] border border-white/12 bg-black/82 backdrop-blur-2xl shadow-[0_18px_44px_rgba(0,0,0,0.42),0_6px_20px_rgba(88,28,135,0.2)] ring-1 ring-white/5 transition-all ${isCompactActionBar ? 'max-h-[72vh] w-full overflow-y-auto px-3 py-3' : `max-w-[calc(100vw-24px)] px-4 py-4 ${showAiPromptPanel ? 'w-[min(760px,calc(100vw-24px))]' : 'w-[min(500px,calc(100vw-24px))]'}`}`}>
               <div className="flex flex-wrap items-center justify-between gap-4">
-                <span className="whitespace-nowrap rounded-full border border-white/[0.08] bg-white/[0.045] px-3 py-1.5 text-xs font-medium text-white/62">已选 {selectedImageList.length} 张</span>
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex shrink-0 -space-x-2">
+                    {selectedPreviewImages.map((imageUrl, index) => (
+                      <div key={`${imageUrl}-${index}`} className="relative h-9 w-9 overflow-hidden rounded-xl border border-black/55 bg-white/[0.06] shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+                        <SafeImage
+                          key={`${imageUrl}-${imageRetryTokens[imageUrl] || 0}`}
+                          src={getDisplayImageUrl(imageUrl)}
+                          alt={`已选预览 ${index + 1}`}
+                          fill
+                          sizes="36px"
+                          className="object-cover"
+                          onLoad={() => clearImageRetryState(imageUrl)}
+                          onError={() => scheduleImageRetry(imageUrl)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <span className="whitespace-nowrap rounded-full border border-white/[0.08] bg-white/[0.045] px-3 py-1.5 text-xs font-medium text-white/68">已选 {selectedImageList.length} 张</span>
+                </div>
                 {processingActionLabel && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-purple-500/18 px-2.5 py-1 text-xs font-medium text-purple-200 border border-purple-400/20">
                     <span className="h-1.5 w-1.5 rounded-full bg-purple-300 animate-pulse"></span>
                     正在提交 {processingActionLabel}
                   </span>
                 )}
+                <button
+                  type="button"
+                  onClick={clearSelectionState}
+                  className="rounded-full border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs font-medium text-white/58 transition-colors hover:bg-white/[0.12] hover:text-white"
+                >
+                  取消选择
+                </button>
               </div>
 
               <div className="mt-4 grid gap-3 md:grid-cols-[auto_minmax(0,1fr)] md:items-center">
