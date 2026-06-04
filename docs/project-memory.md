@@ -1,8 +1,21 @@
 # 造梦项目记忆文档
 
-最后更新：2026-05-28
+最后更新：2026-06-04
 
 本文档是当前项目交接基线。旧的“备用目标、降级、回退本地/URL/模板”、旧服务器路径和 Vercel 发布说明已经失效，后续接手时以本文档为准。
+
+
+## AI 运维交接补充
+
+后续开发 AI / 运维 AI 每次接手前，除本文档外，还必须阅读：
+
+```text
+/Users/andy/Documents/zaomeng/zaomeng/project/projects/docs/ai-ops-handoff.md
+```
+
+该文档记录高危禁区、Git/生产基线整理记录、每次修复后的运维变更记录，以及哪些操作必须先获得用户确认。
+
+2026-06-04 已完成 Git 基线修复：本地 `main`、GitHub `origin/main` 和生产 `/home/ubuntu/zaomeng/.deploy-sha` 均对齐到 `8aa7a1f`；旧 `origin/main` 已备份到 `backup/2026-06-04-old-origin-main-before-prod-sync`。
 
 ## 当前结论
 

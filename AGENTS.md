@@ -17,6 +17,8 @@ Current active capabilities:
 
 Read `docs/project-memory.md` before doing non-trivial work. It is the current handoff baseline.
 
+Also read `docs/ai-ops-handoff.md` before any maintenance, Git, deployment, production, auth, storage, order, points, or API-route work. It records high-risk no-go areas and the latest operational changes.
+
 ## Tech Stack
 
 - Framework: Next.js 16 App Router
