@@ -37,6 +37,18 @@ echo "[deploy] local checks"
 pnpm exec tsc --noEmit --pretty false --incremental false
 git diff --check
 
+echo "[deploy] production env preflight"
+ssh_cmd "set -Eeuo pipefail
+  test -f '${REMOTE_APP}/.env.local'
+  if ! grep -q '^AUTH_COOKIE_SECRET=.' '${REMOTE_APP}/.env.local'; then
+    echo '[deploy] missing AUTH_COOKIE_SECRET in production .env.local; generate a high-entropy value before deploying' >&2
+    exit 1
+  fi
+  if grep -q '^ALLOW_LEGACY_UNSIGNED_USER_COOKIE=true' '${REMOTE_APP}/.env.local'; then
+    echo '[deploy] refusing production deploy with ALLOW_LEGACY_UNSIGNED_USER_COOKIE=true' >&2
+    exit 1
+  fi"
+
 echo "[deploy] create remote release: ${REMOTE_RELEASE}"
 ssh_cmd "mkdir -p '$REMOTE_RELEASE'"
 
@@ -62,6 +74,14 @@ printf '%s\n' "$SHA" | ssh_cmd "cat > '${REMOTE_RELEASE}/.deploy-sha'"
 echo "[deploy] build remote release"
 ssh_cmd "set -Eeuo pipefail
   test -f '${REMOTE_APP}/.env.local'
+  if ! grep -q '^AUTH_COOKIE_SECRET=.' '${REMOTE_APP}/.env.local'; then
+    echo '[deploy] missing AUTH_COOKIE_SECRET in production .env.local; generate a high-entropy value before deploying' >&2
+    exit 1
+  fi
+  if grep -q '^ALLOW_LEGACY_UNSIGNED_USER_COOKIE=true' '${REMOTE_APP}/.env.local'; then
+    echo '[deploy] refusing production deploy with ALLOW_LEGACY_UNSIGNED_USER_COOKIE=true' >&2
+    exit 1
+  fi
   cp '${REMOTE_APP}/.env.local' '${REMOTE_RELEASE}/.env.local'
   mkdir -p '${REMOTE_RELEASE}/.coze-logs'
   for dir in public/uploads public/plugin-capture public/ai-generate public/material-editor public/color-extraction public/avatars; do

@@ -178,7 +178,8 @@ Manual 彩绘 PSD generation is a separate paid action and must only happen afte
 
 ## Known Risks
 
-- Authentication still relies heavily on a client-writable `user` JSON cookie; future work should migrate to trusted server-side sessions or JWT
-- Some APIs still mix user identity from body/header/cookie and need consolidation
-- Payment merchant parameters for real WeChat/Alipay callback verification are still incomplete
-- Smart-edit masks are still submitted as base64 JSON; multipart or pre-uploaded mask references would be more robust
+- Authentication now uses `src/lib/serverAuth.ts` signed `user` cookies for server APIs; do not reintroduce raw `JSON.parse(request.cookies.get('user'))` auth parsing.
+- Production must define a high-entropy `AUTH_COOKIE_SECRET`; the deploy script refuses missing `AUTH_COOKIE_SECRET` or `ALLOW_LEGACY_UNSIGNED_USER_COOKIE=true`.
+- Some legacy/compatibility APIs still exist; new paid, admin, upload, order, and profile work must derive identity from `getCookieUserId(request)` or a stronger future server session, not body/header userId.
+- Payment merchant parameters for real WeChat/Alipay callback verification are still incomplete.
+- Smart-edit masks are still submitted as base64 JSON; multipart or pre-uploaded mask references would be more robust.

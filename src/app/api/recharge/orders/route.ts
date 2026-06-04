@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getCookieUserId } from '@/lib/serverAuth';
 import QRCode from 'qrcode';
 import { transactionManager, userManager } from '@/storage/database';
 import { calculateRechargePoints, RECHARGE_CHANNEL_LABELS, RECHARGE_EXCHANGE_RATE, RECHARGE_TOOL_PAGE, normalizeRechargeChannel, type RechargeChannel } from '@/lib/recharge';
@@ -22,19 +23,6 @@ type RechargeRequestParams = {
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误';
-}
-
-function getCookieUserId(request: NextRequest): string | null {
-  const userCookie = request.cookies.get('user');
-  if (!userCookie) return null;
-
-  try {
-    const userData = JSON.parse(userCookie.value) as { id?: unknown };
-    return typeof userData.id === 'string' && userData.id ? userData.id : null;
-  } catch (error) {
-    console.error('[RechargeOrders] 解析 user cookie 失败:', error);
-    return null;
-  }
 }
 
 function generateRechargeOrderNumber() {

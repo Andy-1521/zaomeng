@@ -1,17 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getCookieUserId } from '@/lib/serverAuth';
 import { capturedImageManager, materialFolderManager } from '@/storage/database'
-
-function getCookieUserId(request: NextRequest): string | null {
-  const userCookie = request.cookies.get('user')
-  if (!userCookie) return null
-
-  try {
-    const userData = JSON.parse(userCookie.value) as { id?: string }
-    return typeof userData.id === 'string' && userData.id ? userData.id : null
-  } catch {
-    return null
-  }
-}
 
 export async function POST(request: NextRequest) {
   const userId = getCookieUserId(request)

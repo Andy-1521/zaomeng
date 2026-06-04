@@ -2,19 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { uploadToCozeStorage } from '@/lib/dualStorage';
 import { normalizeFileExtension, normalizeFolder } from '@/lib/localUploadStorage';
 import { isImageValidationError, validateUploadedImageBuffer } from '@/lib/serverImageValidation';
+import { getCookieUserId } from '@/lib/serverAuth';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '文件上传失败';
-}
-
-function getErrorStack(error: unknown) {
-  return error instanceof Error ? error.stack : undefined;
 }
 
 console.log('[Buffer上传] 使用阿里云OSS对象存储（1年有效期）');
 
 export async function POST(request: NextRequest) {
   try {
+    const userId = getCookieUserId(request);
+    if (!userId) {
+      return NextResponse.json({ success: false, message: '未登录' }, { status: 401 });
+    }
+
     // 解析FormData
     const formData = await request.formData();
     const bufferData = formData.get('buffer') as string; // Base64编码的Buffer
@@ -40,7 +42,7 @@ export async function POST(request: NextRequest) {
     const timestamp = Date.now();
     const random = Math.floor(Math.random() * 10000);
     const extension = normalizeFileExtension(imageInfo.extension);
-    const filePath = `${folder}/${timestamp}_${random}.${extension}`;
+    const filePath = `${folder}/${userId}/${timestamp}_${random}.${extension}`;
 
     console.log('[Buffer上传] 开始上传到阿里云OSS:', filePath);
     const storageUrl = await uploadToCozeStorage(buffer, filePath, imageInfo.contentType);
@@ -67,10 +69,6 @@ export async function POST(request: NextRequest) {
       {
         success: false,
         message: getErrorMessage(error),
-        debug: {
-          error: getErrorMessage(error),
-          stack: getErrorStack(error),
-        },
       },
       { status: 500 }
     );

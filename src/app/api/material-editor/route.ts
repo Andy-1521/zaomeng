@@ -1,4 +1,5 @@
 import { after, NextRequest, NextResponse } from 'next/server';
+import { getCookieUserId } from '@/lib/serverAuth';
 import sharp from 'sharp';
 import { uploadToCozeStorage } from '@/lib/dualStorage';
 import { composePromptFromImage } from '@/lib/materialEditorPrompt';
@@ -97,18 +98,6 @@ class MaterialEditorBadRequestError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'MaterialEditorBadRequestError';
-  }
-}
-
-function getCookieUserId(request: NextRequest): string | null {
-  const userCookie = request.cookies.get('user');
-  if (!userCookie) return null;
-
-  try {
-    const userData = JSON.parse(userCookie.value) as { id?: string };
-    return typeof userData.id === 'string' && userData.id ? userData.id : null;
-  } catch {
-    return null;
   }
 }
 

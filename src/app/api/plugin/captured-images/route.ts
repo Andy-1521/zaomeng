@@ -1,18 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getCookieUserId } from '@/lib/serverAuth';
 import { capturedImageManager } from '@/storage/database'
 import { getAliyunOSSThumbnailUrlFromUrl } from '@/lib/aliyunOSS'
-
-function getCookieUserId(request: NextRequest): string | null {
-  const userCookie = request.cookies.get('user')
-  if (!userCookie) return null
-
-  try {
-    const userData = JSON.parse(userCookie.value) as { id?: string }
-    return typeof userData.id === 'string' && userData.id ? userData.id : null
-  } catch {
-    return null
-  }
-}
 
 function isLikelyDisplayableImage(imageUrl: string) {
   const normalized = imageUrl.split('?')[0].toLowerCase()

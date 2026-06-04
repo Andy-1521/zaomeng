@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { transactionManager } from '@/storage/database';
 import { userManager } from '@/storage/database';
 import { RECHARGE_TOOL_PAGE } from '@/lib/recharge';
+import { getCookieUserId } from '@/lib/serverAuth';
 
 type GenerationFilters = {
   toolPage?: string;
@@ -37,18 +38,9 @@ function mapToolFilter(toolFilter: string): string[] {
  */
 export async function GET(request: NextRequest) {
   try {
-    const userCookie = request.cookies.get('user');
-    let currentUser: { id?: string } | null = null;
+    const currentUserId = getCookieUserId(request);
 
-    if (userCookie) {
-      try {
-        currentUser = JSON.parse(userCookie.value);
-      } catch (error) {
-        console.error('[API] 解析 user cookie 失败:', error);
-      }
-    }
-
-    if (!currentUser || !currentUser.id) {
+    if (!currentUserId) {
       return NextResponse.json(
         { success: false, message: '未登录' },
         { status: 401 }
@@ -56,7 +48,7 @@ export async function GET(request: NextRequest) {
     }
 
     // 从数据库重新查询用户完整信息
-    const adminUser = await userManager.getUserById(currentUser.id);
+    const adminUser = await userManager.getUserById(currentUserId);
 
     if (!adminUser) {
       return NextResponse.json(

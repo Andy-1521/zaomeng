@@ -1,20 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getCookieUserId } from '@/lib/serverAuth';
 import { uploadToCozeStorage } from '@/lib/dualStorage';
 import { capturedImageManager, materialFolderManager } from '@/storage/database';
 import { normalizeFileExtension, normalizeFolder } from '@/lib/localUploadStorage';
 import { isImageValidationError, validateUploadedImageBuffer } from '@/lib/serverImageValidation';
-
-function getCookieUserId(request: NextRequest): string | null {
-  const userCookie = request.cookies.get('user');
-  if (!userCookie) return null;
-
-  try {
-    const userData = JSON.parse(userCookie.value) as { id?: string };
-    return typeof userData.id === 'string' && userData.id ? userData.id : null;
-  } catch {
-    return null;
-  }
-}
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '文件上传失败';
@@ -38,6 +27,11 @@ console.log('[文件上传] 使用阿里云OSS对象存储（1年有效期）');
 
 export async function POST(request: NextRequest) {
   try {
+    const userId = getCookieUserId(request);
+    if (!userId) {
+      return NextResponse.json({ success: false, message: '未登录' }, { status: 401 });
+    }
+
     // 解析FormData
     const formData = await request.formData();
     const file = formData.get('file') as File;
@@ -63,7 +57,7 @@ export async function POST(request: NextRequest) {
     const timestamp = Date.now();
     const random = Math.floor(Math.random() * 10000);
     const extension = normalizeFileExtension(imageInfo.extension);
-    const fileName = `${folder}/${timestamp}_${random}.${extension}`;
+    const fileName = `${folder}/${userId}/${timestamp}_${random}.${extension}`;
 
     console.log('[文件上传] 开始上传到阿里云OSS:', fileName);
     const storageUrl = await uploadToCozeStorage(buffer, fileName, imageInfo.contentType);
@@ -71,24 +65,21 @@ export async function POST(request: NextRequest) {
 
     let materialRecord = null;
     if (createMaterial) {
-      const userId = getCookieUserId(request);
       let targetFolderId: string | null = null;
-      if (userId && materialFolderId) {
+      if (materialFolderId) {
         const targetFolder = await materialFolderManager.getFolderById(materialFolderId, userId);
         targetFolderId = targetFolder ? targetFolder.id : null;
       }
-      if (userId) {
-        materialRecord = await capturedImageManager.createCapturedImage({
-          userId,
-          imageUrl: storageUrl,
-          originalUrl: null,
-          pageUrl: null,
-          pageTitle: originalFileName || file.name,
-          sourceHost: 'local-upload',
-          imageType: 'main',
-          folderId: targetFolderId,
-        });
-      }
+      materialRecord = await capturedImageManager.createCapturedImage({
+        userId,
+        imageUrl: storageUrl,
+        originalUrl: null,
+        pageUrl: null,
+        pageTitle: originalFileName || file.name,
+        sourceHost: 'local-upload',
+        imageType: 'main',
+        folderId: targetFolderId,
+      });
     }
 
     return NextResponse.json({

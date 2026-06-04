@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { userManager } from '@/storage/database';
+import { AUTH_COOKIE_NAME, buildAuthCookieUser, createAuthCookieValue, getAuthCookieOptions, getCookieUserId } from '@/lib/serverAuth';
 
 /**
  * 会话刷新接口
@@ -14,19 +15,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { userId } = body;
-    const userCookie = request.cookies.get('user');
-    let cookieUserId: string | null = null;
-
-    if (userCookie) {
-      try {
-        const userData = JSON.parse(userCookie.value);
-        if (typeof userData.id === 'string' && userData.id) {
-          cookieUserId = userData.id;
-        }
-      } catch (error) {
-        console.error('[API] 解析 refresh user cookie 失败:', error);
-      }
-    }
+    const cookieUserId = getCookieUserId(request);
 
     if (!userId) {
       return NextResponse.json(
@@ -59,36 +48,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 准备用户cookie数据
-    const userData = JSON.stringify({
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      points: user.points,
-      isAdmin: user.isAdmin || false,
-    });
+    const authUser = buildAuthCookieUser(user);
+    const userData = createAuthCookieValue(authUser);
 
     // 创建响应并更新cookie
     const response = NextResponse.json({
       success: true,
       message: '会话刷新成功',
-      data: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        points: user.points,
-        isAdmin: user.isAdmin || false,
-      },
+      data: authUser,
     });
 
-    // 使用Next.js标准方法设置cookie
-    response.cookies.set('user', userData, {
-      httpOnly: true,
-      secure: false,
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 7天
-      path: '/',
-    });
+    response.cookies.set(AUTH_COOKIE_NAME, userData, getAuthCookieOptions(request));
 
     console.log('[API] 会话刷新成功，userId:', user.id, 'isAdmin:', user.isAdmin);
 

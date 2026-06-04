@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { userManager } from '@/storage/database';
+import { AUTH_COOKIE_NAME, buildAuthCookieUser, createAuthCookieValue, getAuthCookieOptions } from '@/lib/serverAuth';
 
 /**
  * 用户登录接口（使用本地 MySQL 数据库验证）
@@ -41,39 +42,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 准备用户cookie数据
-    const userData = JSON.stringify({
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      points: user.points,
-      isAdmin: user.isAdmin || false,
-    });
+    // 准备带签名的用户 cookie 数据，避免伪造 user.id / isAdmin 盗刷积分或兑换码
+    const authUser = buildAuthCookieUser(user);
+    const userData = createAuthCookieValue(authUser);
 
     // 创建响应并设置cookie
     const response = NextResponse.json({
       success: true,
       message: '登录成功',
-      data: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        points: user.points,
-        isAdmin: user.isAdmin || false,
-      },
+      data: authUser,
     });
 
     // 使用Next.js标准方法设置cookie
-    response.cookies.set('user', userData, {
-      httpOnly: true,
-      secure: false,
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 7天
-      path: '/',
-      // 不设置domain，让浏览器自动处理
-    });
+    response.cookies.set(AUTH_COOKIE_NAME, userData, getAuthCookieOptions(request));
 
-    console.log('[API] 登录成功，已设置Cookie，userData前100字符:', userData.substring(0, 100));
+    console.log('[API] 登录成功，已设置安全登录态 Cookie，userId:', authUser.id);
 
     return response;
   } catch (error: unknown) {

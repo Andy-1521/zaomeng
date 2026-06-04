@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { userManager } from '@/storage/database';
 import type { UpdateUser } from '@/storage/database';
+import { getCookieUserId } from '@/lib/serverAuth';
 
 /**
  * 更新用户信息接口（管理员专用）
@@ -14,18 +15,9 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { userId, points, avatar } = body;
 
-    const userCookie = request.cookies.get('user');
-    let currentUser: { id?: string } | null = null;
+    const currentUserId = getCookieUserId(request);
 
-    if (userCookie) {
-      try {
-        currentUser = JSON.parse(userCookie.value);
-      } catch (error) {
-        console.error('[API] 解析 user cookie 失败:', error);
-      }
-    }
-
-    if (!currentUser || !currentUser.id) {
+    if (!currentUserId) {
       return NextResponse.json(
         { success: false, message: '未登录' },
         { status: 401 }
@@ -33,7 +25,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 检查是否是管理员
-    const adminUser = await userManager.getUserById(currentUser.id);
+    const adminUser = await userManager.getUserById(currentUserId);
     if (!adminUser || !adminUser.isAdmin) {
       return NextResponse.json(
         { success: false, message: '无权限访问' },

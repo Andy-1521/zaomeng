@@ -4,6 +4,7 @@ import { decomposeLayersWithRunningHub } from '@/lib/layer-decomposition';
 import { generatePsdFromDecomposition } from '@/lib/psd-generator';
 import { uploadFromUrlToCozeStorage, uploadToCozeStorage } from '@/lib/dualStorage';
 import { getGeneratePsdPoints } from '@/lib/pricing';
+import { getCookieUserId } from '@/lib/serverAuth';
 
 type ParsedRecord = Record<string, unknown>;
 
@@ -128,6 +129,11 @@ export async function POST(request: NextRequest) {
   let chargedByThisRequest = false;
 
   try {
+    const cookieUserId = getCookieUserId(request);
+    if (!cookieUserId) {
+      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
+    }
+
     const body = await request.json();
     const { orderNumber } = body;
 
@@ -138,6 +144,10 @@ export async function POST(request: NextRequest) {
     const transaction = await transactionManager.getTransactionByOrderNumber(orderNumber);
     if (!transaction) {
       return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 });
+    }
+
+    if (transaction.userId !== cookieUserId) {
+      return NextResponse.json({ success: false, error: '无权为其他用户订单生成PSD' }, { status: 403 });
     }
 
     const requestParams = parseRecord(transaction.requestParams);

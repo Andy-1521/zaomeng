@@ -11,6 +11,13 @@ function getErrorMessage(error: unknown) {
  * 用于在生图开始时立即创建订单，确保历史记录能及时显示
  */
 export async function POST(request: Request) {
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json(
+      { success: false, message: '该预创建订单接口仅供维护脚本使用，生产环境已禁用' },
+      { status: 403 }
+    );
+  }
+
   try {
     const body = await request.json();
     const { userId, orderId, toolPage, description, prompt, requestParams } = body;

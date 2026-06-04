@@ -4,6 +4,7 @@ import { uploadFromUrlToCozeStorage, uploadToCozeStorage } from '@/lib/dualStora
 import { isImageEditTimeoutError, runPsydoImageEditFromUrl } from '@/lib/psydoImageEdits';
 import { getColorExtractionPoints, getGeneratePsdPoints } from '@/lib/pricing';
 import { tryCreateAndUploadResultThumbnailFromUrl } from '@/lib/resultThumbnail';
+import { getCookieUserId, isBodyUserMismatch } from '@/lib/serverAuth';
 
 const COLOR_EXTRACTION_POINTS = getColorExtractionPoints();
 const PSD_POINTS = getGeneratePsdPoints();
@@ -325,6 +326,21 @@ export async function POST(request: NextRequest) {
   try {
     const requestBody = await request.json();
     const { userId: requestUserId, imageUrl, orderId } = requestBody;
+    const cookieUserId = getCookieUserId(request);
+
+    if (!cookieUserId) {
+      return NextResponse.json(
+        { success: false, message: '未登录' },
+        { status: 401 }
+      );
+    }
+
+    if (isBodyUserMismatch(requestUserId, cookieUserId)) {
+      return NextResponse.json(
+        { success: false, message: '无权使用其他用户积分' },
+        { status: 403 }
+      );
+    }
 
     console.log(`[彩绘提取2工作流] ========== 接收到请求 ==========`);
     console.log(`[彩绘提取2工作流] userId: ${requestUserId}`);
@@ -332,8 +348,8 @@ export async function POST(request: NextRequest) {
     console.log(`[彩绘提取2工作流] extractionMode: full`);
     console.log(`[彩绘提取2工作流] ========== 请求参数解析完成 ==========`);
 
-    if (!requestUserId || !imageUrl) {
-      console.error('[彩绘提取2工作流] 参数验证失败:', { hasUserId: !!requestUserId, hasImageUrl: !!imageUrl });
+    if (!imageUrl) {
+      console.error('[彩绘提取2工作流] 参数验证失败:', { hasImageUrl: !!imageUrl });
       return NextResponse.json(
         { success: false, message: '缺少必要参数' },
         { status: 400 }
@@ -349,7 +365,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    userId = requestUserId;
+    userId = cookieUserId;
 
     const finalPrompt = `专业提取手机壳表面的完整彩绘图案，执行以下强制要求：
 1. 移除所有手机硬件元素，仅保留手机壳上的彩绘图案本体，重点清除摄像头开孔、边框、按键、镜头圈、壳体轮廓与所有非图案结构；

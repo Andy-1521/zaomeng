@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { userManager } from '@/storage/database';
+import { getCookieUserId } from '@/lib/serverAuth';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误';
@@ -16,19 +17,7 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const requestedUserId = searchParams.get('userId');
-    const userCookie = request.cookies.get('user');
-    let cookieUserId: string | null = null;
-
-    if (userCookie) {
-      try {
-        const userData = JSON.parse(userCookie.value);
-        if (typeof userData.id === 'string' && userData.id) {
-          cookieUserId = userData.id;
-        }
-      } catch (error) {
-        console.error('[API/Profile] 解析 user cookie 失败:', error);
-      }
-    }
+    const cookieUserId = getCookieUserId(request);
 
     const userId = requestedUserId || cookieUserId;
 

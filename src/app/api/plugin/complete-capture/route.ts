@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getCookieUserId } from '@/lib/serverAuth';
 import { assertAliyunOSSObjectExistsBestEffort, getAliyunOSSUrl } from '@/lib/aliyunOSS';
 import { withStorageKeyLock } from '@/lib/storageKeyLock';
 import { capturedImageManager, userManager } from '@/storage/database';
@@ -13,18 +14,6 @@ type CompleteCaptureRequest = {
   imageType?: 'main' | 'detail';
   captureMethod?: string;
 };
-
-function getCookieUserId(request: NextRequest): string | null {
-  const userCookie = request.cookies.get('user');
-  if (!userCookie) return null;
-
-  try {
-    const userData = JSON.parse(userCookie.value) as { id?: string };
-    return typeof userData.id === 'string' && userData.id ? userData.id : null;
-  } catch {
-    return null;
-  }
-}
 
 function isAllowedImageType(value: unknown): value is NonNullable<CompleteCaptureRequest['imageType']> {
   return value === 'main' || value === 'detail';

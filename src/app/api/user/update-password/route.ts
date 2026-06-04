@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { userManager } from '@/storage/database';
+import { getCookieUserId } from '@/lib/serverAuth';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误';
@@ -15,26 +16,39 @@ function getErrorMessage(error: unknown) {
  */
 export async function POST(request: NextRequest) {
   try {
+    const cookieUserId = getCookieUserId(request);
+    if (!cookieUserId) {
+      return NextResponse.json(
+        { success: false, message: '未登录' },
+        { status: 401 }
+      );
+    }
+
     const body = await request.json();
     const { userId, oldPassword, newPassword } = body;
 
-    if (!userId || !oldPassword || !newPassword) {
+    if (typeof userId === 'string' && userId.trim() && userId.trim() !== cookieUserId) {
       return NextResponse.json(
-        { success: false, message: '用户ID、旧密码和新密码不能为空' },
+        { success: false, message: '无权限修改其他用户密码' },
+        { status: 403 }
+      );
+    }
+
+    if (!oldPassword || !newPassword) {
+      return NextResponse.json(
+        { success: false, message: '旧密码和新密码不能为空' },
         { status: 400 }
       );
     }
 
-    if (newPassword.length < 6) {
+    if (String(newPassword).length < 6) {
       return NextResponse.json(
         { success: false, message: '新密码至少6位' },
         { status: 400 }
       );
     }
 
-    // 检查用户是否存在
-    const user = await userManager.getUserById(userId);
-
+    const user = await userManager.getUserById(cookieUserId);
     if (!user) {
       return NextResponse.json(
         { success: false, message: '用户不存在' },
@@ -50,8 +64,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 更新密码
-    await userManager.updatePassword(userId, newPassword);
+    await userManager.updatePassword(cookieUserId, String(newPassword));
 
     return NextResponse.json({
       success: true,

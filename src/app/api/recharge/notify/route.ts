@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { getMysqlPool } from '@/storage/database';
-import { RECHARGE_EXCHANGE_RATE, RECHARGE_TOOL_PAGE } from '@/lib/recharge';
+import { RECHARGE_TOOL_PAGE } from '@/lib/recharge';
 
 type RechargeNotifyBody = {
   orderNumber?: string;
@@ -140,8 +140,28 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: true, message: '充值订单状态已更新', data: { orderNumber, status: nextStatus } });
       }
 
-      const amountYuan = Number(body.amountYuan || 0);
-      const paidPoints = Number(body.paidPoints || (amountYuan > 0 ? amountYuan * RECHARGE_EXCHANGE_RATE : transaction.points));
+      const orderParams = parseJsonObject(transaction.request_params);
+      const expectedAmountYuan = Number(orderParams?.amountYuan || 0);
+      const expectedPoints = Number(transaction.points || 0);
+      const callbackAmountYuan = Number(body.amountYuan || 0);
+      const callbackPaidPoints = Number(body.paidPoints || 0);
+
+      if (!Number.isFinite(expectedPoints) || expectedPoints <= 0) {
+        await connection.rollback();
+        return NextResponse.json({ success: false, message: '充值订单积分异常' }, { status: 400 });
+      }
+
+      if (callbackAmountYuan > 0 && expectedAmountYuan > 0 && callbackAmountYuan !== expectedAmountYuan) {
+        await connection.rollback();
+        return NextResponse.json({ success: false, message: '回调金额与订单不一致' }, { status: 400 });
+      }
+
+      if (callbackPaidPoints > 0 && callbackPaidPoints !== expectedPoints) {
+        await connection.rollback();
+        return NextResponse.json({ success: false, message: '回调积分与订单不一致' }, { status: 400 });
+      }
+
+      const paidPoints = expectedPoints;
 
       const [userRows] = await connection.query<RechargeUserRow[]>(
         `SELECT id, points

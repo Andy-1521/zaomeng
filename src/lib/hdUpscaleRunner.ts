@@ -5,6 +5,7 @@ import { tryCreateAndUploadResultThumbnail } from '@/lib/resultThumbnail';
 import { createUpsamplingTask, waitForUpsamplingTaskComplete } from '@/lib/runningHubWatermark';
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 import { getHdUpscalePoints } from '@/lib/pricing';
+import { getCookieUserId, isBodyUserMismatch } from '@/lib/serverAuth';
 
 type HdUpscaleRequest = {
   userId?: string;
@@ -49,10 +50,18 @@ export async function runHdUpscaleRoute(request: NextRequest) {
 
   try {
     const body = await request.json() as HdUpscaleRequest;
-    const userId = body.userId?.trim();
+    const cookieUserId = getCookieUserId(request);
+    if (!cookieUserId) {
+      return NextResponse.json({ success: false, message: '未登录' }, { status: 401 });
+    }
+    if (isBodyUserMismatch(body.userId, cookieUserId)) {
+      return NextResponse.json({ success: false, message: '无权使用其他用户积分' }, { status: 403 });
+    }
+
+    const userId = cookieUserId;
     const imageUrl = body.imageUrl?.trim();
 
-    if (!userId || !imageUrl) {
+    if (!imageUrl) {
       return NextResponse.json({ success: false, message: '缺少必要参数' }, { status: 400 });
     }
 

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getCookieUserId } from '@/lib/serverAuth';
 import { getAliyunOSSThumbnailUrlFromUrl } from '@/lib/aliyunOSS';
 
 export const runtime = 'nodejs';
@@ -9,21 +10,9 @@ function clampSize(value: string | null) {
   return Math.max(48, Math.min(2048, Math.round(parsed)));
 }
 
-function hasLoggedInUser(request: NextRequest) {
-  const userCookie = request.cookies.get('user');
-  if (!userCookie) return false;
-
-  try {
-    const userData = JSON.parse(userCookie.value) as { id?: unknown };
-    return typeof userData.id === 'string' && userData.id.length > 0;
-  } catch {
-    return false;
-  }
-}
-
 export async function GET(request: NextRequest) {
   try {
-    if (!hasLoggedInUser(request)) {
+    if (!getCookieUserId(request)) {
       return NextResponse.json({ success: false, message: '未登录' }, { status: 401 });
     }
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { userManager } from '@/storage/database';
 import { verifyCodeStore } from '@/utils/verifyCodeStore';
+import { AUTH_COOKIE_NAME, buildAuthCookieUser, createAuthCookieValue, getAuthCookieOptions } from '@/lib/serverAuth';
 
 /**
  * 用户注册接口（使用本地 MySQL 数据库存储）
@@ -68,36 +69,19 @@ export async function POST(request: NextRequest) {
     // 所有操作成功后，删除验证码
     await verifyCodeStore.remove(email);
 
-    // 准备用户cookie数据
-    const userData = JSON.stringify({
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      points: user.points,
-      isAdmin: user.isAdmin || false,
-    });
+    // 准备带签名的用户 cookie 数据，避免伪造 user.id / isAdmin 盗刷积分或兑换码
+    const authUser = buildAuthCookieUser(user);
+    const userData = createAuthCookieValue(authUser);
 
     // 创建响应并设置cookie
     const response = NextResponse.json({
       success: true,
       message: '注册成功',
-      data: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        points: user.points,
-        isAdmin: user.isAdmin || false,
-      },
+      data: authUser,
     });
 
     // 使用Next.js标准方法设置cookie（自动登录）
-    response.cookies.set('user', userData, {
-      httpOnly: true,
-      secure: false,
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 7天
-      path: '/',
-    });
+    response.cookies.set(AUTH_COOKIE_NAME, userData, getAuthCookieOptions(request));
 
     return response;
   } catch (error: unknown) {

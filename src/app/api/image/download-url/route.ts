@@ -1,19 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getCookieUserId } from '@/lib/serverAuth';
 import { getAliyunOSSDownloadUrl, getAliyunOSSKeyFromUrl } from '@/lib/aliyunOSS';
 
 export const runtime = 'nodejs';
-
-function hasLoggedInUser(request: NextRequest) {
-  const userCookie = request.cookies.get('user');
-  if (!userCookie) return false;
-
-  try {
-    const userData = JSON.parse(userCookie.value) as { id?: unknown };
-    return typeof userData.id === 'string' && userData.id.length > 0;
-  } catch {
-    return false;
-  }
-}
 
 function sanitizeFileName(value: string | null) {
   const fallback = 'image.png';
@@ -30,7 +19,7 @@ function sanitizeFileName(value: string | null) {
 
 export async function GET(request: NextRequest) {
   try {
-    if (!hasLoggedInUser(request)) {
+    if (!getCookieUserId(request)) {
       return NextResponse.json({ success: false, message: '未登录' }, { status: 401 });
     }
 

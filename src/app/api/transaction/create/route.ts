@@ -9,6 +9,13 @@ import { transactionManager } from '@/storage/database';
  * - 如果订单已存在，返回现有订单
  */
 export async function POST(request: NextRequest) {
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json(
+      { success: false, message: '该订单创建接口仅供维护脚本使用，生产环境已禁用' },
+      { status: 403 }
+    );
+  }
+
   try {
     const body = await request.json();
     const {

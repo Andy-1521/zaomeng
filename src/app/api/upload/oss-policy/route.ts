@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getCookieUserId } from '@/lib/serverAuth';
 import { createAliyunOSSPostPolicy } from '@/lib/aliyunOSS';
 import { normalizeFileExtension, normalizeFolder } from '@/lib/localUploadStorage';
 
@@ -11,18 +12,6 @@ type DirectUploadPolicyRequest = {
   fileSize?: number;
   folder?: string;
 };
-
-function getCookieUserId(request: NextRequest): string | null {
-  const userCookie = request.cookies.get('user');
-  if (!userCookie) return null;
-
-  try {
-    const userData = JSON.parse(userCookie.value) as { id?: string };
-    return typeof userData.id === 'string' && userData.id ? userData.id : null;
-  } catch {
-    return null;
-  }
-}
 
 function getExtensionFromFileName(fileName: string, contentType: string) {
   const matched = fileName.match(/\.([a-zA-Z0-9]+)$/);

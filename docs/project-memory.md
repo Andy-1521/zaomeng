@@ -471,9 +471,10 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 
 ## 安全和已知风险
 
-- 全站认证仍以客户端 `user` JSON cookie 为核心，存在伪造身份和越权风险；后续应迁移到服务端可信 session/JWT
-- 管理员接口依赖同一 cookie 模型，认证改造时要一起处理
-- 部分 API 仍混用 body/header/cookie 的用户标识，后续应统一 `getAuthenticatedUser(request)`
+- 服务端认证已收口到 `src/lib/serverAuth.ts` 的签名 `user` cookie；不要再新增 raw `JSON.parse(request.cookies.get('user'))` 作为权限来源。
+- 生产环境必须配置高强度 `AUTH_COOKIE_SECRET`；部署脚本会拒绝缺少该变量或开启 `ALLOW_LEGACY_UNSIGNED_USER_COOKIE=true` 的发布。
+- 积分、订单、兑换码、上传、个人资料、管理员接口必须以 `getCookieUserId(request)` 或未来更强服务端 session 为准，不能信 body/header 里的 userId。
+- 管理员接口仍依赖签名 cookie + 数据库 `isAdmin`，长期可继续迁移到完整服务端 session/JWT。
 - 插件服务端兼容采图和远程图片读取必须继续复用 `src/lib/safeRemoteImage.ts`
 - 智能改图 mask 仍以 base64 JSON 提交，Nginx 已放宽 `/api/material-editor` 请求体，但长期建议改 multipart 或先上传 mask
 - 支付宝/微信真实支付商户参数、签名、证书、回调密钥仍未完整提供，真实商户回调验收仍阻塞

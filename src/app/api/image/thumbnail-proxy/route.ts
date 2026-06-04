@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getCookieUserId } from '@/lib/serverAuth';
 import sharp from 'sharp';
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 import { uploadToCozeStorage } from '@/lib/dualStorage';
@@ -11,30 +12,6 @@ const thumbnailMemoryCache = new Map<string, { createdAt: number; contentType: s
 const THUMBNAIL_CACHE_TTL_MS = 30 * 60 * 1000;
 const THUMBNAIL_CACHE_MAX_ITEMS = 80;
 
-function hasLoggedInUser(request: NextRequest) {
-  const userCookie = request.cookies.get('user');
-  if (!userCookie) return false;
-
-  try {
-    const userData = JSON.parse(userCookie.value) as { id?: unknown };
-    return typeof userData.id === 'string' && userData.id.length > 0;
-  } catch {
-    return false;
-  }
-}
-
-function getLoggedInUserId(request: NextRequest) {
-  const userCookie = request.cookies.get('user');
-  if (!userCookie) return '';
-
-  try {
-    const userData = JSON.parse(userCookie.value) as { id?: unknown };
-    return typeof userData.id === 'string' ? userData.id : '';
-  } catch {
-    return '';
-  }
-}
-
 function clampSize(value: string | null) {
   const parsed = Number(value || 256);
   if (!Number.isFinite(parsed)) return 256;
@@ -43,7 +20,7 @@ function clampSize(value: string | null) {
 
 export async function GET(request: NextRequest) {
   try {
-    if (!hasLoggedInUser(request)) {
+    if (!getCookieUserId(request)) {
       return NextResponse.json({ success: false, message: '未登录' }, { status: 401 });
     }
 
@@ -82,7 +59,7 @@ export async function GET(request: NextRequest) {
     let persistedThumbnailUrl = '';
     if (orderNumber) {
       try {
-        const userId = getLoggedInUserId(request);
+        const userId = getCookieUserId(request) || '';
         const order = await transactionManager.getTransactionByOrderNumber(orderNumber);
         if (order?.userId === userId) {
           persistedThumbnailUrl = await uploadToCozeStorage(

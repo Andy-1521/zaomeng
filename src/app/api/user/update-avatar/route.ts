@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { uploadToCozeStorage } from '@/lib/dualStorage';
 import { userManager } from '@/storage/database';
 import { normalizeFileExtension } from '@/lib/localUploadStorage';
+import { AUTH_COOKIE_NAME, buildAuthCookieUser, createAuthCookieValue, getAuthCookieOptions, getCookieUserId } from '@/lib/serverAuth';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误';
@@ -17,16 +18,30 @@ function getErrorMessage(error: unknown) {
  */
 export async function POST(request: NextRequest) {
   try {
+    const cookieUserId = getCookieUserId(request);
+    if (!cookieUserId) {
+      return NextResponse.json({ success: false, message: '未登录' }, { status: 401 });
+    }
+
     const formData = await request.formData();
-    const userId = formData.get('userId') as string;
+    const requestedUserId = formData.get('userId') as string | null;
     const file = formData.get('file') as File;
 
-    if (!userId || !file) {
+    if (requestedUserId && requestedUserId !== cookieUserId) {
       return NextResponse.json(
-        { success: false, message: '用户ID和头像文件不能为空' },
+        { success: false, message: '无权限修改其他用户头像' },
+        { status: 403 }
+      );
+    }
+
+    if (!file) {
+      return NextResponse.json(
+        { success: false, message: '头像文件不能为空' },
         { status: 400 }
       );
     }
+
+    const userId = cookieUserId;
 
     // 验证文件类型
     const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
@@ -66,14 +81,20 @@ export async function POST(request: NextRequest) {
 
     // 更新用户头像
     await userManager.updateAvatar(userId, avatarUrl);
+    const updatedUser = await userManager.getUserById(userId);
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message: '头像修改成功',
       data: {
         avatar: avatarUrl,
       },
     });
+    if (updatedUser) {
+      response.cookies.set(AUTH_COOKIE_NAME, createAuthCookieValue(buildAuthCookieUser(updatedUser)), getAuthCookieOptions(request));
+    }
+
+    return response;
   } catch (error: unknown) {
     console.error('修改头像失败:', error);
     return NextResponse.json(

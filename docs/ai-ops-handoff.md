@@ -219,9 +219,10 @@ pnpm build
    - 部分 `any` 类型
    - 部分无用变量和 `<img>` 警告
 
-4. 认证加固：
-   - 当前仍有接口依赖客户端可写 `user` cookie 或 body/header userId
-   - 后续应统一可信服务端 session / JWT
+4. 认证加固后续项：
+   - 当前已用 `src/lib/serverAuth.ts` 签名 `user` cookie 替代服务端 raw cookie 解析。
+   - 后续仍建议迁移到更完整的服务端 session / JWT，并保留积分/订单/兑换码链路的所有权校验。
+   - 生产必须显式配置高强度 `AUTH_COOKIE_SECRET`；不要在生产开启 `ALLOW_LEGACY_UNSIGNED_USER_COOKIE=true`。
 
 5. 生产日志收敛：
    - 减少生产 `console.log`
@@ -284,6 +285,40 @@ ls -dt /home/ubuntu/zaomeng-prev-* | head -1
 - 是否需要后续注意
 
 ## 变更记录
+
+### 2026-06-04 19:01 CST
+
+- 操作：本地加固积分盗刷、兑换码、订单越权和上传滥用风险，尚未部署生产。
+- 改动摘要：
+  - 新增 `src/lib/serverAuth.ts`，统一解析/签发带 HMAC 签名的 `user` cookie；生产默认拒绝旧 unsigned JSON cookie。
+  - 登录、注册、刷新、改用户名、改头像都会重新写入签名 cookie；本地 `localhost/127.0.0.1` 预览不会强制 `Secure`，生产会使用 Secure Cookie。
+  - 管理员、用户资料、素材、插件、缩略图、下载、充值订单等服务端接口改为统一 `getCookieUserId(request)` / `getCookieUser(request)`，删除 raw `JSON.parse(user cookie)` 权限解析。
+  - `/api/user/transactions` POST 通用扣积分接口禁用；GET 去掉 `x-user-id` 和无 cookie 查询他人记录。
+  - `/api/transaction/create`、`/api/transaction/create-pending` 生产禁用。
+  - `/api/transaction/update` 现在必须登录、校验订单归属，只允许客户端更新 `status` / `resultData` 白名单字段，拒绝改 points/remaining/psdUrl/requestParams。
+  - `/api/transaction/[orderNumber]`、订单删除、清空历史、PSD 生成均校验登录用户拥有订单。
+  - AI 生图、彩绘提取、高清放大、高清+扩图、移除背景等扣积分入口不再信任 body.userId，只使用签名 cookie 用户，body userId 不一致返回 403。
+  - 兑换码兑换使用签名 cookie 用户；管理员兑换码接口使用签名 cookie + DB `isAdmin`。
+  - 充值回调入账积分不再信任回调 `paidPoints` 任意值，而以已创建订单积分为准，并校验可选回调金额/积分一致性。
+  - 上传接口 `/api/upload/file`、`/api/upload/buffer`、`/api/upload/image`、头像更新均要求登录；上传路径加入用户 ID 前缀；上传 500 响应不再返回 stack/debug。
+  - `.env.local.example` 增加 `AUTH_COOKIE_SECRET` 示例。
+- 主要改动文件：
+  - `src/lib/serverAuth.ts`
+  - `src/app/api/auth/login/route.ts`、`register/route.ts`、`refresh/route.ts`
+  - `src/app/api/user/profile/route.ts`、`users/route.ts`、`update-username/route.ts`、`update-password/route.ts`、`update-avatar/route.ts`
+  - `src/app/api/user/transactions/**`、`src/app/api/transaction/**`
+  - `src/app/api/recharge/redeem/route.ts`、`orders/route.ts`、`notify/route.ts`、`src/app/api/admin/recharge-codes/route.ts`
+  - `src/app/api/image-to-image/run/route.ts`、`src/app/api/color-extraction/run/handler.ts`、`src/app/api/color-extraction/generate-psd/handler.ts`
+  - `src/lib/hdUpscaleRunner.ts`、`src/lib/outpaintUpsamplingRunner.ts`、`src/lib/backgroundRemovalRunner.ts`
+  - `src/app/api/upload/**`、素材/插件/图片下载相关 API、`.env.local.example`
+- 验证：
+  - `pnpm exec tsc --noEmit --pretty false --incremental false` 通过。
+  - `git diff --check` 通过。
+  - `pnpm build` 通过。
+  - 本地 `next start -p 5001` 生产模式 smoke：公共页 `/home`、`/login`、`/plugin`、`/privacy`、`/terms`、`/profile`、`/api/plugin/version` 返回 200（根路径 307 重定向）；未登录访问高风险积分/订单/扣费/兑换码接口返回 401/403；伪造 unsigned `user={...}` cookie 访问用户资料、交易、兑换码、管理员兑换码均被拒绝。
+  - 用本机 Chrome/Puppeteer 打开 `/home`、`/login`、`/plugin`、`/privacy`、`/terms`、`/profile`，页面 200 且无 console error。
+- 生产部署：未部署。只读检查发现当前生产 `.env.local` 仍缺少 `AUTH_COOKIE_SECRET`，部署前必须先补高强度随机值（可用 `openssl rand -base64 32` 生成）；`scripts/deploy-production.sh` 已加闸门，缺少该变量或开启 `ALLOW_LEGACY_UNSIGNED_USER_COOKIE=true` 会拒绝部署。部署后旧登录态会失效、用户需重新登录。
+- 高危注意：不要为了兼容旧登录态在生产设置 `ALLOW_LEGACY_UNSIGNED_USER_COOKIE=true`；不要恢复 body/header userId 作为积分、订单、兑换码、上传或管理员权限来源。
 
 ### 2026-06-04 18:30 CST
 

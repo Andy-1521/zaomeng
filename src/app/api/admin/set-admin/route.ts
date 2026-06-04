@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { userManager } from '@/storage/database';
+import { getCookieUserId } from '@/lib/serverAuth';
 
 /**
  * 设置/取消管理员权限接口
@@ -12,18 +13,16 @@ import { userManager } from '@/storage/database';
 export async function POST(request: NextRequest) {
   try {
     // 获取当前登录用户
-    const userCookie = request.cookies.get('user');
-    if (!userCookie) {
+    const currentUserId = getCookieUserId(request);
+    if (!currentUserId) {
       return NextResponse.json(
         { success: false, message: '未登录' },
         { status: 401 }
       );
     }
 
-    const currentUser = JSON.parse(userCookie.value);
-
     // 检查当前用户是否是管理员
-    const adminUser = await userManager.getUserById(currentUser.id);
+    const adminUser = await userManager.getUserById(currentUserId);
     if (!adminUser || !adminUser.isAdmin) {
       return NextResponse.json(
         { success: false, message: '无权限执行此操作' },

@@ -6,6 +6,7 @@ import { tryCreateAndUploadResultThumbnail } from '@/lib/resultThumbnail';
 import { runPsydoImageEditWithMetaFromUrl, isImageEditTimeoutError } from '@/lib/psydoImageEdits';
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 import { getOutpaintUpsamplingPoints } from '@/lib/pricing';
+import { getCookieUserId, isBodyUserMismatch } from '@/lib/serverAuth';
 
 export type OutpaintUpsamplingRequest = {
   userId?: string;
@@ -232,10 +233,18 @@ export async function runOutpaintUpsamplingRoute(request: NextRequest, options: 
 
   try {
     const body = await request.json() as OutpaintUpsamplingRequest;
-    const userId = body.userId?.trim();
+    const cookieUserId = getCookieUserId(request);
+    if (!cookieUserId) {
+      return NextResponse.json({ success: false, message: '未登录' }, { status: 401 });
+    }
+    if (isBodyUserMismatch(body.userId, cookieUserId)) {
+      return NextResponse.json({ success: false, message: '无权使用其他用户积分' }, { status: 403 });
+    }
+
+    const userId = cookieUserId;
     const imageUrl = body.imageUrl?.trim();
 
-    if (!userId || !imageUrl) {
+    if (!imageUrl) {
       return NextResponse.json({ success: false, message: '缺少必要参数' }, { status: 400 });
     }
 

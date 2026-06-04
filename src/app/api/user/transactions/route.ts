@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { transactionManager, userManager } from '@/storage/database';
+import { transactionManager } from '@/storage/database';
 import { reconcileProcessingTransactions } from '@/lib/reconcileProcessingTransactions';
 import { getAliyunOSSThumbnailUrlFromUrl } from '@/lib/aliyunOSS';
+import { getCookieUserId } from '@/lib/serverAuth';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误';
@@ -111,50 +112,18 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const requestedUserId = searchParams.get('userId');
-    let userId = requestedUserId;
+    const cookieUserId = getCookieUserId(request);
     const limit = Math.min(parseInt(searchParams.get('limit') || '200'), 200);
     const cursor = searchParams.get('cursor'); // 游标分页：上一页最后一条的 createdAt
-    let cookieUserId: string | null = null;
 
-    // 如果未传 userId，从 cookie 获取用户信息
-    const userCookie = request.cookies.get('user');
-    if (userCookie) {
-      try {
-        const userData = JSON.parse(userCookie.value);
-        if (typeof userData.id === 'string' && userData.id) {
-          cookieUserId = userData.id;
-          if (!userId) {
-            userId = userData.id;
-          }
-        }
-      } catch (e) {
-        console.error('[API/Transactions] 解析 user cookie 失败:', e);
-      }
-    }
-
-    // 如果还是没有 userId，尝试从请求头中获取（备用方案）
-    if (!userId) {
-      const headerUserId = request.headers.get('x-user-id');
-      if (headerUserId) {
-        userId = headerUserId;
-      }
-    }
-
-    if (!userId) {
-      return NextResponse.json(
-        { success: false, message: '用户ID不能为空' },
-        { status: 401 }
-      );
-    }
-
-    if (requestedUserId && !cookieUserId) {
+    if (!cookieUserId) {
       return NextResponse.json(
         { success: false, message: '未登录' },
         { status: 401 }
       );
     }
 
-    if (requestedUserId && cookieUserId && requestedUserId !== cookieUserId) {
+    if (requestedUserId && requestedUserId !== cookieUserId) {
       return NextResponse.json(
         { success: false, message: '无权限访问其他用户的消费记录' },
         { status: 403 }
@@ -162,7 +131,7 @@ export async function GET(request: NextRequest) {
     }
 
     // 获取用户消费记录（支持游标分页）
-    const transactions = await transactionManager.getUserTransactions(userId, limit, cursor);
+    const transactions = await transactionManager.getUserTransactions(cookieUserId, limit, cursor);
     const reconciledTransactions = await reconcileProcessingTransactions(transactions, {
       logPrefix: 'API/Transactions',
     });
@@ -248,100 +217,12 @@ export async function GET(request: NextRequest) {
 /**
  * 创建消费记录接口
  *
- * 功能说明：
- * - 扣除用户积分
- * - 创建消费记录到数据库
- * - 支持记录提示词、请求参数、结果数据
- * - 返回消费后的积分余额
+ * 安全说明：该通用扣积分接口曾接受客户端传入 userId/points，容易被用于盗刷积分。
+ * 生产业务应使用各工具自己的接口完成：登录校验、订单创建、积分预扣、失败退款。
  */
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const {
-      userId,
-      description,
-      points,
-      toolPage = '彩绘提取',
-      prompt = '',
-      requestParams = '',
-      resultData = '',
-      status = '成功'
-    } = body;
-
-    if (!userId || !description || !points) {
-      return NextResponse.json(
-        { success: false, message: '用户ID、消费描述和消费积分不能为空' },
-        { status: 400 }
-      );
-    }
-
-    if (points <= 0) {
-      return NextResponse.json(
-        { success: false, message: '消费积分必须大于0' },
-        { status: 400 }
-      );
-    }
-
-    // 检查用户是否存在
-    const user = await userManager.getUserById(userId);
-
-    if (!user) {
-      return NextResponse.json(
-        { success: false, message: '用户不存在' },
-        { status: 404 }
-      );
-    }
-
-    const currentPoints = user.points || 0;
-
-    // 检查积分是否足够
-    if (currentPoints < points) {
-      return NextResponse.json(
-        { success: false, message: '积分不足' },
-        { status: 400 }
-      );
-    }
-
-    const updatedUser = await userManager.deductPointsAtomically(userId, points);
-
-    if (!updatedUser) {
-      return NextResponse.json(
-        { success: false, message: '积分不足' },
-        { status: 400 }
-      );
-    }
-
-    const remainingPoints = updatedUser.points || 0;
-
-    // 创建消费记录（包含提示词、请求参数、结果数据）
-    await transactionManager.createTransaction({
-      userId,
-      orderNumber: transactionManager.generateOrderNumber(),
-      toolPage,
-      description,
-      points,
-      remainingPoints,
-      status,
-      prompt,
-      requestParams,
-      resultData,
-    });
-
-    return NextResponse.json({
-      success: true,
-      message: '积分扣除成功',
-      data: {
-        description,
-        points,
-        remainingPoints,
-      },
-    });
-  } catch (error: unknown) {
-    const errorMessage = getErrorMessage(error);
-    console.error('扣除积分失败:', error);
-    return NextResponse.json(
-      { success: false, message: `扣除积分失败: ${errorMessage}` },
-      { status: 500 }
-    );
-  }
+export async function POST() {
+  return NextResponse.json(
+    { success: false, message: '通用扣积分接口已禁用，请使用具体工具接口' },
+    { status: 403 }
+  );
 }

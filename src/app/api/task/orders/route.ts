@@ -4,6 +4,7 @@ import { transactions } from '@/storage/database/shared/schema';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { reconcileProcessingTransactions } from '@/lib/reconcileProcessingTransactions';
 import { getAliyunOSSThumbnailUrlFromUrl } from '@/lib/aliyunOSS';
+import { getCookieUserId } from '@/lib/serverAuth';
 
 type RequestParamsObject = {
   thumbnailUrl?: unknown;
@@ -103,19 +104,7 @@ export async function GET(request: NextRequest) {
     const requestedUserId = searchParams.get('userId');
     const toolPage = searchParams.get('toolPage');
     const limit = clampInteger(searchParams.get('limit'), 120, 20, 200);
-    const userCookie = request.cookies.get('user');
-    let cookieUserId: string | null = null;
-
-    if (userCookie) {
-      try {
-        const userData = JSON.parse(userCookie.value);
-        if (typeof userData.id === 'string' && userData.id) {
-          cookieUserId = userData.id;
-        }
-      } catch (error) {
-        console.error('[订单查询] 解析 user cookie 失败:', error);
-      }
-    }
+    const cookieUserId = getCookieUserId(request);
 
     if (!cookieUserId) {
       return NextResponse.json(

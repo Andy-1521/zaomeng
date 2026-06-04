@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { transactionManager } from '@/storage/database';
+import { getCookieUserId } from '@/lib/serverAuth';
 
 /**
  * GET /api/transaction/[orderNumber]
@@ -20,6 +21,14 @@ export async function GET(
       );
     }
 
+    const cookieUserId = getCookieUserId(request);
+    if (!cookieUserId) {
+      return NextResponse.json(
+        { success: false, message: '未登录' },
+        { status: 401 }
+      );
+    }
+
     console.log('[GetTransaction] 查询订单详情:', orderNumber);
 
     const transaction = await transactionManager.getTransactionByOrderNumber(orderNumber);
@@ -28,6 +37,13 @@ export async function GET(
       return NextResponse.json(
         { success: false, message: '订单不存在' },
         { status: 404 }
+      );
+    }
+
+    if (transaction.userId !== cookieUserId) {
+      return NextResponse.json(
+        { success: false, message: '无权查看其他用户订单' },
+        { status: 403 }
       );
     }
 

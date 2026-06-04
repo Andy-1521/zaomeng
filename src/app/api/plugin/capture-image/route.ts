@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getCookieUserId } from '@/lib/serverAuth';
 import { capturedImageManager, userManager } from '@/storage/database';
 import { uploadToCozeStorage } from '@/lib/dualStorage';
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
@@ -18,21 +19,6 @@ type CaptureImageRequest = {
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '采集图片失败';
-}
-
-function getCookieUserId(request: NextRequest): string | null {
-  const userCookie = request.cookies.get('user');
-  if (!userCookie) {
-    return null;
-  }
-
-  try {
-    const userData = JSON.parse(userCookie.value) as { id?: string };
-    return typeof userData.id === 'string' && userData.id ? userData.id : null;
-  } catch (error) {
-    console.error('[插件采集] 解析用户 cookie 失败:', error);
-    return null;
-  }
 }
 
 function isAllowedImageType(value: unknown): value is NonNullable<CaptureImageRequest['imageType']> {

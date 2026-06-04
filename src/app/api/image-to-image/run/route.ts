@@ -7,6 +7,7 @@ import { getAiGeneratePoints } from '@/lib/pricing';
 import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 import { DEFAULT_SMART_EDIT_SIZE_OPTION, getSmartEditOutputSize, isSmartEditAspectRatioOption, isSmartEditResolution } from '@/lib/smartEditSize';
 import { tryCreateAndUploadResultThumbnail } from '@/lib/resultThumbnail';
+import { getCookieUserId, isBodyUserMismatch } from '@/lib/serverAuth';
 
 const IMAGE_TO_IMAGE_EDIT_TIMEOUT_MS = 300000;
 
@@ -69,7 +70,15 @@ export async function POST(request: NextRequest) {
       orderId?: string;
     };
 
-    const userId = body.userId?.trim();
+    const cookieUserId = getCookieUserId(request);
+    if (!cookieUserId) {
+      return NextResponse.json({ success: false, message: '未登录' }, { status: 401 });
+    }
+    if (isBodyUserMismatch(body.userId, cookieUserId)) {
+      return NextResponse.json({ success: false, message: '无权使用其他用户积分' }, { status: 403 });
+    }
+
+    const userId = cookieUserId;
     const imageUrl = body.imageUrl?.trim();
     const userPrompt = body.prompt?.trim();
     const requestedAspectRatio = isSmartEditAspectRatioOption(body.aspectRatio) ? body.aspectRatio : DEFAULT_SMART_EDIT_SIZE_OPTION;
@@ -86,7 +95,7 @@ export async function POST(request: NextRequest) {
       requestedResolution,
     });
 
-    if (!userId || !imageUrl) {
+    if (!imageUrl) {
       return NextResponse.json({ success: false, message: '缺少必要参数' }, { status: 400 });
     }
 

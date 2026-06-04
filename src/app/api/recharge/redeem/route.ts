@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { rechargeCodeManager } from '@/storage/database';
+import { getCookieUserId } from '@/lib/serverAuth';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '兑换失败，请稍后重试';
@@ -7,19 +8,7 @@ function getErrorMessage(error: unknown) {
 
 export async function POST(request: NextRequest) {
   try {
-    const userCookie = request.cookies.get('user');
-    if (!userCookie) {
-      return NextResponse.json({ success: false, message: '请先登录后再兑换' }, { status: 401 });
-    }
-
-    let userId = '';
-    try {
-      const user = JSON.parse(userCookie.value) as { id?: string };
-      userId = user.id || '';
-    } catch {
-      return NextResponse.json({ success: false, message: '登录状态异常，请重新登录' }, { status: 401 });
-    }
-
+    const userId = getCookieUserId(request);
     if (!userId) {
       return NextResponse.json({ success: false, message: '请先登录后再兑换' }, { status: 401 });
     }

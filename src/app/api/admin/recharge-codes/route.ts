@@ -1,24 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { calculateRechargePoints } from '@/lib/recharge';
 import { rechargeCodeManager, userManager } from '@/storage/database';
+import { getCookieUser } from '@/lib/serverAuth';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误';
 }
 
 async function getAdminUser(request: NextRequest) {
-  const userCookie = request.cookies.get('user');
-  if (!userCookie) return null;
+  const currentUser = getCookieUser(request);
+  if (!currentUser?.id) return null;
 
-  try {
-    const currentUser = JSON.parse(userCookie.value) as { id?: string };
-    if (!currentUser.id) return null;
-
-    const adminUser = await userManager.getUserById(currentUser.id);
-    return adminUser?.isAdmin ? adminUser : null;
-  } catch {
-    return null;
-  }
+  const adminUser = await userManager.getUserById(currentUser.id);
+  return adminUser?.isAdmin ? adminUser : null;
 }
 
 export async function GET(request: NextRequest) {
