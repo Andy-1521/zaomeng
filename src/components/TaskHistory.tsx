@@ -1069,6 +1069,15 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   }, [isCollapsed]);
 
   useEffect(() => {
+    const collapsePanel = () => {
+      setIsCollapsed(true);
+    };
+
+    window.addEventListener('taskHistoryCollapseRequest', collapsePanel);
+    return () => window.removeEventListener('taskHistoryCollapseRequest', collapsePanel);
+  }, []);
+
+  useEffect(() => {
     window.dispatchEvent(new CustomEvent('taskHistoryPanelState', {
       detail: { expanded: !isCollapsed },
     }));
@@ -1484,8 +1493,8 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     navigator.clipboard.writeText(task.orderId).then(() => {
       setShowCopySuccessForOrder(task.orderId || null);
       setTimeout(() => setShowCopySuccessForOrder(null), 2000);
-    }).catch((err) => {
-      console.error('复制失败:', err);
+    }).catch(() => {
+      showToast('复制失败，请手动选择订单号复制', 'error');
     });
   };
 

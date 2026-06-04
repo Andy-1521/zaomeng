@@ -1396,6 +1396,11 @@ export default function QuickCreatePage() {
     setOpenDropdownId(null);
   }, []);
 
+  const revealSelectionActionBar = useCallback(() => {
+    window.dispatchEvent(new Event('taskHistoryCollapseRequest'));
+    setIsTaskHistoryExpanded(false);
+  }, []);
+
   const recordImageMetrics = useCallback((imageUrl: string, width: number, height: number) => {
     if (!(width > 0) || !(height > 0)) return;
 
@@ -1567,7 +1572,10 @@ export default function QuickCreatePage() {
         return [...prev, ...nextData.filter((image) => !existingIds.has(image.id))];
       });
     } catch (error) {
-      console.error('[素材库] 加载失败:', error);
+      console.warn('[素材库] 加载失败:', error);
+      if (!append && !preserveCurrent) {
+        showToast(toUserFacingErrorFromUnknown(error, '素材库加载失败，请稍后重试'), 'error');
+      }
     } finally {
       loadingMaterialKeysRef.current.delete(requestKey);
       if (requestId === materialRequestIdRef.current) {
@@ -4510,6 +4518,42 @@ export default function QuickCreatePage() {
             >
               {isLoadingMoreMaterials ? '加载中...' : `加载更多（${galleryLoadedCount}/${galleryTotalCount}）`}
             </button>
+          </div>
+        )}
+
+        {!imageEditor.open && !showLocalEdit && isTaskHistoryExpanded && selectedImageList.length > 0 && (
+          <div className="fixed bottom-4 left-1/2 z-[75] w-[min(420px,calc(100vw-1.5rem))] -translate-x-1/2 sm:bottom-5">
+            <div className="flex items-center justify-between gap-3 rounded-[1.35rem] border border-white/12 bg-[#050509]/88 px-3 py-2.5 shadow-[0_18px_44px_rgba(0,0,0,0.42)] ring-1 ring-white/5 backdrop-blur-2xl">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex shrink-0 -space-x-2">
+                  {selectedPreviewImages.slice(0, 3).map((imageUrl, index) => (
+                    <div key={`${imageUrl}-${index}`} className="relative h-8 w-8 overflow-hidden rounded-xl border border-black/55 bg-white/[0.06] shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+                      <SafeImage
+                        key={`${imageUrl}-${imageRetryTokens[imageUrl] || 0}`}
+                        src={getDisplayImageUrl(imageUrl)}
+                        alt={`已选预览 ${index + 1}`}
+                        fill
+                        sizes="32px"
+                        className="object-cover"
+                        onLoad={() => clearImageRetryState(imageUrl)}
+                        onError={() => scheduleImageRetry(imageUrl)}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-white/82">已选 {selectedImageList.length} 张</p>
+                  <p className="truncate text-xs text-white/38">订单记录已展开，功能区暂时收起</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={revealSelectionActionBar}
+                className="shrink-0 rounded-full border border-purple-300/25 bg-purple-500/18 px-3.5 py-2 text-xs font-semibold text-purple-100 transition-all hover:-translate-y-0.5 hover:border-purple-200/40 hover:bg-purple-500/28 hover:text-white"
+              >
+                打开功能区
+              </button>
+            </div>
           </div>
         )}
 
