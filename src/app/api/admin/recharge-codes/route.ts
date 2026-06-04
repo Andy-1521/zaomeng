@@ -75,3 +75,37 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const adminUser = await getAdminUser(request);
+    if (!adminUser) {
+      return NextResponse.json({ success: false, message: '无权限操作' }, { status: 403 });
+    }
+
+    const body = await request.json();
+    const id = typeof body.id === 'string' ? body.id.trim() : '';
+    const action = typeof body.action === 'string' ? body.action : '';
+
+    if (!id || action !== 'void') {
+      return NextResponse.json({ success: false, message: '缺少有效的兑换码操作' }, { status: 400 });
+    }
+
+    const record = await rechargeCodeManager.voidCode({
+      id,
+      adminUserId: adminUser.id,
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: '兑换码已作废',
+      data: record,
+    });
+  } catch (error: unknown) {
+    console.error('[Admin] 作废兑换码失败:', error);
+    return NextResponse.json(
+      { success: false, message: `作废兑换码失败: ${getErrorMessage(error)}` },
+      { status: 500 }
+    );
+  }
+}

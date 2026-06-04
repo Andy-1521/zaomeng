@@ -9,6 +9,9 @@ export function toUserFacingErrorMessage(message: string | undefined, fallbackMe
   if (/api|model|upstream|gateway|502|503|504|ETIMEDOUT|AbortError/i.test(trimmed)) {
     return fallbackMessage;
   }
+  if (/Failed query|SELECT|INSERT|UPDATE|DELETE|params:|ECONNREFUSED|ER_|mysql|database|SQL/i.test(trimmed)) {
+    return fallbackMessage;
+  }
 
   return trimmed;
 }

@@ -3,7 +3,7 @@ import type { RowDataPacket } from "mysql2/promise";
 import { RECHARGE_TOOL_PAGE } from "@/lib/recharge";
 import { getMysqlPool } from "./client";
 
-export type RechargeCodeStatus = "unused" | "redeemed";
+export type RechargeCodeStatus = "unused" | "redeemed" | "voided";
 
 export type RechargeCodeRecord = {
   id: string;
@@ -125,6 +125,36 @@ export class RechargeCodeManager {
     );
 
     return rows[0] ? mapRechargeCode(rows[0]) : null;
+  }
+
+  async voidCode(data: { id: string; adminUserId: string }): Promise<RechargeCodeRecord> {
+    const pool = await getMysqlPool();
+
+    const [result] = await pool.query(
+      `UPDATE recharge_codes
+       SET status = 'voided'
+       WHERE id = ? AND status = 'unused'`,
+      [data.id]
+    );
+
+    const affectedRows = Number((result as { affectedRows?: number }).affectedRows || 0);
+    if (affectedRows === 0) {
+      const existing = await this.getCodeById(data.id);
+      if (!existing) {
+        throw new Error("兑换码不存在");
+      }
+      if (existing.status !== "unused") {
+        throw new Error(existing.status === "redeemed" ? "已兑换的兑换码不能作废" : "兑换码已作废");
+      }
+      throw new Error("兑换码作废失败");
+    }
+
+    const updated = await this.getCodeById(data.id);
+    if (!updated) {
+      throw new Error("兑换码作废后读取失败");
+    }
+    console.log(`[Admin] ${data.adminUserId} 作废兑换码 ${updated.code}`);
+    return updated;
   }
 
   async redeemCode(data: { code: string; userId: string }): Promise<{ points: number; remainingPoints: number; transactionId: string }> {

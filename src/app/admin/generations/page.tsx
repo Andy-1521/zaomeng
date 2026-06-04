@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Image, { type ImageLoaderProps, type ImageProps } from 'next/image';
 import { useRouter } from 'next/navigation';
 import Navbar from '@/components/Navbar';
@@ -85,7 +85,7 @@ type RechargeCodeRecord = {
   code: string;
   amountYuan: number;
   points: number;
-  status: 'unused' | 'redeemed';
+  status: 'unused' | 'redeemed' | 'voided';
   createdByName: string | null;
   redeemedByName: string | null;
   redeemedByEmail: string | null;
@@ -153,6 +153,8 @@ type FilterDropdownOption = {
 };
 
 type AdminDropdownId = 'tool-page' | 'status' | 'diagnostic' | 'time-range';
+
+type RechargeCodeStatusFilter = 'all' | 'unused' | 'redeemed' | 'voided';
 
 const adminToolOptions: ToolOption[] = [
   { label: '彩绘提取', value: '彩绘提取' },
@@ -569,6 +571,9 @@ export default function AdminGenerationsPage() {
   const [rechargeCodeAmount, setRechargeCodeAmount] = useState(30);
   const [generatedRechargeCode, setGeneratedRechargeCode] = useState<RechargeCodeRecord | null>(null);
   const [isCreatingRechargeCode, setIsCreatingRechargeCode] = useState(false);
+  const [rechargeCodeStatusFilter, setRechargeCodeStatusFilter] = useState<RechargeCodeStatusFilter>('all');
+  const [rechargeCodeKeyword, setRechargeCodeKeyword] = useState('');
+  const [voidingRechargeCodeId, setVoidingRechargeCodeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [previewImages, setPreviewImages] = useState<string[]>([]);
@@ -577,6 +582,8 @@ export default function AdminGenerationsPage() {
   const [hasMore, setHasMore] = useState(true);
   const [currentAdminId, setCurrentAdminId] = useState<string | null>(null);
   const [sessionRefreshed, setSessionRefreshed] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<UserInfo | null>(null);
+  const [showDiagnosticBreakdown, setShowDiagnosticBreakdown] = useState(false);
 
   // 详情模态框状态
   const [detailModal, setDetailModal] = useState<{ open: boolean; record: GenerationRecord | null }>({
@@ -641,6 +648,35 @@ export default function AdminGenerationsPage() {
   const activeToolSummary = adminToolOptions
     .map((option) => ({ ...option, count: derivedToolStats[option.label] || 0 }))
     .filter((option) => option.count > 0 || option.value === filterToolPage);
+
+  const rechargeCodeCounts = useMemo(() => {
+    return rechargeCodes.reduce(
+      (acc, item) => {
+        acc.all += 1;
+        acc[item.status] += 1;
+        return acc;
+      },
+      { all: 0, unused: 0, redeemed: 0, voided: 0 }
+    );
+  }, [rechargeCodes]);
+
+  const filteredRechargeCodes = useMemo(() => {
+    const keyword = rechargeCodeKeyword.trim().toLowerCase();
+    return rechargeCodes.filter((item) => {
+      if (rechargeCodeStatusFilter !== 'all' && item.status !== rechargeCodeStatusFilter) {
+        return false;
+      }
+
+      if (!keyword) return true;
+      return [
+        item.code,
+        String(item.amountYuan),
+        String(item.points),
+        item.redeemedByName || '',
+        item.redeemedByEmail || '',
+      ].some((value) => value.toLowerCase().includes(keyword));
+    });
+  }, [rechargeCodeKeyword, rechargeCodeStatusFilter, rechargeCodes]);
 
   const searchDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const hasRecordsRef = useRef(false);
@@ -723,10 +759,10 @@ export default function AdminGenerationsPage() {
         }
         setHasMore(data.data.records.length >= 50);
       } else {
-        setError(data.message || '加载失败');
+        setError(toUserFacingErrorMessage(data.message, '获取生图记录失败，请稍后重试'));
       }
     } catch {
-      setError('网络错误，请稍后重试');
+      setError('获取生图记录失败，请稍后重试');
     } finally {
       setLoading(false);
     }
@@ -776,10 +812,10 @@ export default function AdminGenerationsPage() {
       if (data.success) {
         setUsers(data.data);
       } else {
-        setError(data.message || '加载失败');
+        setError(toUserFacingErrorMessage(data.message, '获取用户列表失败，请稍后重试'));
       }
     } catch {
-      setError('网络错误，请稍后重试');
+      setError('获取用户列表失败，请稍后重试');
     } finally {
       setLoading(false);
     }
@@ -798,10 +834,10 @@ export default function AdminGenerationsPage() {
       if (data.success) {
         setRechargeCodes(Array.isArray(data.data) ? data.data : []);
       } else {
-        setError(data.message || '加载兑换码失败');
+        setError(toUserFacingErrorMessage(data.message, '加载兑换码失败，请稍后重试'));
       }
     } catch {
-      setError('网络错误，请稍后重试');
+      setError('加载兑换码失败，请稍后重试');
     } finally {
       setLoading(false);
     }
@@ -837,6 +873,98 @@ export default function AdminGenerationsPage() {
       setIsCreatingRechargeCode(false);
     }
   };
+
+  const copyText = useCallback(async (text: string, successMessage = '已复制') => {
+    if (!text) {
+      showToast('没有可复制的内容', 'error');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast(successMessage, 'success');
+    } catch {
+      showToast('复制失败，请手动复制', 'error');
+    }
+  }, []);
+
+  const getCustomerSummary = useCallback((record: GenerationRecord) => {
+    const resultImages = getResultImageUrls(record.resultData);
+    const requestImages = getRequestImageUrls(record.requestParams, record.uploadedImage);
+    const diagnostic = getRecordDiagnostic(record);
+    const points = record.actualPoints > 0 ? record.actualPoints : 0;
+    return [
+      `用户: ${record.username} / ${record.userId}`,
+      `订单: ${record.orderNumber}`,
+      `工具: ${getNormalizedToolLabel(record.toolPage, record.description || '', record.orderNumber || '')}`,
+      `状态: ${record.status} / ${diagnostic.label}`,
+      `积分: ${points}`,
+      `图片: 结果 ${resultImages.length} 张，参考 ${requestImages.length} 张`,
+      diagnostic.errorMessage && diagnostic.errorMessage !== '未知错误' ? `原因: ${diagnostic.errorMessage}` : `摘要: ${diagnostic.summary}`,
+    ].join('\n');
+  }, []);
+
+  const downloadRecordResults = useCallback(async (record: GenerationRecord) => {
+    const resultImages = getResultImageUrls(record.resultData);
+    if (resultImages.length === 0) {
+      showToast('该订单没有可下载的结果图', 'error');
+      return;
+    }
+
+    try {
+      showToast(resultImages.length > 1 ? `正在准备 ${resultImages.length} 张结果图...` : '正在准备结果图...', 'info');
+      for (let index = 0; index < resultImages.length; index += 1) {
+        const imageUrl = resultImages[index];
+        const fileName = `${record.orderNumber}-${index + 1}.png`;
+        const response = await fetch(`/api/image/download-url?url=${encodeURIComponent(imageUrl)}&filename=${encodeURIComponent(fileName)}`, {
+          credentials: 'include',
+        });
+        const data = await response.json() as { success?: boolean; data?: { downloadUrl?: string }; message?: string };
+        if (!response.ok || !data.success || !data.data?.downloadUrl) {
+          throw new Error(data.message || '生成下载链接失败');
+        }
+        window.open(data.data.downloadUrl, '_blank', 'noopener,noreferrer');
+      }
+    } catch (error) {
+      showToast(toUserFacingErrorFromUnknown(error, '结果图下载失败，请重试'), 'error');
+    }
+  }, []);
+
+  const voidRechargeCode = useCallback(async (item: RechargeCodeRecord) => {
+    if (item.status !== 'unused') {
+      showToast('只有未兑换的兑换码可以作废', 'error');
+      return;
+    }
+
+    if (!confirm(`确定作废兑换码 ${item.code} 吗？作废后用户不能再兑换。`)) {
+      return;
+    }
+
+    setVoidingRechargeCodeId(item.id);
+    try {
+      const response = await fetch('/api/admin/recharge-codes', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: item.id, action: 'void' }),
+      });
+      const data = await response.json() as { success?: boolean; data?: RechargeCodeRecord; message?: string };
+      if (!response.ok || !data.success || !data.data) {
+        showToast(toUserFacingErrorMessage(data.message, '作废兑换码失败，请稍后重试'), 'error');
+        return;
+      }
+
+      setRechargeCodes((current) => current.map((code) => code.id === item.id ? data.data! : code));
+      if (generatedRechargeCode?.id === item.id) {
+        setGeneratedRechargeCode(data.data);
+      }
+      showToast('兑换码已作废', 'success');
+    } catch (error) {
+      showToast(toUserFacingErrorFromUnknown(error, '作废兑换码失败，请稍后重试'), 'error');
+    } finally {
+      setVoidingRechargeCodeId(null);
+    }
+  }, [generatedRechargeCode]);
 
   const handleToolPageChange = (value: string) => {
     closeDropdowns();
@@ -1063,7 +1191,8 @@ export default function AdminGenerationsPage() {
 
       const data = await response.json();
       if (data.success) {
-        loadUsers();
+        setSelectedUser((current) => current?.id === userId ? { ...current, isAdmin: !currentIsAdmin } : current);
+        void loadUsers();
         showToast(data.message || '操作成功', 'success');
       } else {
         showToast(toUserFacingErrorMessage(data.message, '操作失败，请稍后重试'), 'error');
@@ -1221,6 +1350,14 @@ export default function AdminGenerationsPage() {
       const data = await response.json();
       if (data.success) {
         showToast('更新成功', 'success');
+        setSelectedUser((current) => {
+          if (!current || current.id !== userId) return current;
+          return {
+            ...current,
+            ...(updateData.points !== undefined ? { points: updateData.points } : {}),
+            ...(updateData.avatar !== undefined ? { avatar: updateData.avatar } : {}),
+          };
+        });
         void loadUsers();
         closeEditModal();
       } else {
@@ -1254,6 +1391,7 @@ export default function AdminGenerationsPage() {
   const detailRecommendations = detailRecord && detailDiagnostic
     ? getDiagnosticRecommendations(detailRecord, detailDiagnostic)
     : [];
+  const detailCustomerSummary = detailRecord ? getCustomerSummary(detailRecord) : '';
 
   const activeTabHasNoData =
     activeTab === 'generations'
@@ -1334,32 +1472,34 @@ export default function AdminGenerationsPage() {
           {activeTab === 'users' && (
             <div className="flex-1 min-h-0 flex flex-col gap-4">
               {/* User search */}
-              <div className="flex gap-3 flex-shrink-0">
-                <div className="flex-1 max-w-md">
+              <div className="flex flex-shrink-0 flex-col gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-3 sm:flex-row sm:items-center">
+                <div className="min-w-0 flex-1">
                   <input
                     type="text"
                     value={userSearchKeyword}
                     onChange={(e) => setUserSearchKeyword(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && loadUsers(userSearchKeyword)}
-                    placeholder="搜索用户名或邮箱..."
-                    className="w-full bg-black/50 border border-white/20 rounded-lg px-4 py-2 text-sm text-white placeholder-white/40 focus:outline-none focus:border-purple-500 transition-colors"
+                    onKeyDown={(e) => e.key === 'Enter' && void loadUsers(userSearchKeyword)}
+                    placeholder="搜索用户名、邮箱或 UID..."
+                    className="w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-sm text-white placeholder-white/35 transition-colors focus:outline-none focus:border-purple-500"
                   />
                 </div>
                 <button
-                  onClick={() => loadUsers(userSearchKeyword)}
-                  className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
+                  onClick={() => void loadUsers(userSearchKeyword)}
+                  className="rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90"
                 >
                   搜索
                 </button>
                 <button
                   onClick={() => {
                     setUserSearchKeyword('');
-                    loadUsers('');
+                    setSelectedUser(null);
+                    void loadUsers('');
                   }}
-                  className="px-4 py-2 border border-white/10 rounded-lg text-sm font-medium hover:bg-white/20 transition-colors"
+                  className="rounded-xl border border-white/12 px-4 py-2 text-sm font-medium text-white/70 transition-colors hover:bg-white/10 hover:text-white"
                 >
                   重置
                 </button>
+                <div className="text-xs text-white/42 sm:ml-auto">当前 {users.length} 个用户</div>
               </div>
 
               {users.length === 0 && !loading ? (
@@ -1367,23 +1507,30 @@ export default function AdminGenerationsPage() {
                   <p className="text-white/60">暂无用户</p>
                 </div>
               ) : (
-                <div className="flex-1 min-h-0 bg-white/5 rounded-xl border border-white/10 overflow-y-auto">
-                  <table className="w-full">
-                    <thead className="sticky top-0 z-[1]">
-                      <tr className="border-b border-white/10 bg-neutral-900/95 backdrop-blur">
-                        <th className="text-left px-5 py-3 text-xs font-semibold text-white/60 uppercase tracking-wider">用户</th>
-                        <th className="text-left px-5 py-3 text-xs font-semibold text-white/60 uppercase tracking-wider">邮箱</th>
-                        <th className="text-left px-5 py-3 text-xs font-semibold text-white/60 uppercase tracking-wider">积分</th>
-                        <th className="text-left px-5 py-3 text-xs font-semibold text-white/60 uppercase tracking-wider">角色</th>
-                        <th className="text-left px-5 py-3 text-xs font-semibold text-white/60 uppercase tracking-wider">操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {users.map((user, idx) => (
-                        <tr key={user.id} className={`border-b border-white/10 last:border-0 ${idx % 2 === 1 ? 'bg-white/[0.08]' : ''} hover:bg-white/20 transition-colors`}>
+                <div className="grid flex-1 min-h-0 gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+                  <div className="min-h-0 overflow-y-auto rounded-xl border border-white/10 bg-white/5">
+                    <table className="w-full min-w-[760px]">
+                      <thead className="sticky top-0 z-[1]">
+                        <tr className="border-b border-white/10 bg-neutral-900/95 backdrop-blur">
+                          <th className="text-left px-5 py-3 text-xs font-semibold text-white/60 uppercase tracking-wider">用户</th>
+                          <th className="text-left px-5 py-3 text-xs font-semibold text-white/60 uppercase tracking-wider">邮箱</th>
+                          <th className="text-left px-5 py-3 text-xs font-semibold text-white/60 uppercase tracking-wider">积分</th>
+                          <th className="text-left px-5 py-3 text-xs font-semibold text-white/60 uppercase tracking-wider">角色</th>
+                          <th className="text-left px-5 py-3 text-xs font-semibold text-white/60 uppercase tracking-wider">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {users.map((user, idx) => {
+                          const selected = selectedUser?.id === user.id;
+                          return (
+                        <tr
+                          key={user.id}
+                          onClick={() => setSelectedUser(user)}
+                          className={`border-b border-white/10 last:border-0 cursor-pointer ${selected ? 'bg-purple-500/16 ring-1 ring-inset ring-purple-300/25' : idx % 2 === 1 ? 'bg-white/[0.08]' : ''} hover:bg-white/20 transition-colors`}
+                        >
                           <td className="px-5 py-3">
                             <div className="flex items-center gap-3">
-                              <div className="relative h-8 w-8 cursor-pointer overflow-hidden rounded-full group" onClick={() => openEditModal(user.id, 'avatar', user.avatar)}>
+                              <div className="relative h-8 w-8 cursor-pointer overflow-hidden rounded-full group" onClick={(event) => { event.stopPropagation(); openEditModal(user.id, 'avatar', user.avatar); }}>
                                 <SafeImage
                                   src={user.avatar || '/images/avatar.png'}
                                   alt={user.username}
@@ -1398,16 +1545,24 @@ export default function AdminGenerationsPage() {
                                   </svg>
                                 </div>
                               </div>
-                              <span className="text-sm font-medium">{user.username}</span>
+                              <span className="min-w-0 truncate text-sm font-medium">{user.username}</span>
                             </div>
                           </td>
-                          <td className="px-5 py-3 text-sm text-white/60">{user.email}</td>
+                          <td className="px-5 py-3 text-sm text-white/60">
+                            <button
+                              type="button"
+                              onClick={(event) => { event.stopPropagation(); void copyText(user.email, '邮箱已复制'); }}
+                              className="max-w-[260px] truncate text-left transition hover:text-white"
+                            >
+                              {user.email || '-'}
+                            </button>
+                          </td>
                           <td className="px-5 py-3">
                             <div className="flex items-center gap-2">
                               <SafeImage src="/points-icon.png" alt="积分" width={16} height={16} className="h-4 w-4" />
                               <span className="text-sm font-medium text-amber-600">{user.points}</span>
                               <button
-                                onClick={() => openEditModal(user.id, 'points', user.points)}
+                                onClick={(event) => { event.stopPropagation(); openEditModal(user.id, 'points', user.points); }}
                                 className="text-white/60 hover:text-white text-xs transition-colors"
                                 title="修改积分"
                               >
@@ -1425,7 +1580,7 @@ export default function AdminGenerationsPage() {
                           <td className="px-5 py-3">
                             {user.id !== currentAdminId && (
                               <button
-                                onClick={() => handleToggleAdmin(user.id, user.isAdmin, user.username)}
+                                onClick={(event) => { event.stopPropagation(); void handleToggleAdmin(user.id, user.isAdmin, user.username); }}
                                 className="text-sm text-white/60 hover:text-white transition-colors"
                               >
                                 {user.isAdmin ? '取消管理员' : '设为管理员'}
@@ -1433,9 +1588,64 @@ export default function AdminGenerationsPage() {
                             )}
                           </td>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <aside className="min-h-0 rounded-xl border border-white/10 bg-white/[0.045] p-4">
+                    {selectedUser ? (
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-3">
+                          <div className="relative h-12 w-12 overflow-hidden rounded-2xl border border-white/10">
+                            <SafeImage src={selectedUser.avatar || '/images/avatar.png'} alt={selectedUser.username} fill sizes="48px" className="object-cover" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="truncate text-base font-semibold text-white">{selectedUser.username}</div>
+                            <div className="mt-1 text-xs text-white/42">{selectedUser.isAdmin ? '管理员' : '普通用户'}</div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 text-sm">
+                          <button type="button" onClick={() => void copyText(selectedUser.id, 'UID 已复制')} className="flex w-full items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-left text-white/68 hover:bg-white/8 hover:text-white">
+                            <span>UID</span>
+                            <span className="truncate font-mono text-xs">{selectedUser.id}</span>
+                          </button>
+                          <button type="button" onClick={() => void copyText(selectedUser.email, '邮箱已复制')} className="flex w-full items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-left text-white/68 hover:bg-white/8 hover:text-white">
+                            <span>邮箱</span>
+                            <span className="truncate text-xs">{selectedUser.email || '-'}</span>
+                          </button>
+                          <div className="flex items-center justify-between rounded-xl border border-amber-300/16 bg-amber-500/[0.08] px-3 py-2 text-sm text-amber-100">
+                            <span>积分</span>
+                            <span className="font-semibold tabular-nums">{selectedUser.points}</span>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-2">
+                          <button type="button" onClick={() => openEditModal(selectedUser.id, 'points', selectedUser.points)} className="rounded-xl bg-white text-sm font-semibold text-black py-2.5 transition hover:bg-white/88">
+                            修改积分
+                          </button>
+                          <button type="button" onClick={() => openEditModal(selectedUser.id, 'avatar', selectedUser.avatar)} className="rounded-xl border border-white/12 bg-white/[0.055] py-2.5 text-sm text-white/72 transition hover:bg-white/[0.11] hover:text-white">
+                            修改头像
+                          </button>
+                          {selectedUser.id !== currentAdminId && (
+                            <button type="button" onClick={() => void handleToggleAdmin(selectedUser.id, selectedUser.isAdmin, selectedUser.username)} className="rounded-xl border border-purple-300/18 bg-purple-500/[0.08] py-2.5 text-sm text-purple-100 transition hover:bg-purple-500/[0.14]">
+                              {selectedUser.isAdmin ? '取消管理员' : '设为管理员'}
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs leading-5 text-white/42">
+                          后续可在这里继续接用户最近订单、充值明细和失败次数，日常客服排查会更快。
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex h-full min-h-[240px] items-center justify-center rounded-xl border border-dashed border-white/12 text-center text-sm leading-6 text-white/42">
+                        选择一个用户后查看详情和快捷操作
+                      </div>
+                    )}
+                  </aside>
                 </div>
               )}
             </div>
@@ -1481,46 +1691,78 @@ export default function AdminGenerationsPage() {
                     <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <p className="font-mono text-2xl font-semibold tracking-[0.12em] text-emerald-100">{generatedRechargeCode.code}</p>
-                        <p className="mt-1 text-sm text-emerald-100/62">¥{generatedRechargeCode.amountYuan} / {generatedRechargeCode.points} 积分</p>
+                        <p className="mt-1 text-sm text-emerald-100/62">¥{generatedRechargeCode.amountYuan} / {generatedRechargeCode.points} 积分 · {generatedRechargeCode.status === 'voided' ? '已作废' : generatedRechargeCode.status === 'redeemed' ? '已兑换' : '未兑换'}</p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(generatedRechargeCode.code).then(() => {
-                            showToast('兑换码已复制', 'success');
-                          }).catch(() => {
-                            showToast('复制失败，请手动复制', 'error');
-                          });
-                        }}
-                        className="rounded-xl border border-emerald-300/20 bg-emerald-300/10 px-4 py-2 text-sm text-emerald-100 transition hover:bg-emerald-300/16"
-                      >
-                        复制兑换码
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void copyText(generatedRechargeCode.code, '兑换码已复制')}
+                          className="rounded-xl border border-emerald-300/20 bg-emerald-300/10 px-4 py-2 text-sm text-emerald-100 transition hover:bg-emerald-300/16"
+                        >
+                          复制兑换码
+                        </button>
+                        {generatedRechargeCode.status === 'unused' && (
+                          <button
+                            type="button"
+                            onClick={() => void voidRechargeCode(generatedRechargeCode)}
+                            disabled={voidingRechargeCodeId === generatedRechargeCode.id}
+                            className="rounded-xl border border-red-300/20 bg-red-500/10 px-4 py-2 text-sm text-red-100 transition hover:bg-red-500/16 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {voidingRechargeCodeId === generatedRechargeCode.id ? '作废中...' : '作废'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
               </section>
 
               <section className="flex-1 min-h-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.05]">
-                <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+                <div className="flex flex-col gap-3 border-b border-white/10 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
                   <div>
                     <h2 className="text-base font-semibold text-white">兑换码记录</h2>
-                    <p className="mt-0.5 text-xs text-white/38">共 {rechargeCodes.length} 条，显示最近 200 条</p>
+                    <p className="mt-0.5 text-xs text-white/38">共 {rechargeCodes.length} 条，当前显示 {filteredRechargeCodes.length} 条</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void loadRechargeCodes()}
-                    className="rounded-xl border border-white/12 px-3 py-2 text-sm text-white/70 transition hover:bg-white/10 hover:text-white"
-                  >
-                    刷新
-                  </button>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <input
+                      type="text"
+                      value={rechargeCodeKeyword}
+                      onChange={(event) => setRechargeCodeKeyword(event.target.value)}
+                      placeholder="搜索兑换码、额度或用户..."
+                      className="w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-sm text-white placeholder-white/35 transition-colors focus:outline-none focus:border-purple-500 sm:w-[240px]"
+                    />
+                    <div className="flex rounded-xl border border-white/10 bg-black/24 p-1">
+                      {[
+                        { key: 'all' as RechargeCodeStatusFilter, label: `全部 ${rechargeCodeCounts.all}` },
+                        { key: 'unused' as RechargeCodeStatusFilter, label: `未兑换 ${rechargeCodeCounts.unused}` },
+                        { key: 'redeemed' as RechargeCodeStatusFilter, label: `已兑换 ${rechargeCodeCounts.redeemed}` },
+                        { key: 'voided' as RechargeCodeStatusFilter, label: `已作废 ${rechargeCodeCounts.voided}` },
+                      ].map((item) => (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => setRechargeCodeStatusFilter(item.key)}
+                          className={`rounded-lg px-2.5 py-1.5 text-xs transition ${rechargeCodeStatusFilter === item.key ? 'bg-white text-black' : 'text-white/58 hover:bg-white/10 hover:text-white'}`}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void loadRechargeCodes()}
+                      className="rounded-xl border border-white/12 px-3 py-2 text-sm text-white/70 transition hover:bg-white/10 hover:text-white"
+                    >
+                      刷新
+                    </button>
+                  </div>
                 </div>
 
-                {rechargeCodes.length === 0 && !loading ? (
+                {filteredRechargeCodes.length === 0 && !loading ? (
                   <div className="flex h-full items-center justify-center py-20 text-sm text-white/50">暂无兑换码</div>
                 ) : (
                   <div className="h-full overflow-auto">
-                    <table className="w-full min-w-[900px]">
+                    <table className="w-full min-w-[980px]">
                       <thead className="sticky top-0 z-[1]">
                         <tr className="border-b border-white/10 bg-neutral-900/95 backdrop-blur">
                           <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-white/60">兑换码</th>
@@ -1529,17 +1771,16 @@ export default function AdminGenerationsPage() {
                           <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-white/60">兑换用户</th>
                           <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-white/60">生成时间</th>
                           <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-white/60">兑换时间</th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-white/60">操作</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {rechargeCodes.map((item, idx) => (
+                        {filteredRechargeCodes.map((item, idx) => (
                           <tr key={item.id} className={`border-b border-white/10 last:border-0 ${idx % 2 === 1 ? 'bg-white/[0.06]' : ''}`}>
                             <td className="px-4 py-3">
                               <button
                                 type="button"
-                                onClick={() => {
-                                  navigator.clipboard.writeText(item.code).then(() => showToast('兑换码已复制', 'success')).catch(() => showToast('复制失败', 'error'));
-                                }}
+                                onClick={() => void copyText(item.code, '兑换码已复制')}
                                 className="font-mono text-sm tracking-[0.08em] text-white transition hover:text-purple-200"
                               >
                                 {item.code}
@@ -1549,6 +1790,8 @@ export default function AdminGenerationsPage() {
                             <td className="px-4 py-3">
                               {item.status === 'redeemed' ? (
                                 <span className="rounded-full border border-emerald-400/24 bg-emerald-500/12 px-2.5 py-1 text-xs text-emerald-200">已兑换</span>
+                              ) : item.status === 'voided' ? (
+                                <span className="rounded-full border border-red-400/24 bg-red-500/12 px-2.5 py-1 text-xs text-red-200">已作废</span>
                               ) : (
                                 <span className="rounded-full border border-blue-400/24 bg-blue-500/12 px-2.5 py-1 text-xs text-blue-200">未兑换</span>
                               )}
@@ -1562,6 +1805,27 @@ export default function AdminGenerationsPage() {
                             </td>
                             <td className="px-4 py-3 text-sm text-white/50">{formatTime(item.createdAt)}</td>
                             <td className="px-4 py-3 text-sm text-white/50">{item.redeemedAt ? formatTime(item.redeemedAt) : '-'}</td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void copyText(item.code, '兑换码已复制')}
+                                  className="rounded-lg border border-white/10 bg-white/[0.055] px-2.5 py-1.5 text-xs text-white/70 transition hover:bg-white/[0.12] hover:text-white"
+                                >
+                                  复制
+                                </button>
+                                {item.status === 'unused' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => void voidRechargeCode(item)}
+                                    disabled={voidingRechargeCodeId === item.id}
+                                    className="rounded-lg border border-red-300/18 bg-red-500/[0.08] px-2.5 py-1.5 text-xs text-red-100 transition hover:bg-red-500/[0.14] disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    {voidingRechargeCodeId === item.id ? '作废中' : '作废'}
+                                  </button>
+                                )}
+                              </div>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -1575,7 +1839,7 @@ export default function AdminGenerationsPage() {
           {/* ===== Generations Tab ===== */}
           {activeTab === 'generations' && (
             <div className="flex-1 min-h-0 flex flex-col gap-3">
-              <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6 flex-shrink-0">
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6 flex-shrink-0">
                 <button
                   onClick={handleResetFilters}
                   className="rounded-xl border border-white/10 bg-white/[0.05] p-3 text-left transition-colors hover:bg-white/[0.08]"
@@ -1760,42 +2024,63 @@ export default function AdminGenerationsPage() {
                 </div>
 
                 {(totalStats.failureCount > 0 || totalStats.failureBreakdown.missingResultCount > 0) && (
-                  <div className="mt-2 grid gap-2 md:grid-cols-2 lg:grid-cols-4">
-                    <button
-                      onClick={() => handleQuickFilter(undefined, '失败', 'upstream-error')}
-                      className={`rounded-xl border p-2.5 text-left transition-colors ${filterDiagnostic === 'upstream-error' ? 'border-red-400/35 bg-red-500/10' : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'}`}
-                    >
-                      <div className="text-xs text-white/45">上游失败</div>
-                      <div className="mt-1 text-xl font-semibold tabular-nums text-red-200">{totalStats.failureBreakdown.upstreamErrorCount}</div>
-                      <div className="mt-0.5 text-[11px] text-white/35">上游返回失败</div>
-                    </button>
+                  <div className="mt-2 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300/16 bg-amber-500/[0.075] px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-amber-50/78">
+                        <span className="font-medium text-amber-100">异常概览</span>
+                        <button type="button" onClick={() => handleQuickFilter(undefined, '失败', 'upstream-error')} className="rounded-full border border-white/10 bg-black/18 px-2 py-1 hover:bg-white/10">上游 {totalStats.failureBreakdown.upstreamErrorCount}</button>
+                        <button type="button" onClick={() => handleQuickFilter(undefined, '失败', 'timeout-error')} className="rounded-full border border-white/10 bg-black/18 px-2 py-1 hover:bg-white/10">超时 {totalStats.failureBreakdown.timeoutErrorCount}</button>
+                        <button type="button" onClick={() => handleQuickFilter(undefined, undefined, 'missing-result')} className="rounded-full border border-white/10 bg-black/18 px-2 py-1 hover:bg-white/10">无结果 {totalStats.failureBreakdown.missingResultCount}</button>
+                        <button type="button" onClick={() => handleQuickFilter(undefined, '失败', 'other-failure')} className="rounded-full border border-white/10 bg-black/18 px-2 py-1 hover:bg-white/10">其他 {totalStats.failureBreakdown.otherFailureCount}</button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowDiagnosticBreakdown((current) => !current)}
+                        className="rounded-full border border-white/12 bg-black/20 px-3 py-1 text-xs text-white/70 transition hover:bg-white/10 hover:text-white"
+                      >
+                        {showDiagnosticBreakdown ? '收起诊断卡' : '展开诊断卡'}
+                      </button>
+                    </div>
 
-                    <button
-                      onClick={() => handleQuickFilter(undefined, '失败', 'timeout-error')}
-                      className={`rounded-xl border p-2.5 text-left transition-colors ${filterDiagnostic === 'timeout-error' ? 'border-orange-400/35 bg-orange-500/10' : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'}`}
-                    >
-                      <div className="text-xs text-white/45">超时异常</div>
-                      <div className="mt-1 text-xl font-semibold tabular-nums text-orange-200">{totalStats.failureBreakdown.timeoutErrorCount}</div>
-                      <div className="mt-0.5 text-[11px] text-white/35">超时或中断</div>
-                    </button>
+                    {showDiagnosticBreakdown && (
+                      <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-4">
+                        <button
+                          onClick={() => handleQuickFilter(undefined, '失败', 'upstream-error')}
+                          className={`rounded-xl border p-2.5 text-left transition-colors ${filterDiagnostic === 'upstream-error' ? 'border-red-400/35 bg-red-500/10' : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'}`}
+                        >
+                          <div className="text-xs text-white/45">上游失败</div>
+                          <div className="mt-1 text-xl font-semibold tabular-nums text-red-200">{totalStats.failureBreakdown.upstreamErrorCount}</div>
+                          <div className="mt-0.5 text-[11px] text-white/35">上游返回失败</div>
+                        </button>
 
-                    <button
-                      onClick={() => handleQuickFilter(undefined, undefined, 'missing-result')}
-                      className={`rounded-xl border p-2.5 text-left transition-colors ${filterDiagnostic === 'missing-result' ? 'border-amber-400/35 bg-amber-500/10' : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'}`}
-                    >
-                      <div className="text-xs text-white/45">无结果</div>
-                      <div className="mt-1 text-xl font-semibold tabular-nums text-amber-200">{totalStats.failureBreakdown.missingResultCount}</div>
-                      <div className="mt-0.5 text-[11px] text-white/35">无有效结果图</div>
-                    </button>
+                        <button
+                          onClick={() => handleQuickFilter(undefined, '失败', 'timeout-error')}
+                          className={`rounded-xl border p-2.5 text-left transition-colors ${filterDiagnostic === 'timeout-error' ? 'border-orange-400/35 bg-orange-500/10' : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'}`}
+                        >
+                          <div className="text-xs text-white/45">超时异常</div>
+                          <div className="mt-1 text-xl font-semibold tabular-nums text-orange-200">{totalStats.failureBreakdown.timeoutErrorCount}</div>
+                          <div className="mt-0.5 text-[11px] text-white/35">超时或中断</div>
+                        </button>
 
-                    <button
-                      onClick={() => handleQuickFilter(undefined, '失败', 'other-failure')}
-                      className={`rounded-xl border p-2.5 text-left transition-colors ${filterDiagnostic === 'other-failure' ? 'border-white/25 bg-white/[0.08]' : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'}`}
-                    >
-                      <div className="text-xs text-white/45">其他异常</div>
-                      <div className="mt-1 text-xl font-semibold tabular-nums text-white">{totalStats.failureBreakdown.otherFailureCount}</div>
-                      <div className="mt-0.5 text-[11px] text-white/35">人工排查</div>
-                    </button>
+                        <button
+                          onClick={() => handleQuickFilter(undefined, undefined, 'missing-result')}
+                          className={`rounded-xl border p-2.5 text-left transition-colors ${filterDiagnostic === 'missing-result' ? 'border-amber-400/35 bg-amber-500/10' : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'}`}
+                        >
+                          <div className="text-xs text-white/45">无结果</div>
+                          <div className="mt-1 text-xl font-semibold tabular-nums text-amber-200">{totalStats.failureBreakdown.missingResultCount}</div>
+                          <div className="mt-0.5 text-[11px] text-white/35">无有效结果图</div>
+                        </button>
+
+                        <button
+                          onClick={() => handleQuickFilter(undefined, '失败', 'other-failure')}
+                          className={`rounded-xl border p-2.5 text-left transition-colors ${filterDiagnostic === 'other-failure' ? 'border-white/25 bg-white/[0.08]' : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'}`}
+                        >
+                          <div className="text-xs text-white/45">其他异常</div>
+                          <div className="mt-1 text-xl font-semibold tabular-nums text-white">{totalStats.failureBreakdown.otherFailureCount}</div>
+                          <div className="mt-0.5 text-[11px] text-white/35">人工排查</div>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1812,7 +2097,7 @@ export default function AdminGenerationsPage() {
                     </div>
                   )}
                   <div className="overflow-y-auto flex-1">
-                    <table className="w-full min-w-[1220px]">
+                    <table className="w-full min-w-[1340px]">
                       <thead className="sticky top-0 z-[1]">
                         <tr className="border-b border-white/10 bg-neutral-900/95 backdrop-blur">
                           <th className="text-left px-4 py-3 text-xs font-semibold text-white/60 uppercase tracking-wider">用户</th>
@@ -1823,6 +2108,7 @@ export default function AdminGenerationsPage() {
                           <th className="text-center px-4 py-3 text-xs font-semibold text-white/60 uppercase tracking-wider">结果</th>
                           <th className="text-right px-4 py-3 text-xs font-semibold text-white/60 uppercase tracking-wider">积分</th>
                           <th className="text-center px-4 py-3 text-xs font-semibold text-white/60 uppercase tracking-wider">PSD</th>
+                          <th className="text-center px-4 py-3 text-xs font-semibold text-white/60 uppercase tracking-wider">操作</th>
                           <th className="text-left px-4 py-3 text-xs font-semibold text-white/60 uppercase tracking-wider">时间</th>
                         </tr>
                       </thead>
@@ -2032,6 +2318,33 @@ export default function AdminGenerationsPage() {
                                 )}
                               </td>
 
+                              <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setDetailModal({ open: true, record })}
+                                    className="rounded-lg border border-white/10 bg-white/[0.055] px-2.5 py-1.5 text-xs text-white/70 transition hover:bg-white/[0.12] hover:text-white"
+                                  >
+                                    详情
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void copyText(record.orderNumber, '订单号已复制')}
+                                    className="rounded-lg border border-white/10 bg-white/[0.055] px-2.5 py-1.5 text-xs text-white/70 transition hover:bg-white/[0.12] hover:text-white"
+                                  >
+                                    复制
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void downloadRecordResults(record)}
+                                    disabled={getResultImageUrls(record.resultData).length === 0}
+                                    className="rounded-lg border border-emerald-300/16 bg-emerald-500/[0.08] px-2.5 py-1.5 text-xs text-emerald-100 transition hover:bg-emerald-500/[0.14] disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    下载图
+                                  </button>
+                                </div>
+                              </td>
+
                               {/* Time */}
                               <td className="px-4 py-3">
                                 <span className="text-xs text-white/60 whitespace-nowrap">
@@ -2142,9 +2455,12 @@ export default function AdminGenerationsPage() {
               style={{ backgroundColor: 'rgba(0, 0, 0, 0.6)' }}
             >
               <div className="bg-black border border-white/20 rounded-2xl p-6 max-w-md w-full shadow-xl">
-                <h2 className="text-lg font-bold mb-4">
-                  {editModal.type === 'points' ? '修改积分' : '修改头像'}
-                </h2>
+                <div className="mb-4">
+                  <h2 className="text-lg font-bold">
+                    {editModal.type === 'points' ? '修改积分' : '修改头像'}
+                  </h2>
+                  <p className="mt-1 text-xs text-white/42">请确认修改对象和数值，保存后会直接影响用户账号。</p>
+                </div>
 
                 {editModal.type === 'points' ? (
                   <div className="mb-6">
@@ -2156,7 +2472,16 @@ export default function AdminGenerationsPage() {
                       onChange={(e) => setEditValue(e.target.value)}
                       className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-white/20"
                     />
-                    <p className="text-white/60 text-xs mt-2">当前积分: {editModal.currentData}</p>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
+                        <div className="text-white/38">当前积分</div>
+                        <div className="mt-1 text-base font-semibold tabular-nums text-white">{editModal.currentData}</div>
+                      </div>
+                      <div className="rounded-xl border border-amber-300/16 bg-amber-500/[0.08] p-3">
+                        <div className="text-amber-100/62">保存后</div>
+                        <div className="mt-1 text-base font-semibold tabular-nums text-amber-100">{editValue || 0}</div>
+                      </div>
+                    </div>
                   </div>
                 ) : (
                   <div className="mb-6">
@@ -2174,6 +2499,18 @@ export default function AdminGenerationsPage() {
                         <SafeImage
                           src={editModal.currentData}
                           alt="当前头像"
+                          width={48}
+                          height={48}
+                          className="h-12 w-12 rounded-full object-cover"
+                        />
+                      </div>
+                    )}
+                    {editValue && (
+                      <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.04] p-3">
+                        <p className="text-white/60 text-xs mb-2">新头像预览:</p>
+                        <SafeImage
+                          src={editValue}
+                          alt="新头像预览"
                           width={48}
                           height={48}
                           className="h-12 w-12 rounded-full object-cover"
@@ -2210,18 +2547,47 @@ export default function AdminGenerationsPage() {
             >
               <div className="bg-black border border-white/20 rounded-2xl p-6 max-w-4xl w-full max-h-[84vh] overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
                 <div className="flex justify-between items-start mb-5">
-                  <h2 className="text-lg font-bold">订单详情</h2>
-                  <button
-                    onClick={() => setDetailModal({ open: false, record: null })}
-                    className="text-white/60 hover:text-white transition-colors"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
+                  <div>
+                    <h2 className="text-lg font-bold">订单详情</h2>
+                    <p className="mt-1 text-xs text-white/42">客服摘要、图片、诊断和原始数据</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void copyText(detailCustomerSummary, '客服摘要已复制')}
+                      className="rounded-xl border border-white/12 bg-white/[0.055] px-3 py-2 text-xs text-white/70 transition hover:bg-white/[0.12] hover:text-white"
+                    >
+                      复制摘要
+                    </button>
+                    <button
+                      onClick={() => setDetailModal({ open: false, record: null })}
+                      className="text-white/60 hover:text-white transition-colors"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-5">
+                  <div className="rounded-xl border border-cyan-300/16 bg-cyan-500/[0.075] p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="text-xs text-cyan-100/62">客服摘要</div>
+                        <div className="mt-2 text-sm leading-6 text-cyan-50/86">
+                          {detailDiagnostic?.label || detailRecord.status} · {detailResultImages.length} 张结果图 · {detailRequestImages.length} 张参考图 · {detailRecord.actualPoints > 0 ? detailRecord.actualPoints : 0} 积分
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" onClick={() => void copyText(detailRecord.orderNumber, '订单号已复制')} className="rounded-lg border border-white/12 bg-black/20 px-2.5 py-1.5 text-xs text-white/72 hover:bg-white/10 hover:text-white">复制订单</button>
+                        <button type="button" onClick={() => void copyText(detailRecord.userId, '用户 UID 已复制')} className="rounded-lg border border-white/12 bg-black/20 px-2.5 py-1.5 text-xs text-white/72 hover:bg-white/10 hover:text-white">复制UID</button>
+                        <button type="button" onClick={() => void downloadRecordResults(detailRecord)} disabled={detailResultImages.length === 0} className="rounded-lg border border-emerald-300/18 bg-emerald-500/[0.12] px-2.5 py-1.5 text-xs text-emerald-100 hover:bg-emerald-500/[0.18] disabled:cursor-not-allowed disabled:opacity-40">下载结果</button>
+                      </div>
+                    </div>
+                    <pre className="mt-3 whitespace-pre-wrap rounded-lg border border-white/10 bg-black/20 p-3 text-xs leading-5 text-cyan-50/72">{detailCustomerSummary}</pre>
+                  </div>
+
                   <div className="grid gap-3 md:grid-cols-4">
                     <div className="rounded-xl border border-white/10 bg-white/[0.04] p-4">
                       <div className="text-xs text-white/45">订单号</div>
