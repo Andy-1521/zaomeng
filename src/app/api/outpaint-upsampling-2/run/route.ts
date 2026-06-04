@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
     description: '高清+扩图2处理',
     queuedMessage: '高清+扩图2任务已提交',
     logPrefix: '高清+扩图2',
-    workflow: 'gpt-image-2-outpaint-vision-prompt-then-upsampling-4k',
+    workflow: 'runninghub-g31-flash-outpaint-vision-prompt-then-upsampling-4k',
     routeStoragePrefix: 'outpaint-upsampling-2',
     resolvePrompt: async ({ sourceBuffer, sourceWidth, sourceHeight }) => {
       return generateDynamicOutpaintPrompt({

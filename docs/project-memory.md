@@ -137,7 +137,7 @@
 - 智能改图：画笔/标记局部编辑，后端整理 prompt 并调用图像编辑
 - 彩绘提取：从商品图中提取适合打印的平面彩绘稿
 - 彩绘 PSD：用户手动点击生成，单独计费
-- 高清+扩图：Psydo `gpt-image-2` 补全四周并输出 4K 长边，后台执行
+- 高清+扩图：RunningHub `rhart-image-n-g31-flash` 补全四周并输出 4K 长边，后台执行
 - 高清放大：RunningHub 高清放大，后台执行，5 积分
 - 任务中心：展示处理中、成功、失败、超时、PSD 状态和下载入口
 - 插件采图：浏览器插件从网页采集图片回素材库；网站会检测插件版本并提示更新
@@ -215,7 +215,7 @@ PSD 当前要点：
 - 标记识别入口是 `POST /api/smart-edit/identify`，实现位于 `src/app/api/smart-edit/identify/handler.ts`。前端保留预识别 `prewarm`，实际识别会发送更小的 JPEG 裁切图，当前超时控制为 16 秒。
 - prompt 组合入口是 `POST /api/material-editor/compose-prompt`，核心逻辑在 `src/lib/materialEditorPrompt.ts`。Prompt Agent 失败时直接失败，不返回模板提示词。
 - 正式提交入口是 `POST /api/material-editor`，智能改图会创建订单、记录 requestParams、预扣积分，然后后台执行编辑任务。
-- 后台任务调用 `composePromptFromImage` 形成最终提示词，再通过 `src/lib/psydoImageEdits.ts` 调主图像编辑接口；当前没有备用模型目标。
+- 后台任务调用 `composePromptFromImage` 形成最终提示词，再通过 `src/lib/psydoImageEdits.ts` 调 RunningHub 图像通道。
 - 编辑结果下载成 buffer 后上传阿里云 OSS，订单 `resultData` 保存最终 OSS URL，同时生成 WebP 缩略图上传 OSS 并保存到 `requestParams.thumbnailUrl`。AI 生图和智能改图结果只进入订单记录，不自动写入图库。
 - 成功后通过 `taskHistoryUpdated` 和订单轮询刷新右侧任务中心；失败、超时、上传失败或结果缺失时，订单标记失败并按预扣规则退款。
 - 当前 mask 仍以 base64 JSON 提交，Nginx 已放宽 `/api/material-editor` 请求体；长期建议改 multipart 或先上传 mask 到 OSS。
@@ -484,7 +484,7 @@ pnpm exec tsx scripts/verification/real-ai-smart-api-check.ts
 - `.env.local` 是真实运行配置，不能外泄密钥
 - `zaomeng-web.service` 通过 `/home/ubuntu/zaomeng/.env.local` 注入变量
 - 文档里只记录变量用途和变量名，不记录真实值
-- 当前图像编辑只使用主配置，不再配置备用图像编辑目标
+- 当前图像编辑按本次用户要求优先使用 RunningHub 图像通道
 - `RUNNINGHUB_API_KEY` 存在时才能跑相关流程
 - `RUNNINGHUB_WATERMARK_API_KEY` 不存在时不要假设高清放大水印专用链路可用
 

@@ -347,7 +347,7 @@ export async function runOutpaintUpsamplingRoute(request: NextRequest, options: 
           targetName: string;
           baseUrl: string;
         } | null = null;
-        console.log(`[${options.logPrefix}] 步骤2: 调用 gpt-image-2 扩图`);
+        console.log(`[${options.logPrefix}] 步骤2: 调用 RunningHub rhart-image-n-g31-flash 扩图`);
         const imageEditResult = await runPsydoImageEditWithMetaFromUrl({
           imageUrl: sourceCanvasUrl,
           prompt: promptResolution.prompt,

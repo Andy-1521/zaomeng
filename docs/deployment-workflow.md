@@ -52,8 +52,8 @@
 
 ## 其他功能流程
 
-- AI 生图：`/api/image-to-image/run` 创建订单、预扣积分、调用 Psydo 图像接口、结果上传 OSS、生成 OSS 缩略图、订单成功；失败或超时退款。
-- 高清+扩图：`/api/outpaint-upsampling/run` 创建后台订单、预扣积分、构建扩图画布和 mask，调用 Psydo `gpt-image-2` 只补全四周，最终规范为 4K 长边后上传 OSS，并同步上传 OSS 缩略图；当前价格通过 `getOutpaintUpsamplingPoints()` 读取，不写死。
+- AI 生图：`/api/image-to-image/run` 创建订单、预扣积分、调用 RunningHub 图像通道、结果上传 OSS、生成 OSS 缩略图、订单成功；失败或超时退款。
+- 高清+扩图：`/api/outpaint-upsampling/run` 创建后台订单、预扣积分、构建扩图画布和 mask，调用 RunningHub `rhart-image-n-g31-flash` 图像通道只补全四周，最终规范为 4K 长边后上传 OSS，并同步上传 OSS 缩略图；当前价格通过 `getOutpaintUpsamplingPoints()` 读取，不写死。
 - 高清放大：`/api/hd-upscale/run` 创建后台订单、预扣 5 积分，调用 RunningHub 高清放大，结果下载后上传 OSS，并同步上传 OSS 缩略图；价格通过 `getHdUpscalePoints()` 读取。
 - 素材下载/订单下载：图库下载和订单记录下载均应优先走 OSS 直签附件下载，避免服务器中转大图。
 - 插件更新：用户只看到“下载最新版插件”，不要向用户暴露服务器、域名、迁移细节。

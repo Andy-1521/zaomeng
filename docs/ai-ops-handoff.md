@@ -354,3 +354,56 @@ ls -dt /home/ubuntu/zaomeng-prev-* | head -1
 - 操作：新增本文档，并在 `AGENTS.md`、顶层 `HANDOFF.md`、`docs/project-memory.md` 中增加必读引用。
 - 目的：确保后续开发 AI 接手时读取高危禁区、当前生产基线、Git 整理记录和发布纪律。
 - 生产部署：未部署。
+
+### 2026-06-04 21:10 CST
+
+- 操作：上线前全站巡检、依赖安全升级和素材删除误触保护修复。
+- 背景：本地浏览器巡检首页、素材库、订单、个人中心、管理员、插件、隐私/协议页面时，发现素材卡片“删除图片”按钮存在误触直接删除风险；同时 `pnpm audit --prod` 发现 Next.js、axios、nodemailer 等生产依赖存在已知高危/中危漏洞。
+- 改动摘要：
+  - 升级生产依赖：`next` 16.0.10 → 16.2.7、`axios` → 1.17.0、`coze-coding-dev-sdk` → 0.7.24、`nodemailer` → 8.0.10。
+  - 升级 `eslint-config-next` 到 16.2.7。
+  - 将 `drizzle-kit` 从生产 dependencies 移到 devDependencies。
+  - 增加 pnpm overrides：`postcss`、`qs` 使用已修复版本，确保 `pnpm audit --prod` 无已知漏洞。
+  - 素材删除前端增加二次确认；单张删除、批量删除、重复图删除都会带 `confirmDelete: true`。
+  - `/api/plugin/captured-images` DELETE 后端增加强制确认闸门：未携带 `confirmDelete: true` 的删除请求返回 400，不执行删除；用于防止旧前端、误请求或脚本直接删素材。
+- 改动文件：
+  - `package.json`
+  - `pnpm-lock.yaml`
+  - `src/app/api/plugin/captured-images/route.ts`
+  - `src/components/QuickCreatePage.tsx`
+  - `docs/ai-ops-handoff.md`
+- 验证：
+  - `pnpm exec tsc --noEmit --pretty false --incremental false` 通过。
+  - `git diff --check` 通过。
+  - `pnpm build` 通过。
+  - `pnpm audit --prod` 显示 `No known vulnerabilities found`。
+  - 本地 `next start -p 5001` 使用 Next 16.2.7 正常启动。
+  - 浏览器巡检：`/login`、`/home`、`/plugin`、`/profile`、`/profile?tab=recharge`、`/admin/generations`、`/privacy`、`/terms` 页面加载正常且无 console error/warn。
+  - 接口安全回归：未登录资料/交易/扣费/兑换/上传接口返回 401/403；伪造 unsigned user cookie 被拒绝；登录后资料接口正常；素材 DELETE 未携带 `confirmDelete: true` 返回 400 且素材总数不变。
+- 生产部署：准备部署。部署前必须确保生产 `.env.local` 有非空 `AUTH_COOKIE_SECRET` 且未开启 `ALLOW_LEGACY_UNSIGNED_USER_COOKIE=true`。部署后旧登录 Cookie 会失效，用户需要重新登录。
+- 高危注意：不要移除素材删除的 `confirmDelete` 前后端双重闸门；不要恢复无确认直接删除素材；不要降级 Next.js/axios 到有已知高危漏洞的版本。
+
+### 2026-06-04 21:30 CST
+
+- 操作：排查“所有功能无法成功”的根因，尚未部署生产。
+- 结论：基础页面、登录、素材、订单等接口正常；AI 图像类失败集中在旧 Psydo/OpenAI-compatible 图像编辑通道。
+- 真实错误：旧默认 `gpt-image-2` 已不可用；改测 Psydo 当前图像模型 `gpt-image-1` / `gpt-image-1.5` 后，直连 `/images/edits` 和 `/v1/images/edits` 仍返回 `502 Upstream service temporarily unavailable`。
+- 积分安全回归：测试订单失败后 `actual_points=0`，用户积分已退回。
+- 本地环境：验证码/注册/找回密码依赖 Redis；本机未运行 Redis，已临时建立 SSH 隧道 `127.0.0.1:6379 -> 生产 127.0.0.1:6379` 后 Redis `PING` 正常。
+- 生产注意：生产 `.env.local` 当前缺少 `AUTH_COOKIE_SECRET`，部署脚本会拒绝上线；部署前必须补高强度随机值。
+
+### 2026-06-04 21:45 CST
+
+- 操作：按用户要求撤掉旧 `gpt-image-2` 路线，恢复 RunningHub 图像通道。
+- 新图像通道：`https://www.runninghub.cn/openapi/v2/rhart-image-n-g31-flash/image-to-image`，鉴权使用 `RUNNINGHUB_API_KEY`。
+- 代码入口仍是 `src/lib/psydoImageEdits.ts`（历史命名未改），但当 `RUNNINGHUB_API_KEY` 存在时优先走 RunningHub `rhart-image-n-g31-flash`，不再先请求 Psydo/OpenAI-compatible `images/edits`。
+- 覆盖范围：AI 生图、彩绘提取、智能改图、高清+扩图等所有调用 `runPsydoImageEdit*` 的功能。
+- 高危注意：继续保留订单失败退款逻辑；RunningHub 失败/超时不得扣积分，订单必须标记失败或超时并回写 `actual_points=0`。
+
+### 2026-06-04 21:55 CST
+
+- 操作：按用户指定 curl 方案，将 RunningHub 图像通道切到 `rhart-image-n-g31-flash/image-to-image` 并做真实直连测试。
+- 直连测试结果：RunningHub API 返回 HTTP 200，但业务错误：`errorCode=812`、`errorMessage=CORPAPIKEY_INSUFFICIENT_FUNDS`、`taskId=""`。
+- 结论：当前 `RUNNINGHUB_API_KEY` 对应企业账户余额不足，无法创建真实图像任务；不是前端问题，也不是请求格式问题。
+- 部署状态：未部署生产。用户要求“没问题就部署”，但当前外部图像通道因余额不足无法通过真实验证，不能上线承诺功能恢复。
+- 后续处理：需要先给 RunningHub 账户充值，或提供有余额的 `RUNNINGHUB_API_KEY`；然后重新执行直连 RunningHub 测试和网站业务订单测试，确认订单成功、结果图回传、积分扣费正常后再部署。

@@ -2440,6 +2440,11 @@ export default function QuickCreatePage() {
   const removeUploadedImage = async (image: CapturedImageRecord) => {
     if (deletingMaterialIds.has(image.id)) return;
 
+    const confirmed = window.confirm('确定要删除这张素材吗？此操作不可恢复。');
+    if (!confirmed) {
+      return;
+    }
+
     setDeletingMaterialIds((prev) => new Set(prev).add(image.id));
     setCapturedImages((prev) => prev.filter((item) => item.id !== image.id));
     reduceMaterialsPagination(1);
@@ -2454,7 +2459,7 @@ export default function QuickCreatePage() {
         method: 'DELETE',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: image.id }),
+        body: JSON.stringify({ id: image.id, confirmDelete: true }),
       });
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(toUserFacingErrorMessage(data.error, '删除失败，请重试'));
@@ -2646,6 +2651,8 @@ export default function QuickCreatePage() {
     }
 
     const deletedImageUrls: string[] = [];
+    const confirmed = window.confirm(`确定要删除所选 ${selectedImageList.length} 张素材吗？此操作不可恢复。`);
+    if (!confirmed) return;
 
     try {
       for (const imageUrl of selectedImageList) {
@@ -2656,7 +2663,7 @@ export default function QuickCreatePage() {
           method: 'DELETE',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: target.id }),
+          body: JSON.stringify({ id: target.id, confirmDelete: true }),
         });
         const data = await response.json().catch(() => ({} as { success?: boolean; error?: string; message?: string }));
         if (!response.ok || !data.success) throw new Error(toUserFacingErrorMessage(data.error || data.message, '删除失败，请重试'));
@@ -2715,7 +2722,7 @@ export default function QuickCreatePage() {
           method: 'DELETE',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: image.id }),
+          body: JSON.stringify({ id: image.id, confirmDelete: true }),
         });
         const data = await response.json();
         if (!response.ok || !data.success) throw new Error(toUserFacingErrorMessage(data.error, '删除重复图片失败，请重试'));

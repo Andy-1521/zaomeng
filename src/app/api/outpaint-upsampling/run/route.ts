@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
     description: '高清+扩图处理',
     queuedMessage: '高清+扩图任务已提交',
     logPrefix: '高清+扩图',
-    workflow: 'gpt-image-2-outpaint-4k',
+    workflow: 'runninghub-g31-flash-outpaint-4k',
     routeStoragePrefix: 'outpaint-upsampling',
     resolvePrompt: async () => ({
       prompt: OUTPAINT_PROMPT,

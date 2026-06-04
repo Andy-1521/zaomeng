@@ -99,7 +99,11 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ success: false, error: '未登录' }, { status: 401 })
   }
 
-  const body = await request.json() as { id?: string; clearAll?: boolean }
+  const body = await request.json() as { id?: string; clearAll?: boolean; confirmDelete?: boolean }
+
+  if (body.confirmDelete !== true) {
+    return NextResponse.json({ success: false, error: '删除素材需要二次确认' }, { status: 400 })
+  }
 
   if (body.clearAll) {
     const deletedCount = await capturedImageManager.clearUserCapturedImages(userId)

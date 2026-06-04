@@ -1,5 +1,5 @@
 const DEFAULT_OPENAI_COMPAT_BASE_URL = 'https://api.psydo.top/v1';
-const DEFAULT_OPENAI_COMPAT_IMAGE_MODEL = 'gpt-image-2';
+const DEFAULT_OPENAI_COMPAT_IMAGE_MODEL = 'gpt-image-1.5';
 const DEFAULT_OPENAI_COMPAT_VISION_MODEL = 'gpt-5.4-mini';
 
 function trimTrailingSlash(value: string) {

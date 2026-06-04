@@ -78,7 +78,7 @@ const COLOR_EXTRACTION_PROMPT = `你是手机壳彩绘生产稿提取助手。�
 // ========== Psydo 图生图 API - 彩绘提取（唯一接口） ==========
 
 /**
- * 调用 Psydo gpt-image-2 进行彩绘提取
+ * 调用 RunningHub rhart-image-n-g31-flash 进行彩绘提取
  */
 async function submitCozeWorkflowExtractionTask(imageUrl: string, localMaterialOrigin?: string): Promise<{ success: boolean; resultUrl?: string; errorMsg?: string; isTimeout?: boolean }> {
   console.log(`[Psydo彩绘提取] ========== 开始彩绘提取 ==========`);
