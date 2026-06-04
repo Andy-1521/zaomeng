@@ -4,6 +4,13 @@ import { transactions } from '@/storage/database/shared/schema';
 import { eq, desc } from 'drizzle-orm';
 
 export async function GET() {
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json(
+      { success: false, message: '此接口仅限开发环境使用' },
+      { status: 403 },
+    );
+  }
+
   try {
     const db = await getDb();
 

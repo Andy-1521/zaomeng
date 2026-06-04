@@ -16,6 +16,13 @@ type TransactionRow = RowDataPacket & {
  * 数据库迁移：添加 uploaded_image 字段到 transactions 表
  */
 export async function POST() {
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json(
+      { success: false, message: '生产环境禁止直接调用迁移接口' },
+      { status: 403 },
+    );
+  }
+
   try {
     console.log('[Migration] 开始添加 uploaded_image 字段...');
 

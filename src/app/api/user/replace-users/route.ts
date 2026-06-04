@@ -7,28 +7,20 @@ import { sql } from 'drizzle-orm';
  * 用户数据替换 API（管理员专用，一次性使用）
  *
  * POST: 清空现有用户并批量导入新用户数据
- * 鉴权: X-Admin-Secret 请求头 或 管理员 Cookie
+ * 鉴权: X-Admin-Secret 请求头，且必须显式配置 ADMIN_SECRET_KEY
  */
 export async function POST(request: NextRequest) {
   try {
-    // 鉴权：支持 X-Admin-Secret 请求头 或 管理员 Cookie
+    // 极高危一次性接口：只允许显式配置的维护密钥调用，不使用默认密钥或客户端 Cookie。
     const adminSecret = request.headers.get('X-Admin-Secret');
-    const SECRET_KEY = process.env.ADMIN_SECRET_KEY || 'replace-users-2026';
+    const configuredSecret = process.env.ADMIN_SECRET_KEY;
 
-    if (adminSecret !== SECRET_KEY) {
-      const userCookie = request.cookies.get('user');
-      let currentUser;
-      if (userCookie) {
-        try { currentUser = JSON.parse(userCookie.value); } catch { /* ignore */ }
-      }
-      if (!currentUser?.id) {
-        return NextResponse.json({ success: false, message: '未登录' }, { status: 401 });
-      }
-      const { userManager } = await import('@/storage/database');
-      const adminUser = await userManager.getUserById(currentUser.id);
-      if (!adminUser?.isAdmin) {
-        return NextResponse.json({ success: false, message: '无权限访问' }, { status: 403 });
-      }
+    if (!configuredSecret) {
+      return NextResponse.json({ success: false, message: '此接口未启用' }, { status: 403 });
+    }
+
+    if (adminSecret !== configuredSecret) {
+      return NextResponse.json({ success: false, message: '无权限访问' }, { status: 403 });
     }
 
     const body = await request.json();

@@ -285,6 +285,25 @@ ls -dt /home/ubuntu/zaomeng-prev-* | head -1
 
 ## 变更记录
 
+### 2026-06-04 18:30 CST
+
+- 操作：本地修复 P0/P1 运维安全问题，尚未部署生产。
+- 改动文件：
+  - `src/app/api/debug/orders/route.ts`：生产环境禁用未鉴权 debug 订单摘要接口。
+  - `src/app/api/migrations/add-uploaded-image/route.ts`：生产环境禁用直接调用迁移接口。
+  - `src/app/api/task/clean-stucked-orders/route.ts`：生产环境禁用未鉴权卡单清理接口。
+  - `src/app/api/user/replace-users/route.ts`：移除默认管理密钥和 Cookie 管理员兜底，仅允许显式配置 `ADMIN_SECRET_KEY` 后用 `X-Admin-Secret` 调用。
+  - `src/lib/psydoImageEdits.ts`：删除图像编辑 RunningHub 备用通道，主链路失败直接失败并交由调用方退款。
+  - `src/lib/app-init.ts`：`next build` / 静态生成阶段跳过数据库初始化，避免构建期连接 MySQL 或自动迁移。
+- 验证：
+  - `pnpm exec tsc --noEmit --pretty false --incremental false` 通过。
+  - `git diff --check` 通过。
+  - `pnpm build` 通过，且不再出现 `[App Init]` / MySQL `127.0.0.1:3307` 连接错误。
+  - 本地 `next start -p 5001` 生产模式验证：`/api/debug/orders`、`/api/migrations/add-uploaded-image`、`/api/task/clean-stucked-orders`、`/api/user/replace-users` 均返回 403；`/login`、`/plugin`、`/terms`、`/privacy`、`/home`、`/profile`、`/api/plugin/version` 均返回 200。
+- 生产部署：未部署。生产当前仍运行 `8aa7a1f`，本次修复需要用户验收后再按发布流程部署。
+- 注意：构建期仍会输出阿里云 OSS 初始化摘要日志，未阻塞构建，但后续可继续收敛模块级初始化日志。
+
+
 ### 2026-06-04 17:44 CST
 
 - 操作：修复 GitHub `origin/main` 与生产基线不一致问题。

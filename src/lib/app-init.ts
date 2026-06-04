@@ -82,6 +82,11 @@ export async function initializeApp() {
  * 这是为了避免阻塞应用启动
  */
 export function triggerInitialization() {
+  // Next.js build / static generation 会执行 layout 模块；此时不能连接数据库或自动迁移。
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    return;
+  }
+
   // 立即触发初始化，但不等待完成
   initializeApp().catch(error => {
     console.error("[App Init] 未捕获的初始化错误:", error);

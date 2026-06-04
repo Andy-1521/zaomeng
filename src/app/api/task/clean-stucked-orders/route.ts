@@ -12,6 +12,13 @@ function getErrorMessage(error: unknown) {
  * - 用于清理因异常导致的卡死订单
  */
 export async function POST(request: NextRequest) {
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json(
+      { success: false, message: '生产环境禁止直接调用清理接口' },
+      { status: 403 },
+    );
+  }
+
   console.log('[CleanStuckOrders] ========== 开始处理请求 ==========');
 
   try {
