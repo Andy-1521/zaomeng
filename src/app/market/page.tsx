@@ -213,6 +213,9 @@ function MarketPageContent() {
   const [imageSearchPreviewUrl, setImageSearchPreviewUrl] = useState("");
   const [imageSearchFileName, setImageSearchFileName] = useState("");
   const [isImageSearchDragging, setIsImageSearchDragging] = useState(false);
+  const [heroActionMode, setHeroActionMode] = useState<"search" | "browse">(
+    "search",
+  );
   const [directListingDraft, setDirectListingDraft] =
     useState<DirectMarketListingDraft | null>(null);
   const [isSubmittingDirectListing, setIsSubmittingDirectListing] =
@@ -1170,18 +1173,47 @@ function MarketPageContent() {
                         </p>
                       </div>
 
-                      <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+                      <div
+                        className="relative mx-auto mt-7 grid w-full max-w-[26rem] grid-cols-2 rounded-full border border-white/12 bg-black/42 p-1 shadow-[0_18px_54px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-2xl"
+                        role="group"
+                        aria-label="图市入口方式"
+                      >
+                        <span
+                          className={`pointer-events-none absolute bottom-1 top-1 w-[calc(50%-0.25rem)] rounded-full shadow-[0_14px_34px_rgba(255,255,255,0.12)] transition-transform duration-300 ease-out ${
+                            heroActionMode === "browse"
+                              ? "translate-x-[calc(100%+0.5rem)] bg-white/[0.11] ring-1 ring-white/12"
+                              : "translate-x-0 bg-white"
+                          }`}
+                        />
                         <button
                           type="button"
-                          onClick={() => imageSearchInputRef.current?.click()}
-                          className="rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black shadow-[0_12px_32px_rgba(255,255,255,0.12)] transition hover:bg-cyan-50"
+                          onMouseEnter={() => setHeroActionMode("search")}
+                          onFocus={() => setHeroActionMode("search")}
+                          onClick={() => {
+                            setHeroActionMode("search");
+                            imageSearchInputRef.current?.click();
+                          }}
+                          className={`relative z-10 rounded-full px-5 py-2.5 text-sm font-semibold transition ${
+                            heroActionMode === "search"
+                              ? "text-black"
+                              : "text-white/54 hover:text-white"
+                          }`}
                         >
                           以图搜图
                         </button>
                         <button
                           type="button"
-                          onClick={scrollToBrowseMarket}
-                          className="rounded-full px-5 py-2.5 text-sm text-white/58 transition hover:bg-white/[0.08] hover:text-white"
+                          onMouseEnter={() => setHeroActionMode("browse")}
+                          onFocus={() => setHeroActionMode("browse")}
+                          onClick={() => {
+                            setHeroActionMode("browse");
+                            scrollToBrowseMarket();
+                          }}
+                          className={`relative z-10 rounded-full px-5 py-2.5 text-sm font-semibold transition ${
+                            heroActionMode === "browse"
+                              ? "text-white"
+                              : "text-white/54 hover:text-white"
+                          }`}
                         >
                           向下逛图市
                         </button>
@@ -1585,7 +1617,7 @@ function MarketPageContent() {
         >
           <span className="grid h-10 w-10 place-items-center rounded-full border border-emerald-200/18 bg-emerald-300/[0.12] shadow-[0_18px_48px_rgba(0,0,0,0.28)] backdrop-blur-2xl transition group-hover:border-emerald-100/42 group-hover:bg-emerald-300/[0.18]">
             <svg
-              className="h-4.5 w-4.5"
+              className="h-5 w-5"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -1595,13 +1627,7 @@ function MarketPageContent() {
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth={1.8}
-                d="M12 5v14m7-7H5"
-              />
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.8}
-                d="M6.5 19.5h11"
+                d="M12 16V4m0 0 4.5 4.5M12 4 7.5 8.5M5 20h14"
               />
             </svg>
           </span>
