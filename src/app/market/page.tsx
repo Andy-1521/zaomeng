@@ -1177,7 +1177,7 @@ function MarketPageContent() {
                         <span className="relative mt-2 grid h-11 w-11 place-items-center text-cyan-200 motion-safe:animate-bounce">
                           <span className="absolute inset-1 rounded-full bg-cyan-300/12 blur-xl" />
                           <svg
-                            className="relative h-9 w-9 drop-shadow-[0_0_18px_rgba(103,232,249,0.42)]"
+                            className="relative h-8 w-8 drop-shadow-[0_0_16px_rgba(103,232,249,0.36)]"
                             fill="none"
                             stroke="currentColor"
                             viewBox="0 0 24 24"
@@ -1186,7 +1186,7 @@ function MarketPageContent() {
                             <path
                               strokeLinecap="round"
                               strokeLinejoin="round"
-                              strokeWidth={2.8}
+                              strokeWidth={2}
                               d="m5.5 7.5 6.5 6.5 6.5-6.5M5.5 13l6.5 6.5L18.5 13"
                             />
                           </svg>
