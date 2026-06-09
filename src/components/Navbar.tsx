@@ -201,20 +201,29 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
 
           {/* 右侧用户菜单 */}
           {showUserMenu && !user && (
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 items-center">
               <Link
                 href={`/login?next=${encodeURIComponent(pathname || "/market")}`}
                 prefetch
-                className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-xs font-medium text-white/72 transition hover:bg-white/[0.12] hover:text-white sm:px-4 sm:py-2 sm:text-sm"
+                className="group inline-flex items-center gap-2 rounded-full border border-cyan-200/18 bg-white/[0.065] px-3.5 py-1.5 text-xs font-semibold text-white/82 shadow-[0_14px_34px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-xl transition hover:border-cyan-100/34 hover:bg-white/[0.11] hover:text-white sm:px-4 sm:py-2 sm:text-sm"
               >
-                登录
-              </Link>
-              <Link
-                href={`/login?next=${encodeURIComponent(pathname || "/market")}`}
-                prefetch
-                className="hidden rounded-full bg-white px-4 py-2 text-sm font-semibold text-black shadow-[0_12px_32px_rgba(255,255,255,0.12)] transition hover:bg-cyan-50 sm:inline-flex"
-              >
-                注册
+                <span>登录/注册</span>
+                <span className="grid h-5 w-5 place-items-center rounded-full bg-white text-black transition group-hover:bg-cyan-50">
+                  <svg
+                    className="h-3 w-3"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M5 12h14m0 0-5-5m5 5-5 5"
+                    />
+                  </svg>
+                </span>
               </Link>
             </div>
           )}
