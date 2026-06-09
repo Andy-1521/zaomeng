@@ -37,7 +37,7 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
   ];
 
   return (
-    <div className="fixed left-6 top-1/2 -translate-y-1/2 z-[70] flex flex-col gap-4 px-2 py-6">
+    <div className="fixed bottom-4 left-1/2 z-[70] flex -translate-x-1/2 items-center gap-2 rounded-[1.35rem] border border-white/10 bg-black/62 px-2 py-2 shadow-[0_18px_52px_rgba(0,0,0,0.38)] backdrop-blur-2xl sm:left-6 sm:top-1/2 sm:bottom-auto sm:-translate-x-0 sm:-translate-y-1/2 sm:flex-col sm:gap-4 sm:border-0 sm:bg-transparent sm:px-2 sm:py-6 sm:shadow-none sm:backdrop-blur-none">
       {tabs.map((tab) => (
         <button
           key={tab.id}
@@ -46,7 +46,7 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
             router.push(tab.id === 'market' ? '/market' : '/home');
           }}
           className={`
-            relative flex flex-col items-center gap-2 p-3 rounded-2xl transition-all
+            relative flex min-w-[4.25rem] flex-col items-center gap-1.5 rounded-2xl px-3 py-2.5 transition-all sm:min-w-0 sm:gap-2 sm:p-3
             ${activeTab === tab.id
               ? 'bg-white/20 text-white backdrop-blur-xl'
               : 'text-white/60 hover:bg-white/10 hover:text-white hover:backdrop-blur-md'

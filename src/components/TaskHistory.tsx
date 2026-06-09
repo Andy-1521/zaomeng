@@ -1665,8 +1665,8 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     <div
       className={`fixed z-[70] flex ${
         isCollapsed
-          ? 'bottom-4 right-4 top-auto items-end sm:bottom-4 sm:right-5 sm:top-[5.5rem] sm:items-center'
-          : 'bottom-3 left-3 right-3 top-auto items-end sm:bottom-4 sm:left-auto sm:right-5 sm:top-[5.5rem] sm:items-center'
+          ? 'bottom-24 right-4 top-auto items-end sm:bottom-4 sm:right-5 sm:top-[5.5rem] sm:items-center'
+          : 'bottom-24 left-3 right-3 top-auto items-end sm:bottom-4 sm:left-auto sm:right-5 sm:top-[5.5rem] sm:items-center'
       }`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}

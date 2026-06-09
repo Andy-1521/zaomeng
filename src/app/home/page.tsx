@@ -98,7 +98,7 @@ export default function HomePage() {
         <TaskHistory activeTab="color-extraction" userId={user?.id} />
 
         {/* 主要内容区 */}
-        <div className="pl-20 pr-28">
+        <div className="px-3 pb-28 sm:pl-20 sm:pr-28 sm:pb-0">
           <QuickCreatePage />
         </div>
       </div>
