@@ -1392,21 +1392,6 @@ function MarketPageContent() {
                 </div>
               ) : null}
 
-              {publicMarketLocked ? (
-                <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-[1.35rem] border border-cyan-200/14 bg-cyan-300/[0.055] px-4 py-3 text-sm text-cyan-50/72">
-                  <span>
-                    游客模式：可搜索和预览图市首屏素材，点击详情、下载、已购/上架和加载更多需要登录。
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => requireLogin("/market")}
-                    className="rounded-full border border-cyan-100/24 bg-cyan-200/[0.1] px-3 py-1.5 text-xs font-semibold text-cyan-50 transition hover:bg-cyan-200/[0.16]"
-                  >
-                    登录/注册
-                  </button>
-                </div>
-              ) : null}
-
               {loading ? (
                 <div
                   className="flex items-start justify-center"
@@ -1572,7 +1557,7 @@ function MarketPageContent() {
                     onClick={() => requireLogin("/market")}
                     className="rounded-full border border-white/14 bg-white px-5 py-2.5 text-sm font-semibold text-black shadow-[0_14px_34px_rgba(255,255,255,0.12)] transition hover:bg-cyan-50"
                   >
-                    登录后加载更多素材
+                    加载更多素材
                   </button>
                 </div>
               ) : null}
