@@ -178,21 +178,21 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
 
   return (
     <>
-      <nav className="fixed inset-x-0 top-0 z-[120] border-b border-white/[0.08] bg-[#030b14]/82 px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.24)] backdrop-blur-2xl sm:px-6 sm:py-3">
+      <nav className="fixed inset-x-0 top-0 z-[120] border-b border-white/[0.08] bg-[#030b14]/82 px-3 py-1.5 shadow-[0_10px_28px_rgba(0,0,0,0.22)] backdrop-blur-2xl sm:px-6 sm:py-2">
         <div className="mx-auto flex max-w-[92vw] items-center justify-between gap-2 2xl:max-w-[1780px]">
           {/* Logo - 点击回到首页 */}
           <button
             onClick={handleLogoClick}
-            className="group flex shrink-0 items-center gap-2 rounded-full px-1.5 py-1 transition-colors hover:bg-white/[0.04] sm:gap-2.5 sm:px-2"
+            className="group flex shrink-0 items-center gap-2 rounded-full px-1.5 py-0.5 transition-colors hover:bg-white/[0.04] sm:gap-2.5 sm:px-2"
           >
             <Image
               src="/assets/32.png"
               alt="Logo"
               width={32}
               height={32}
-              className="h-7 w-7 rounded-lg border border-purple-500/30 object-cover sm:h-8 sm:w-8"
+              className="h-7 w-7 rounded-lg border border-purple-500/30 object-cover"
             />
-            <h1 className="whitespace-nowrap bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-lg font-bold text-transparent transition-all group-hover:from-purple-300 group-hover:to-blue-300 sm:text-2xl">
+            <h1 className="whitespace-nowrap bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-lg font-bold text-transparent transition-all group-hover:from-purple-300 group-hover:to-blue-300 sm:text-xl">
               造梦AI
             </h1>
           </button>
@@ -235,7 +235,7 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
                 <Link
                   href="/plugin"
                   prefetch
-                  className={`px-3 py-1.5 rounded-full border text-xs flex items-center gap-2 transition-colors ${
+                  className={`px-3 py-1 rounded-full border text-xs flex items-center gap-2 transition-colors ${
                     pluginNeedsUpdate
                       ? "bg-amber-500/15 border-amber-500/35 text-amber-200 hover:bg-amber-500/20"
                       : pluginReady
@@ -289,14 +289,14 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
               <Link
                 href="/profile"
                 prefetch
-                className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] p-1 backdrop-blur-md transition-all hover:border-white/18 hover:bg-white/[0.12] sm:gap-3 sm:py-1 sm:pl-1 sm:pr-4"
+                className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] p-0.5 backdrop-blur-md transition-all hover:border-white/18 hover:bg-white/[0.12] sm:gap-3 sm:py-0.5 sm:pl-0.5 sm:pr-4"
               >
                 <SafeImage
                   src={user.avatar || "/images/avatar.png"}
                   alt="用户头像"
                   width={36}
                   height={36}
-                  className="h-8 w-8 rounded-full border-2 border-purple-500/30 object-cover sm:h-9 sm:w-9"
+                  className="h-8 w-8 rounded-full border-2 border-purple-500/30 object-cover"
                 />
                 <span className="hidden max-w-[180px] truncate font-medium text-white sm:inline">
                   {user.username}
@@ -307,7 +307,7 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
               <Link
                 href="/profile?tab=recharge"
                 prefetch
-                className="flex items-center gap-1.5 rounded-full border border-yellow-500/25 bg-yellow-500/12 px-2.5 py-1.5 transition-colors hover:bg-yellow-500/18 sm:px-3"
+                className="flex items-center gap-1.5 rounded-full border border-yellow-500/25 bg-yellow-500/12 px-2.5 py-1 transition-colors hover:bg-yellow-500/18 sm:px-3"
                 title="前往积分兑换"
               >
                 <Image
@@ -323,7 +323,7 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
               {/* 退出登录按钮 */}
               <button
                 onClick={handleLogout}
-                className="whitespace-nowrap rounded-full px-2 py-1.5 text-xs text-white/48 transition-colors hover:bg-white/[0.06] hover:text-white sm:px-3 sm:text-sm"
+                className="whitespace-nowrap rounded-full px-2 py-1 text-xs text-white/48 transition-colors hover:bg-white/[0.06] hover:text-white sm:px-3 sm:text-sm"
               >
                 <span className="sm:hidden">退出</span>
                 <span className="hidden sm:inline">退出登录</span>
@@ -332,7 +332,7 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
           )}
         </div>
       </nav>
-      <div className="h-[61px] sm:h-[77px]" aria-hidden="true" />
+      <div className="h-[52px] sm:h-[57px]" aria-hidden="true" />
     </>
   );
 }
