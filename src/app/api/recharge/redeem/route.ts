@@ -2,8 +2,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import { rechargeCodeManager } from '@/storage/database';
 import { getCookieUserId } from '@/lib/serverAuth';
 
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '兑换失败，请稍后重试';
+function getSafeRedeemError(error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  if (message.includes('不存在') || message.includes('已被使用')) {
+    return { message, status: 400 };
+  }
+
+  if (
+    message.includes('ECONNREFUSED') ||
+    message.includes('ETIMEDOUT') ||
+    message.includes('connect ') ||
+    message.includes('数据库')
+  ) {
+    return { message: '兑换服务暂时不可用，请稍后重试', status: 500 };
+  }
+
+  return { message: message || '兑换失败，请稍后重试', status: 500 };
 }
 
 export async function POST(request: NextRequest) {
@@ -28,8 +42,7 @@ export async function POST(request: NextRequest) {
       data: result,
     });
   } catch (error: unknown) {
-    const message = getErrorMessage(error);
-    const status = message.includes('不存在') || message.includes('已被使用') ? 400 : 500;
+    const { message, status } = getSafeRedeemError(error);
     console.error('[Recharge] 兑换码兑换失败:', error);
     return NextResponse.json({ success: false, message }, { status });
   }

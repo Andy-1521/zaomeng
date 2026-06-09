@@ -9,6 +9,7 @@ import { getAliyunOSSThumbnailUrlFromUrl } from '@/lib/aliyunOSS';
 import { inspectMarketPsd, inspectMarketPsdFromUrl } from '@/lib/marketPsd';
 import { normalizeFileExtension } from '@/lib/localUploadStorage';
 import { isImageValidationError, validateUploadedImageBuffer } from '@/lib/serverImageValidation';
+import { readDevPreviewUser } from '@/lib/devPreviewUser';
 
 const MAX_PSD_UPLOAD_BYTES = 120 * 1024 * 1024;
 const DEFAULT_PRICE_POINTS = 50;
@@ -25,6 +26,8 @@ type LocalPreviewMarketItem = Record<string, unknown> & {
   id?: string;
   sellerId?: string;
   status?: string;
+  buyerId?: string;
+  purchasedBy?: string[];
 };
 
 async function readLocalPreviewMarketItems(allowLocalPreview = process.env.NODE_ENV !== 'production') {
@@ -49,6 +52,13 @@ async function writeLocalPreviewMarketItem(item: LocalPreviewMarketItem, allowLo
   return true;
 }
 
+async function writeLocalPreviewMarketItems(items: LocalPreviewMarketItem[], allowLocalPreview = process.env.NODE_ENV !== 'production') {
+  if (!allowLocalPreview) return false;
+  const filePath = join(process.cwd(), '.cache', 'market-preview.json');
+  await writeFile(filePath, JSON.stringify(items, null, 2), 'utf8');
+  return true;
+}
+
 async function loadLocalPreviewMarketItems(
   options: { keyword?: string; mode?: string; userId?: string | null },
   allowLocalPreview = process.env.NODE_ENV !== 'production',
@@ -64,6 +74,11 @@ async function loadLocalPreviewMarketItems(
     filteredItems = filteredItems.filter((item) => item.sellerId === userId);
   } else if (mode === 'pending') {
     filteredItems = filteredItems.filter((item) => item.status === 'pending');
+  } else if (mode === 'purchased') {
+    filteredItems = filteredItems.filter((item) => {
+      const purchasedBy = Array.isArray(item.purchasedBy) ? item.purchasedBy : [];
+      return item.buyerId === userId || purchasedBy.includes(userId);
+    });
   } else if (mode === 'approved') {
     filteredItems = filteredItems.filter((item) => item.status === 'approved');
   }
@@ -391,8 +406,21 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ success: false, message: '未登录' }, { status: 401 });
   }
 
-  const admin = await userManager.getUserById(userId);
-  if (!admin?.isAdmin) {
+  let isAdmin = false;
+  try {
+    const admin = await userManager.getUserById(userId);
+    isAdmin = Boolean(admin?.isAdmin);
+  } catch (error) {
+    const previewUser = await readDevPreviewUser(isLocalPreviewRequest(request));
+    if (previewUser?.id === userId && previewUser.isAdmin) {
+      console.warn('[图市] 本地数据库不可用，使用 .cache/material-preview.json 管理员身份预览:', error);
+      isAdmin = true;
+    } else {
+      throw error;
+    }
+  }
+
+  if (!isAdmin) {
     return NextResponse.json({ success: false, message: '无管理员权限' }, { status: 403 });
   }
 
@@ -401,6 +429,28 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ success: false, message: '缺少审核参数' }, { status: 400 });
   }
 
-  const item = await marketManager.reviewItem(body.id, body.status, body.rejectionReason);
-  return NextResponse.json({ success: true, data: item });
+  try {
+    const item = await marketManager.reviewItem(body.id, body.status, body.rejectionReason);
+    return NextResponse.json({ success: true, data: item });
+  } catch (error) {
+    if (!isLocalPreviewRequest(request)) throw error;
+    const items = await readLocalPreviewMarketItems(true);
+    if (!items) throw error;
+    const index = items.findIndex((item) => item.id === body.id);
+    if (index < 0) {
+      return NextResponse.json({ success: false, message: '素材不存在' }, { status: 404 });
+    }
+    const now = new Date().toISOString();
+    const updatedItem: LocalPreviewMarketItem = {
+      ...items[index],
+      status: body.status,
+      rejectionReason: body.status === 'rejected' ? body.rejectionReason || '未通过审核' : null,
+      approvedAt: body.status === 'approved' ? now : null,
+      updatedAt: now,
+    };
+    items[index] = updatedItem;
+    await writeLocalPreviewMarketItems(items, true);
+    console.warn('[图市] 本地数据库不可用，已写入 .cache/market-preview.json 预览审核:', error);
+    return NextResponse.json({ success: true, data: updatedItem, preview: true });
+  }
 }
