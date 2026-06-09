@@ -29,7 +29,9 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family:
+    var(--font-geist-sans), "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
 }
 
 body::selection {
@@ -42,8 +44,16 @@ body::selection {
   min-height: 100vh;
   overflow: hidden;
   background:
-    radial-gradient(circle at 52% -8%, rgba(95, 112, 255, 0.2), transparent 34rem),
-    radial-gradient(circle at 12% 28%, rgba(124, 58, 237, 0.16), transparent 28rem),
+    radial-gradient(
+      circle at 52% -8%,
+      rgba(95, 112, 255, 0.2),
+      transparent 34rem
+    ),
+    radial-gradient(
+      circle at 12% 28%,
+      rgba(124, 58, 237, 0.16),
+      transparent 28rem
+    ),
     linear-gradient(180deg, #06070c 0%, #05060b 58%, #040409 100%);
   color: #fff;
 }
@@ -78,7 +88,10 @@ body::selection {
   background: rgba(0, 0, 0, 0.24);
   color: #fff;
   outline: none;
-  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .zaomeng-input::placeholder {
@@ -94,7 +107,9 @@ body::selection {
   background: linear-gradient(135deg, #8b5cf6, #2563eb);
   color: #fff;
   box-shadow: 0 14px 34px rgba(37, 99, 235, 0.22);
-  transition: filter 160ms ease, transform 160ms ease;
+  transition:
+    filter 160ms ease,
+    transform 160ms ease;
 }
 
 .zaomeng-primary-button:hover {
@@ -109,7 +124,10 @@ body::selection {
   border: 1px solid var(--zm-border);
   background: rgba(255, 255, 255, 0.055);
   color: rgba(255, 255, 255, 0.74);
-  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
 }
 
 .zaomeng-ghost-button:hover {
