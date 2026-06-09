@@ -79,10 +79,35 @@ type HeroMarketTile = {
   toneIndex?: number;
 };
 
+type DirectMarketListingDraft = {
+  imageFile: File | null;
+  imagePreviewUrl: string;
+  psdFile: File | null;
+  title: string;
+  description: string;
+  category: string;
+  tags: string;
+  pricePoints: number;
+};
+
 const MARKET_HERO_COLUMN_COUNT = 6;
 const MARKET_HERO_ROWS_PER_COLUMN = 8;
 const MARKET_HERO_IMAGE_LIMIT = 24;
 const PUBLIC_MARKET_PREVIEW_LIMIT = 36;
+const DIRECT_LISTING_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const DIRECT_LISTING_MAX_PSD_BYTES = 120 * 1024 * 1024;
+
+const DEFAULT_DIRECT_LISTING_DRAFT: DirectMarketListingDraft = {
+  imageFile: null,
+  imagePreviewUrl: "",
+  psdFile: null,
+  title: "",
+  description:
+    "适合手机壳铺货、商品展示和二次编辑使用。购买后可用于商品铺货，不可二次转售素材文件。",
+  category: "手机壳图案",
+  tags: "手机壳 彩绘 铺货",
+  pricePoints: 50,
+};
 
 const MARKET_HERO_FALLBACK_IMAGES: HeroMarketImage[] = [
   {
@@ -150,6 +175,14 @@ function getStableMarketImageRatio(seed: string) {
   return [1.18, 1.28, 1.38, 1.5][hash % 4];
 }
 
+function getFileTitle(fileName: string) {
+  return fileName
+    .replace(/\.[^.]+$/, "")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .slice(0, 60);
+}
+
 function MarketPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -180,6 +213,10 @@ function MarketPageContent() {
   const [imageSearchPreviewUrl, setImageSearchPreviewUrl] = useState("");
   const [imageSearchFileName, setImageSearchFileName] = useState("");
   const [isImageSearchDragging, setIsImageSearchDragging] = useState(false);
+  const [directListingDraft, setDirectListingDraft] =
+    useState<DirectMarketListingDraft | null>(null);
+  const [isSubmittingDirectListing, setIsSubmittingDirectListing] =
+    useState(false);
   const [marketBrowseLocked, setMarketBrowseLocked] = useState(false);
   const [marketToolbarReveal, setMarketToolbarReveal] = useState(0);
   const [showMarketBackToTop, setShowMarketBackToTop] = useState(false);
@@ -421,12 +458,143 @@ function MarketPageContent() {
     }
 
     resetImageSearchState();
-    setActiveTab("mine");
-    marketBrowseLockedRef.current = true;
-    setMarketBrowseLocked(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-    showToast("从订单结果图点击“上架”，可自定义标题、售价和 PSD。", "info");
+    setDirectListingDraft({ ...DEFAULT_DIRECT_LISTING_DRAFT });
   }, [requireLogin, resetImageSearchState, user?.id]);
+
+  const closeDirectListingDialog = useCallback(() => {
+    setDirectListingDraft((current) => {
+      if (current?.imagePreviewUrl) {
+        URL.revokeObjectURL(current.imagePreviewUrl);
+      }
+      return null;
+    });
+    setIsSubmittingDirectListing(false);
+  }, []);
+
+  const setDirectListingImage = useCallback((file: File | null) => {
+    if (!file) return;
+    const isImage =
+      file.type.startsWith("image/") ||
+      /\.(png|jpe?g|webp|gif)$/i.test(file.name);
+    if (!isImage) {
+      showToast("请上传 PNG、JPG、WebP 或 GIF 图片", "error");
+      return;
+    }
+    if (file.size > DIRECT_LISTING_MAX_IMAGE_BYTES) {
+      showToast("上架图片需小于 10MB", "error");
+      return;
+    }
+
+    const nextPreviewUrl = URL.createObjectURL(file);
+    setDirectListingDraft((current) => {
+      if (!current) {
+        URL.revokeObjectURL(nextPreviewUrl);
+        return current;
+      }
+      if (current.imagePreviewUrl) {
+        URL.revokeObjectURL(current.imagePreviewUrl);
+      }
+      return {
+        ...current,
+        imageFile: file,
+        imagePreviewUrl: nextPreviewUrl,
+        title: current.title.trim() ? current.title : getFileTitle(file.name),
+      };
+    });
+  }, []);
+
+  const setDirectListingPsd = useCallback((file: File | null) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".psd")) {
+      showToast("只支持上传 PSD 文件", "error");
+      return;
+    }
+    if (file.size <= 0 || file.size > DIRECT_LISTING_MAX_PSD_BYTES) {
+      showToast("PSD 文件需小于 120MB", "error");
+      return;
+    }
+    setDirectListingDraft((current) =>
+      current ? { ...current, psdFile: file } : current,
+    );
+  }, []);
+
+  const submitDirectListing = useCallback(async () => {
+    if (!user?.id) {
+      requireLogin("/market");
+      return;
+    }
+    if (!directListingDraft?.imageFile) {
+      showToast("请先上传要上架的图片", "error");
+      return;
+    }
+
+    const title = directListingDraft.title.trim();
+    const pricePoints = Math.max(
+      1,
+      Math.min(9999, Math.floor(Number(directListingDraft.pricePoints) || 0)),
+    );
+    if (!title) {
+      showToast("请填写素材标题", "error");
+      return;
+    }
+    if (!Number.isFinite(pricePoints) || pricePoints < 1) {
+      showToast("售价积分需大于 0", "error");
+      return;
+    }
+
+    setIsSubmittingDirectListing(true);
+    try {
+      const formData = new FormData();
+      formData.append("imageFile", directListingDraft.imageFile);
+      formData.append("title", title);
+      formData.append("description", directListingDraft.description.trim());
+      formData.append("category", directListingDraft.category.trim() || "手机壳图案");
+      formData.append("tags", directListingDraft.tags.trim());
+      formData.append("pricePoints", String(pricePoints));
+      if (directListingDraft.psdFile) {
+        formData.append("psdMode", "upload");
+        formData.append("psdFile", directListingDraft.psdFile);
+      } else {
+        formData.append("psdMode", "none");
+      }
+
+      const response = await fetch("/api/market/listings", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      const data = await parseJsonApiResponse<ApiResponse<MarketItem>>(
+        response,
+        "提交上架失败",
+      );
+      if (!response.ok || !data.success || !data.data) {
+        throw new Error(toUserFacingErrorMessage(data.message, "提交上架失败"));
+      }
+
+      showToast("已提交审核，审核通过后会展示到图市", "success");
+      closeDirectListingDialog();
+      setActiveTab("mine");
+      marketBrowseLockedRef.current = true;
+      setMarketBrowseLocked(true);
+      setItems((current) => [
+        data.data as MarketItem,
+        ...current.filter((item) => item.id !== data.data?.id),
+      ]);
+      window.dispatchEvent(new CustomEvent("marketPendingChanged"));
+      void loadMarketStats();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (error) {
+      showToast(toUserFacingErrorFromUnknown(error, "提交上架失败"), "error");
+    } finally {
+      setIsSubmittingDirectListing(false);
+    }
+  }, [
+    closeDirectListingDialog,
+    directListingDraft,
+    loadMarketStats,
+    requireLogin,
+    user?.id,
+  ]);
 
   const runImageSearch = useCallback(
     async (file: File) => {
@@ -585,6 +753,14 @@ function MarketPageContent() {
       }
     };
   }, [imageSearchPreviewUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (directListingDraft?.imagePreviewUrl) {
+        URL.revokeObjectURL(directListingDraft.imagePreviewUrl);
+      }
+    };
+  }, [directListingDraft?.imagePreviewUrl]);
 
   useEffect(() => {
     void loadMarketStats();
@@ -1405,28 +1581,30 @@ function MarketPageContent() {
           onClick={openMarketListingEntry}
           aria-label="上架卖图"
           title="上架卖图"
-          className="group grid h-11 w-11 place-items-center rounded-[1.05rem] border border-emerald-200/18 bg-emerald-300/[0.12] text-emerald-50 shadow-[0_18px_48px_rgba(0,0,0,0.28)] backdrop-blur-2xl transition-all duration-300 hover:-translate-y-0.5 hover:border-emerald-100/42 hover:bg-emerald-300/[0.18] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200/50"
+          className="group grid h-11 w-11 place-items-center rounded-full bg-transparent p-0 text-emerald-50 transition-all duration-300 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200/50"
         >
-          <svg
-            className="h-4.5 w-4.5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.8}
-              d="M12 5v14m7-7H5"
-            />
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.8}
-              d="M6.5 19.5h11"
-            />
-          </svg>
+          <span className="grid h-10 w-10 place-items-center rounded-full border border-emerald-200/18 bg-emerald-300/[0.12] shadow-[0_18px_48px_rgba(0,0,0,0.28)] backdrop-blur-2xl transition group-hover:border-emerald-100/42 group-hover:bg-emerald-300/[0.18]">
+            <svg
+              className="h-4.5 w-4.5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.8}
+                d="M12 5v14m7-7H5"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.8}
+                d="M6.5 19.5h11"
+              />
+            </svg>
+          </span>
           <span className="sr-only">上架卖图</span>
         </button>
 
@@ -1435,25 +1613,298 @@ function MarketPageContent() {
           onClick={scrollToMarketTop}
           aria-label="回到图市顶部"
           title="回到顶部"
-          className={`group grid h-11 w-11 place-items-center rounded-[1.05rem] border border-white/12 bg-black/68 text-white/78 shadow-[0_18px_48px_rgba(0,0,0,0.34)] backdrop-blur-2xl transition-all duration-300 hover:-translate-y-0.5 hover:border-[#31a8ff]/42 hover:bg-white/[0.12] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#31a8ff]/55 ${showMarketBackToTop ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0"}`}
+          className={`group grid h-11 w-11 place-items-center rounded-full bg-transparent p-0 text-white/78 transition-all duration-300 hover:-translate-y-0.5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#31a8ff]/55 ${showMarketBackToTop ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0"}`}
         >
-          <svg
-            className="h-4 w-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.8}
-              d="M12 19V5m0 0 6 6M12 5l-6 6"
-            />
-          </svg>
+          <span className="grid h-10 w-10 place-items-center rounded-full border border-white/12 bg-black/68 shadow-[0_18px_48px_rgba(0,0,0,0.34)] backdrop-blur-2xl transition group-hover:border-[#31a8ff]/42 group-hover:bg-white/[0.12]">
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.8}
+                d="M12 19V5m0 0 6 6M12 5l-6 6"
+              />
+            </svg>
+          </span>
           <span className="sr-only">回到顶部</span>
         </button>
       </div>
+
+      {directListingDraft ? (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/78 px-4 py-6 backdrop-blur-md"
+          onClick={() => {
+            if (!isSubmittingDirectListing) closeDirectListingDialog();
+          }}
+        >
+          <div
+            className="grid max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-[1.65rem] border border-white/12 bg-[#07080c]/96 shadow-[0_28px_96px_rgba(0,0,0,0.58)] lg:grid-cols-[minmax(0,0.92fr)_minmax(360px,0.9fr)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="min-h-[360px] bg-[radial-gradient(circle_at_35%_18%,rgba(52,211,153,0.16),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.015))] p-4 sm:p-5">
+              <label
+                className="group relative flex h-full min-h-[360px] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-[1.35rem] border border-dashed border-emerald-200/22 bg-black/34 p-5 text-center transition hover:border-emerald-100/48 hover:bg-emerald-300/[0.055]"
+                onDragOver={(event) => {
+                  event.preventDefault();
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setDirectListingImage(event.dataTransfer.files.item(0));
+                }}
+              >
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  className="sr-only"
+                  disabled={isSubmittingDirectListing}
+                  onChange={(event) => {
+                    setDirectListingImage(event.currentTarget.files?.item(0) || null);
+                    event.currentTarget.value = "";
+                  }}
+                />
+                {directListingDraft.imagePreviewUrl ? (
+                  <>
+                    <SafeImage
+                      src={directListingDraft.imagePreviewUrl}
+                      alt="待上架图片预览"
+                      fill
+                      sizes="(min-width: 1024px) 48vw, 92vw"
+                      className="object-contain p-5"
+                    />
+                    <div className="absolute inset-x-4 bottom-4 rounded-2xl border border-white/10 bg-black/68 px-4 py-3 text-left shadow-[0_18px_42px_rgba(0,0,0,0.34)] backdrop-blur-xl">
+                      <p className="text-sm font-semibold text-white">
+                        {directListingDraft.imageFile?.name || "已选择图片"}
+                      </p>
+                      <p className="mt-1 text-xs text-white/52">
+                        点击或拖拽可重新选择上架图片
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <div className="relative z-10 flex max-w-sm flex-col items-center">
+                    <span className="grid h-16 w-16 place-items-center rounded-full border border-emerald-100/20 bg-emerald-300/[0.12] text-emerald-100 shadow-[0_18px_48px_rgba(16,185,129,0.16)]">
+                      <svg
+                        className="h-7 w-7"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={1.7}
+                          d="M12 16V4m0 0 4.5 4.5M12 4 7.5 8.5M5 20h14"
+                        />
+                      </svg>
+                    </span>
+                    <h2 className="mt-5 text-2xl font-semibold text-white">
+                      上传图片上架
+                    </h2>
+                    <p className="mt-3 text-sm leading-6 text-white/54">
+                      点击选择或直接拖拽图片到这里，填写标题、标签和售价后提交审核。
+                    </p>
+                    <p className="mt-3 rounded-full border border-white/10 bg-white/[0.045] px-3 py-1.5 text-xs text-white/42">
+                      支持 PNG / JPG / WebP / GIF，最大 10MB
+                    </p>
+                  </div>
+                )}
+              </label>
+            </div>
+
+            <div className="min-h-0 overflow-y-auto p-5 sm:p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200/70">
+                    Market Listing
+                  </p>
+                  <h2 className="mt-2 text-2xl font-semibold text-white">
+                    自定义上架卖图
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-white/46">
+                    上传自己的图案素材，提交后进入待审核，审核通过后用户可用积分购买。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeDirectListingDialog}
+                  disabled={isSubmittingDirectListing}
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-white/10 bg-white/[0.045] text-white/58 transition hover:bg-white/[0.09] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label="关闭上架弹窗"
+                >
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.8}
+                      d="M6 6l12 12M18 6 6 18"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="mt-6 space-y-4">
+                <label className="block">
+                  <span className="text-sm font-medium text-white/72">
+                    素材标题
+                  </span>
+                  <input
+                    value={directListingDraft.title}
+                    maxLength={120}
+                    disabled={isSubmittingDirectListing}
+                    onChange={(event) =>
+                      setDirectListingDraft((current) =>
+                        current ? { ...current, title: event.target.value } : current,
+                      )
+                    }
+                    placeholder="例如：复古花卉手机壳图案"
+                    className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.055] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/24 focus:border-emerald-200/36 focus:bg-white/[0.075]"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-medium text-white/72">
+                    素材说明
+                  </span>
+                  <textarea
+                    value={directListingDraft.description}
+                    rows={4}
+                    maxLength={1000}
+                    disabled={isSubmittingDirectListing}
+                    onChange={(event) =>
+                      setDirectListingDraft((current) =>
+                        current
+                          ? { ...current, description: event.target.value }
+                          : current,
+                      )
+                    }
+                    className="mt-2 w-full resize-none rounded-2xl border border-white/10 bg-white/[0.055] px-4 py-3 text-sm leading-6 text-white outline-none transition placeholder:text-white/24 focus:border-emerald-200/36 focus:bg-white/[0.075]"
+                  />
+                </label>
+
+                <div className="grid gap-4 sm:grid-cols-[1fr_140px]">
+                  <label className="block">
+                    <span className="text-sm font-medium text-white/72">
+                      分类
+                    </span>
+                    <input
+                      value={directListingDraft.category}
+                      disabled={isSubmittingDirectListing}
+                      onChange={(event) =>
+                        setDirectListingDraft((current) =>
+                          current
+                            ? { ...current, category: event.target.value }
+                            : current,
+                        )
+                      }
+                      className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.055] px-4 py-3 text-sm text-white outline-none transition focus:border-emerald-200/36 focus:bg-white/[0.075]"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="text-sm font-medium text-white/72">
+                      售价积分
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={9999}
+                      value={directListingDraft.pricePoints}
+                      disabled={isSubmittingDirectListing}
+                      onChange={(event) =>
+                        setDirectListingDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                pricePoints: Number(event.target.value) || 0,
+                              }
+                            : current,
+                        )
+                      }
+                      className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.055] px-4 py-3 text-sm text-white outline-none transition focus:border-emerald-200/36 focus:bg-white/[0.075]"
+                    />
+                  </label>
+                </div>
+
+                <label className="block">
+                  <span className="text-sm font-medium text-white/72">
+                    标签
+                  </span>
+                  <input
+                    value={directListingDraft.tags}
+                    disabled={isSubmittingDirectListing}
+                    onChange={(event) =>
+                      setDirectListingDraft((current) =>
+                        current ? { ...current, tags: event.target.value } : current,
+                      )
+                    }
+                    placeholder="用空格或逗号分隔，例如：手机壳 彩绘 花卉"
+                    className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.055] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/24 focus:border-emerald-200/36 focus:bg-white/[0.075]"
+                  />
+                </label>
+
+                <label className="flex cursor-pointer items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 transition hover:border-white/18 hover:bg-white/[0.065]">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-white/76">
+                      PSD 图层文件（可选）
+                    </p>
+                    <p className="mt-1 truncate text-xs text-white/42">
+                      {directListingDraft.psdFile
+                        ? directListingDraft.psdFile.name
+                        : "可上传 PSD，买家购买后可下载图层文件"}
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-full border border-white/12 bg-black/36 px-3 py-1.5 text-xs font-semibold text-white/64">
+                    选择 PSD
+                  </span>
+                  <input
+                    type="file"
+                    accept=".psd,application/octet-stream"
+                    className="sr-only"
+                    disabled={isSubmittingDirectListing}
+                    onChange={(event) => {
+                      setDirectListingPsd(event.currentTarget.files?.item(0) || null);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+
+              <div className="mt-7 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={closeDirectListingDialog}
+                  disabled={isSubmittingDirectListing}
+                  className="rounded-full border border-white/10 bg-white/[0.045] px-5 py-3 text-sm font-semibold text-white/62 transition hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={submitDirectListing}
+                  disabled={
+                    isSubmittingDirectListing || !directListingDraft.imageFile
+                  }
+                  className="rounded-full border border-emerald-100/28 bg-emerald-300 px-6 py-3 text-sm font-semibold text-black shadow-[0_16px_42px_rgba(52,211,153,0.2)] transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.08] disabled:text-white/34 disabled:shadow-none"
+                >
+                  {isSubmittingDirectListing ? "提交中..." : "提交审核"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {selectedItem ? (
         <div
