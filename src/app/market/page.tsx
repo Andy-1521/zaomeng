@@ -193,21 +193,31 @@ function MarketPageContent() {
   const tabs = useMemo(() => {
     const base: Array<{ key: MarketTab; label: string; count?: number }> = [
       { key: "market", label: "市场" },
-      { key: "purchased", label: "已购" },
-      { key: "mine", label: "我的上架" },
     ];
-    if (user?.isAdmin)
+
+    if (user?.id) {
+      base.push(
+        { key: "purchased", label: "已购" },
+        { key: "mine", label: "我的上架" },
+      );
+    }
+
+    if (user?.isAdmin) {
       base.push({ key: "pending", label: "待审核", count: pendingCount });
+    }
+
     return base;
-  }, [pendingCount, user?.isAdmin]);
+  }, [pendingCount, user?.id, user?.isAdmin]);
 
   const marketToolbarPinned = activeTab !== "market" || marketBrowseLocked;
   const publicMarketLocked = !user?.id && activeTab === "market";
   const visibleItems = useMemo(
-    () => publicMarketLocked ? items.slice(0, PUBLIC_MARKET_PREVIEW_LIMIT) : items,
+    () =>
+      publicMarketLocked ? items.slice(0, PUBLIC_MARKET_PREVIEW_LIMIT) : items,
     [items, publicMarketLocked],
   );
-  const hasMorePublicItems = publicMarketLocked && items.length > visibleItems.length;
+  const hasMorePublicItems =
+    publicMarketLocked && items.length > visibleItems.length;
 
   const marketMasonryColumns = useMemo(() => {
     const displayColumnCount = Math.max(
@@ -280,10 +290,13 @@ function MarketPageContent() {
     void refreshUser();
   }, [isLoading, refreshUser, user?.id]);
 
-  const requireLogin = useCallback((next = "/market") => {
-    showToast("登录后可继续使用完整图市功能", "info");
-    router.push(`/login?next=${encodeURIComponent(next)}`);
-  }, [router]);
+  const requireLogin = useCallback(
+    (next = "/market") => {
+      showToast("登录后可继续使用完整图市功能", "info");
+      router.push(`/login?next=${encodeURIComponent(next)}`);
+    },
+    [router],
+  );
 
   useEffect(() => {
     if (!user?.isAdmin) return;
@@ -291,6 +304,12 @@ function MarketPageContent() {
       setActiveTab("pending");
     }
   }, [searchParams, user?.isAdmin]);
+
+  useEffect(() => {
+    if (!user?.id && activeTab !== "market") {
+      setActiveTab("market");
+    }
+  }, [activeTab, user?.id]);
 
   const loadMarketStats = useCallback(async () => {
     if (!user?.isAdmin) {
@@ -976,15 +995,6 @@ function MarketPageContent() {
                         >
                           向下逛图市
                         </button>
-                        {!user?.id ? (
-                          <button
-                            type="button"
-                            onClick={() => requireLogin('/market')}
-                            className="rounded-full border border-cyan-200/20 bg-cyan-300/[0.08] px-5 py-2.5 text-sm font-medium text-cyan-100 transition hover:border-cyan-100/38 hover:bg-cyan-300/[0.14]"
-                          >
-                            登录解锁详情
-                          </button>
-                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -1188,10 +1198,12 @@ function MarketPageContent() {
 
               {publicMarketLocked ? (
                 <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-[1.35rem] border border-cyan-200/14 bg-cyan-300/[0.055] px-4 py-3 text-sm text-cyan-50/72">
-                  <span>游客模式：可搜索和预览图市首屏素材，点击详情、下载、已购/上架和加载更多需要登录。</span>
+                  <span>
+                    游客模式：可搜索和预览图市首屏素材，点击详情、下载、已购/上架和加载更多需要登录。
+                  </span>
                   <button
                     type="button"
-                    onClick={() => requireLogin('/market')}
+                    onClick={() => requireLogin("/market")}
                     className="rounded-full border border-cyan-100/24 bg-cyan-200/[0.1] px-3 py-1.5 text-xs font-semibold text-cyan-50 transition hover:bg-cyan-200/[0.16]"
                   >
                     登录/注册
@@ -1361,7 +1373,7 @@ function MarketPageContent() {
                 <div className="mt-8 flex justify-center">
                   <button
                     type="button"
-                    onClick={() => requireLogin('/market')}
+                    onClick={() => requireLogin("/market")}
                     className="rounded-full border border-white/14 bg-white px-5 py-2.5 text-sm font-semibold text-black shadow-[0_14px_34px_rgba(255,255,255,0.12)] transition hover:bg-cyan-50"
                   >
                     登录后加载更多素材
