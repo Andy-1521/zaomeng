@@ -1356,7 +1356,7 @@ function MarketPageContent() {
                 </div>
               </div>
               {marketToolbarPinned ? (
-                <div className="h-[132px]" aria-hidden="true" />
+                <div className="h-[104px]" aria-hidden="true" />
               ) : null}
               {imageSearchActive ? (
                 <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-[1.3rem] border border-cyan-300/14 bg-cyan-300/[0.055] px-3 py-3">
