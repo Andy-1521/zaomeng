@@ -38,12 +38,13 @@ Also read `docs/ai-ops-handoff.md` before any maintenance, Git, deployment, prod
 - Combined local check: `pnpm check`
 - Build: `pnpm build`
 - Start locally: `pnpm start`
+- Deploy production: `pnpm deploy:production`（只发布到腾讯云香港 `https://zaomengai.icu`）
 - Restart production: `sudo systemctl restart zaomeng-web.service`
 - Check production status: `systemctl is-active zaomeng-web.service`
 
 Local project path: `/Users/andy/Documents/zaomeng/zaomeng/project/projects`
 Production project path: `/home/ubuntu/zaomeng`
-Production URL: `https://zaomengai.icu`
+Production URL: `https://zaomengai.icu`（唯一生产公网入口；不要再使用 Vercel 或其它域名作为生产入口）
 
 ## Release Workflow
 

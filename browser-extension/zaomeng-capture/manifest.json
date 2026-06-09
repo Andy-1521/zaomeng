@@ -12,7 +12,7 @@
   "permissions": ["contextMenus", "storage", "tabs"],
   "host_permissions": [
     "<all_urls>",
-    "http://localhost:5000/*"
+    "https://zaomengai.icu/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -34,7 +34,7 @@
     },
     {
       "matches": [
-        "http://localhost:5000/*"
+        "https://zaomengai.icu/*"
       ],
       "js": ["site-bridge.js"],
       "run_at": "document_idle"

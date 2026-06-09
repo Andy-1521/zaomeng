@@ -1,6 +1,6 @@
 # 造梦 AI 部署验收流程
 
-最后更新：2026-05-28
+最后更新：2026-06-10
 
 ## 固定原则
 
@@ -9,9 +9,17 @@
 - 每次修改后先启动本地预览给用户验收，默认地址为 `http://localhost:5001`。
 - 用户明确确认本地预览没问题后，才能部署生产给真实用户使用。
 - 每次生产发布前都要备份到 GitHub，提交信息使用 `backup: YYYY-MM-DD 摘要`。
-- 当前生产部署在腾讯云香港服务器，不再走 Vercel Preview / Production。
+- 当前生产只部署在腾讯云香港服务器；唯一生产公网入口是 `https://zaomengai.icu`，不再使用 Vercel Preview / Production 或其它域名作为生产入口。
 - 生产数据优先保护：不直接改生产数据库、不清空生产素材、不覆盖 `/home/ubuntu/zaomeng/.env.local`。
-- 当前正式生产基线：生产地址 `https://zaomengai.icu`，服务器 `/home/ubuntu/zaomeng/.deploy-sha` 记录当前发布的 Git commit。
+- 当前正式生产基线：生产地址只认 `https://zaomengai.icu`，服务器 `/home/ubuntu/zaomeng/.deploy-sha` 记录当前发布的 Git commit。
+
+
+## 2026-06-10 生产入口清理
+
+- 生产公网入口唯一为 `https://zaomengai.icu`。
+- 本地 `localhost:5001` 只用于开发预览和用户验收，不是生产入口。
+- Vercel 相关发布脚本和配置已移除；后续发布只使用 `scripts/deploy-production.sh` / `pnpm deploy:production`。
+- 浏览器插件模板默认站点已改为 `https://zaomengai.icu`；插件下载接口仍会按当前请求域名动态打包，但生产页只应从唯一生产域名下载。
 
 ## 网站作用
 
@@ -88,7 +96,7 @@
 - 发布脚本必须先在远程临时目录构建成功，再短暂停服务切换到 `/home/ubuntu/zaomeng`。
 - 发布时保留生产服务器上的 `/home/ubuntu/zaomeng/.env.local`。
 - 发布时保留 `/home/ubuntu/zaomeng/.coze-logs`。
-- 不同步 `.git`、`node_modules`、`.next`、`.vercel`、日志、构建产物和运行生成素材。
+- 不同步 `.git`、`node_modules`、`.next`、日志、构建产物和运行生成素材；项目已移除 Vercel 发布配置，不要重新添加。
 - 生产发布失败时优先恢复 `/home/ubuntu/zaomeng-prev-*` 上一个目录，并重启 `zaomeng-web`。
 - 发布脚本部署后只保留最近 1 个 `/home/ubuntu/zaomeng-prev-*` 回滚目录，避免服务器堆积旧版本。
 - 禁止执行空变量拼出的远程路径，例如 `/home/ubuntu/$name` 在 `$name` 为空时会变成 `/home/ubuntu/`，这是生产事故级风险。
@@ -111,7 +119,7 @@
 ## 禁止事项
 
 - 不要跳过本地预览和用户确认直接切生产。
-- 不要提交 `.env.local`、`.vercel/`、日志、构建产物或运行生成素材。
+- 不要提交 `.env.local`、日志、构建产物或运行生成素材；不要恢复 Vercel 发布配置。
 - 不要把测试账号、测试兑换码或临时数据留到生产数据库。
 - 不要在用户未确认前影响生产线上用户。
 - 不要恢复本地 public 作为 OSS 上传失败后的替代存储。

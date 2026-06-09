@@ -1,8 +1,8 @@
 # 造梦项目记忆文档
 
-最后更新：2026-06-04
+最后更新：2026-06-10
 
-本文档是当前项目交接基线。旧的“备用目标、降级、回退本地/URL/模板”、旧服务器路径和 Vercel 发布说明已经失效，后续接手时以本文档为准。
+本文档是当前项目交接基线。旧的“备用目标、降级、回退本地/URL/模板”、旧服务器路径和 Vercel 发布说明已经失效，后续接手时以本文档为准。生产公网入口唯一为 `https://zaomengai.icu`。
 
 
 ## AI 运维交接补充
@@ -17,22 +17,31 @@
 
 2026-06-04 已完成 Git 基线修复：本地 `main`、GitHub `origin/main` 和生产 `/home/ubuntu/zaomeng/.deploy-sha` 均对齐到 `8aa7a1f`；旧 `origin/main` 已备份到 `backup/2026-06-04-old-origin-main-before-prod-sync`。
 
+
+## 2026-06-10 生产入口和生产数据确认
+
+- 生产公网入口唯一为 `https://zaomengai.icu`。不要再把 Vercel、其它域名或 localhost 作为生产入口。
+- `localhost:5001` 仅用于本地预览和用户验收；生产服务器内部 `127.0.0.1:5000` 仅供 Nginx 反代和服务器本机 smoke。
+- 已移除 Vercel 发布脚本和配置，发布只走 `scripts/deploy-production.sh` / `pnpm deploy:production`。
+- 浏览器插件模板默认站点改为 `https://zaomengai.icu`，生产插件包只应从 `https://zaomengai.icu/plugin` 下载。
+- 2026-06-09/10 生产全链路 smoke 期间，生产数据库真实用户数据未做更新或删除；只执行了安全建表初始化（补齐 `market_items` / `market_purchases`）以及 `assistant-prod-smoke-*` / `assistant-real-smoke@example.test` 测试账号和关联测试记录的创建、验证、清理。最终确认 smoke 测试账号残留为 0。
+
 ## 当前结论
 
 - 本地主项目路径：`/Users/andy/Documents/zaomeng/zaomeng/project/projects`
 - 本地交接根目录：`/Users/andy/Documents/zaomeng/zaomeng`
 - 生产项目路径：`/home/ubuntu/zaomeng`
-- 公网入口：`https://zaomengai.icu`
+- 公网入口：`https://zaomengai.icu`（唯一生产公网入口）
 - 生产服务：`zaomeng-web.service`
 - 运行方式：systemd 启动 `next start`，Nginx 反代到 `127.0.0.1:5000`
 - 运行配置：`/home/ubuntu/zaomeng/.env.local`
 - 应用日志：`/home/ubuntu/zaomeng/.coze-logs/systemd-web.log`
 - 错误日志：`/home/ubuntu/zaomeng/.coze-logs/systemd-web-error.log`
 - 当前服务状态：已完成构建和重启验证，`zaomeng-web.service` 为 `active`
-- 当前正式生产基线：公网入口 `https://zaomengai.icu`，服务器 `/home/ubuntu/zaomeng/.deploy-sha` 记录当前发布的 Git commit
+- 当前正式生产基线：公网入口只认 `https://zaomengai.icu`，服务器 `/home/ubuntu/zaomeng/.deploy-sha` 记录当前发布的 Git commit
 - 当前核心原则：只有主链路；没有备用、没有降级、没有失败后换路；失败要明确失败并按积分规则补偿
 - 当前发布原则：先本地预览给用户验收，再备份 GitHub，最后部署腾讯云香港生产服务器
-- 当前数据原则：后续优化尽量不动生产数据；排查生产问题先只读查询，任何修复性写入必须先得到用户确认
+- 当前数据原则：后续优化尽量不动生产数据；排查生产问题先只读查询，任何修复性写入必须先得到用户确认。2026-06-09/10 生产巡检只创建并清理 `assistant-prod-smoke-*` / `assistant-real-smoke@example.test` 测试数据，未更新或删除真实用户数据
 
 ## 网站作用
 
@@ -341,11 +350,11 @@ pnpm build
 - 应用目录：`/home/ubuntu/zaomeng`
 - 服务名：`zaomeng-web`
 - Next.js 端口：`127.0.0.1:5000`
-- 公网域名：`https://zaomengai.icu`
+- 公网域名：`https://zaomengai.icu`（唯一生产公网入口）
 - Nginx：80/443 反代到本机 5000
 - 对象存储：阿里云 OSS 香港区域，生产桶 `zaomengai-hk-20260527`
 
-发布时使用 `scripts/deploy-production.sh` 从本地 rsync 到服务器临时构建目录，排除 `.git`、`.DS_Store`、`node_modules`、`.next`、`.vercel`、`.env.local`、日志和运行生成素材。服务器上的 `/home/ubuntu/zaomeng/.env.local` 必须保留并复制到新版本目录。
+发布时使用 `scripts/deploy-production.sh` 从本地 rsync 到服务器临时构建目录，排除 `.git`、`.DS_Store`、`node_modules`、`.next`、`.env.local`、日志和运行生成素材。服务器上的 `/home/ubuntu/zaomeng/.env.local` 必须保留并复制到新版本目录。Vercel 发布配置已移除，不要恢复。
 
 发布脚本部署成功后只保留最近 1 个 `/home/ubuntu/zaomeng-prev-*` 回滚目录。当前服务器已清理为：
 

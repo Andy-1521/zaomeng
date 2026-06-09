@@ -1,6 +1,6 @@
 # AI 运维交接与高危操作清单
 
-最后更新：2026-06-09 14:10 CST
+最后更新：2026-06-10 00:55 CST
 维护人：Codex AI 运维会话
 
 本文档给后续开发 AI / 运维 AI 每次接手前阅读。目标是避免误动生产、误回退主链路、误覆盖 GitHub 主分支、误泄露密钥或误写生产数据。
@@ -26,13 +26,26 @@
 /home/ubuntu/zaomeng
 ```
 
-生产公网：
+生产公网（唯一生产入口）：
 
 ```text
 https://zaomengai.icu
 ```
 
 
+
+## 2026-06-10 生产入口清理与生产数据确认
+
+本次按用户要求确认并清理生产入口：
+
+- 唯一生产公网入口：`https://zaomengai.icu`。
+- Vercel 发布脚本和配置已从项目移除；不要再使用 Vercel Preview / Production 或其它域名作为生产入口。
+- `localhost:5001` 只用于本地预览，`127.0.0.1:5000` 只用于生产服务器本机 Next.js 监听和本机 smoke，不是公网生产入口。
+- 浏览器插件模板默认站点已改为 `https://zaomengai.icu`；生产插件包只应从 `https://zaomengai.icu/plugin` 下载。
+- 生产数据库真实用户数据未做更新或删除。2026-06-09/10 的生产巡检只涉及：安全补齐 `market_items` / `market_purchases` 表、创建临时 `assistant-prod-smoke-*` / `assistant-real-smoke@example.test` 测试账号与测试订单/素材/市场记录、验证后硬清理这些测试数据。最终检查：`smoke_users = 0`。
+- 当前生产服务确认：`zaomeng-web.service` 为 `active`，`/home/ubuntu/zaomeng/.deploy-sha` 为 `1cedb2c`。
+
+后续注意：清理生产测试数据只能限定 `assistant-prod-smoke-*` / `assistant-real-smoke@example.test` 这类隔离账号；不得对真实用户做批量删除、积分重算或订单清理。
 
 ## 2026-06-09 公开首页 / 游客图市改造
 

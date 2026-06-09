@@ -1,13 +1,13 @@
-const WEBSITE_ORIGIN = 'http://localhost:5000'
+const WEBSITE_ORIGIN = 'https://zaomengai.icu'
 const WEBSITE_PATTERNS = [
-  'http://localhost:5000/*',
+  'https://zaomengai.icu/*',
 ]
 const WORKSPACE_PATH = '/home'
 
 const CONTEXT_MENU_ID = 'ZAOMENG_SAVE_IMAGE'
 
 const isWebsiteUrl = (url = '') => {
-  return url.startsWith('http://localhost:5000/')
+  return url.startsWith('https://zaomengai.icu/')
 }
 
 const showTabTip = (tabId, message, status = 'info', durationMs = 2600) => {
