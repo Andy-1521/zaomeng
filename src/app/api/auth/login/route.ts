@@ -3,6 +3,14 @@ import { userManager } from '@/storage/database';
 import { AUTH_COOKIE_NAME, buildAuthCookieUser, createAuthCookieValue, getAuthCookieOptions } from '@/lib/serverAuth';
 import { readDevPreviewUserByEmail } from '@/lib/devPreviewUser';
 
+
+function isLocalPreviewRequest(request: NextRequest) {
+  const hostname = request.nextUrl.hostname;
+  const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  const isLocalWorkspace = process.cwd().startsWith('/Users/andy/Documents/zaomeng/');
+  return isLocalHost && isLocalWorkspace;
+}
+
 /**
  * 用户登录接口（使用本地 MySQL 数据库验证）
  *
@@ -67,7 +75,7 @@ export async function POST(request: NextRequest) {
     console.error('登录失败:', error);
 
     const email = typeof body?.email === 'string' ? body.email : '';
-    const previewUser = email ? await readDevPreviewUserByEmail(email) : null;
+    const previewUser = email ? await readDevPreviewUserByEmail(email, isLocalPreviewRequest(request)) : null;
 
     if (previewUser) {
       const authUser = buildAuthCookieUser(previewUser);

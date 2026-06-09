@@ -3,6 +3,14 @@ import { userManager } from '@/storage/database';
 import { getCookieUserId } from '@/lib/serverAuth';
 import { readDevPreviewUser } from '@/lib/devPreviewUser';
 
+
+function isLocalPreviewRequest(request: NextRequest) {
+  const hostname = request.nextUrl.hostname;
+  const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  const isLocalWorkspace = process.cwd().startsWith('/Users/andy/Documents/zaomeng/');
+  return isLocalHost && isLocalWorkspace;
+}
+
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误';
 }
@@ -68,7 +76,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: unknown) {
     console.error('获取用户信息失败:', error);
-    const previewUser = await readDevPreviewUser();
+    const previewUser = await readDevPreviewUser(isLocalPreviewRequest(request));
 
     if (previewUser && userId === previewUser.id) {
       return NextResponse.json({

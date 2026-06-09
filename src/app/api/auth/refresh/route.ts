@@ -3,6 +3,14 @@ import { userManager } from '@/storage/database';
 import { AUTH_COOKIE_NAME, buildAuthCookieUser, createAuthCookieValue, getAuthCookieOptions, getCookieUserId } from '@/lib/serverAuth';
 import { readDevPreviewUser } from '@/lib/devPreviewUser';
 
+
+function isLocalPreviewRequest(request: NextRequest) {
+  const hostname = request.nextUrl.hostname;
+  const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  const isLocalWorkspace = process.cwd().startsWith('/Users/andy/Documents/zaomeng/');
+  return isLocalHost && isLocalWorkspace;
+}
+
 /**
  * 会话刷新接口
  *
@@ -69,7 +77,7 @@ export async function POST(request: NextRequest) {
     return response;
   } catch (error: unknown) {
     console.error('会话刷新失败:', error);
-    const previewUser = await readDevPreviewUser();
+    const previewUser = await readDevPreviewUser(isLocalPreviewRequest(request));
 
     if (previewUser && userId === previewUser.id && cookieUserId === previewUser.id) {
       const authUser = buildAuthCookieUser(previewUser);

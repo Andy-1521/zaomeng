@@ -10,8 +10,16 @@ import { inspectMarketPsd, inspectMarketPsdFromUrl } from '@/lib/marketPsd';
 const MAX_PSD_UPLOAD_BYTES = 120 * 1024 * 1024;
 const DEFAULT_PRICE_POINTS = 50;
 
-async function loadLocalPreviewMarketItems(keyword: string) {
-  if (process.env.NODE_ENV === 'production') return null;
+
+function isLocalPreviewRequest(request: NextRequest) {
+  const hostname = request.nextUrl.hostname;
+  const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  const isLocalWorkspace = process.cwd().startsWith('/Users/andy/Documents/zaomeng/');
+  return isLocalHost && isLocalWorkspace;
+}
+
+async function loadLocalPreviewMarketItems(keyword: string, allowLocalPreview = process.env.NODE_ENV !== 'production') {
+  if (!allowLocalPreview) return null;
   try {
     const filePath = join(process.cwd(), '.cache', 'market-preview.json');
     const raw = await readFile(filePath, 'utf8');
@@ -108,7 +116,7 @@ export async function GET(request: NextRequest) {
       data: await marketManager.listApproved(userId, { keyword, limit: 120 }),
     });
   } catch (error) {
-    const previewItems = await loadLocalPreviewMarketItems(keyword);
+    const previewItems = await loadLocalPreviewMarketItems(keyword, isLocalPreviewRequest(request));
     if (previewItems) {
       console.warn('[图市] 本地数据库不可用，使用 .cache/market-preview.json 预览数据:', error);
       return NextResponse.json({ success: true, data: previewItems, preview: true });

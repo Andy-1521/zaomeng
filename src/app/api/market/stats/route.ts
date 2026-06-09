@@ -3,6 +3,13 @@ import { marketManager, userManager } from '@/storage/database';
 import { getCookieUserId } from '@/lib/serverAuth';
 import { readDevPreviewUser } from '@/lib/devPreviewUser';
 
+
+function isLocalPreviewRequest(request: NextRequest) {
+  const hostname = request.nextUrl.hostname;
+  const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  const isLocalWorkspace = process.cwd().startsWith('/Users/andy/Documents/zaomeng/');
+  return isLocalHost && isLocalWorkspace;
+}
 export async function GET(request: NextRequest) {
   try {
     const userId = getCookieUserId(request);
@@ -20,7 +27,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('[图市] 获取统计失败:', error);
     const userId = getCookieUserId(request);
-    const previewUser = await readDevPreviewUser();
+    const previewUser = await readDevPreviewUser(isLocalPreviewRequest(request));
 
     if (previewUser?.isAdmin && previewUser.id === userId) {
       return NextResponse.json({ success: true, data: { pendingCount: 0 }, preview: true });

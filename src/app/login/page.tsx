@@ -206,6 +206,7 @@ export default function AuthPage() {
         setUser(result.data);
         showToast(`注册成功，已获得 ${result.data.points} 积分`, "success");
         router.replace(nextPath);
+        router.refresh();
       } else {
         showToast(
           toUserFacingErrorMessage(result.message, "注册失败，请稍后重试"),
@@ -237,6 +238,7 @@ export default function AuthPage() {
         setUser(result.data);
         showToast(`登录成功，欢迎回来，${result.data.username}`, "success");
         router.replace(nextPath);
+        router.refresh();
       } else {
         showToast(
           toUserFacingErrorMessage(result.message, "登录失败，请稍后重试"),

@@ -1,6 +1,6 @@
 # AI 运维交接与高危操作清单
 
-最后更新：2026-06-08 10:55 CST
+最后更新：2026-06-09 14:10 CST
 维护人：Codex AI 运维会话
 
 本文档给后续开发 AI / 运维 AI 每次接手前阅读。目标是避免误动生产、误回退主链路、误覆盖 GitHub 主分支、误泄露密钥或误写生产数据。
@@ -31,6 +31,22 @@
 ```text
 https://zaomengai.icu
 ```
+
+
+
+## 2026-06-09 公开首页 / 游客图市改造
+
+本次把网站首屏从登录页改为公开图市 / 以图搜图入口，但保留私人图库和交易操作登录保护：
+
+- `/` 现在直接进入 `/market`，游客可看到图市首页、以图搜图入口和首屏公开素材。
+- `/market` 不再因未登录自动跳 `/login`；游客可搜索和预览公开素材卡片。
+- 游客点击图市素材详情、已购、我的上架、加载更多、购买/下载等动作必须跳登录，登录后再继续。
+- 左侧“图库”入口未登录会跳 `/login?next=/home`；私人图库 `/home` 仍必须登录，`/api/plugin/captured-images` 未登录仍必须 401。
+- 本地 `next start -p 5001` 生产模式验证通过：`/` 307 到 `/market`；`/api/market/listings` 200；`/api/plugin/captured-images` 401；`/api/market/purchase` 401；in-app browser 中游客点击图市卡片跳 `/login?next=/market?item=...`，点击图库跳 `/login?next=/home`。
+
+安全边界：公开图市数据只能来自 `/api/market/listings?mode=approved` 或游客图搜；不要复用私人图库接口给游客展示真实用户图库。localhost 生产模式允许 `.cache/market-preview.json` 只读预览，真实生产域名数据库异常时不应依赖本地缓存兜底。
+
+补充：本地 `next start -p 5001` 是 `NODE_ENV=production`，本地 MySQL 不通时登录接口会走 `.cache/material-preview.json` 的本地预览用户。该兜底已限制为 localhost/127.0.0.1 且 `process.cwd()` 位于 `/Users/andy/Documents/zaomeng/`，生产服务器路径不会启用。登录页成功后会 `router.refresh()`，避免 Cookie 刚写入后旧上下文导致再次回登录页。
 
 
 ## 2026-06-08 认证 / 图库访问加固

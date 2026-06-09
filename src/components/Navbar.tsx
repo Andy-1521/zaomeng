@@ -73,12 +73,13 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
   const pluginNeedsUpdate = pluginReady && latestPluginVersion && (!pluginVersion || compareVersions(pluginVersion, latestPluginVersion) < 0);
 
   const handleLogoClick = () => {
-    if (pathname === '/home') {
+    const targetPath = user?.id ? '/home' : '/market';
+    if (pathname === targetPath) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
-    router.push('/home');
+    router.push(targetPath);
   };
 
   const handleLogout = async () => {

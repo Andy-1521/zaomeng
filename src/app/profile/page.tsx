@@ -313,6 +313,25 @@ export default function ProfilePage() {
     }
   };
 
+  const formatUserId = (id?: string | null) => {
+    if (!id) return "-";
+    if (id.length <= 14) return id;
+    return `${id.slice(0, 6)}...${id.slice(-6)}`;
+  };
+
+  const copyText = async (value?: string | null) => {
+    if (!value) return;
+
+    try {
+      await navigator.clipboard.writeText(value);
+      setShowCopySuccess(true);
+      setTimeout(() => setShowCopySuccess(false), 2000);
+    } catch (error) {
+      console.error("复制失败:", error);
+      showMessage("error", "复制失败，请手动复制");
+    }
+  };
+
   // 处理用户名修改
   const handleUpdateUsername = async () => {
     if (!user || !editUsername.trim()) {
@@ -599,9 +618,14 @@ export default function ProfilePage() {
                 <div className="mx-4 h-px bg-white/10" />
                 <div className="flex items-center justify-between gap-4 px-4 py-3.5">
                   <span className="text-sm text-white/44">用户 ID</span>
-                  <span className="min-w-0 truncate text-right font-mono text-xs text-white/55">
-                    {user.id}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void copyText(user.id)}
+                    className="min-w-0 rounded-full border border-white/10 bg-white/[0.045] px-2.5 py-1 text-right font-mono text-xs text-white/62 transition hover:bg-white/[0.08] hover:text-white"
+                    title="复制完整用户 ID"
+                  >
+                    {formatUserId(user.id)}
+                  </button>
                 </div>
                 <div className="mx-4 h-px bg-white/10" />
                 <div className="flex items-center justify-between gap-4 px-4 py-3.5">
@@ -616,9 +640,19 @@ export default function ProfilePage() {
                 <Link
                   href="/admin/generations"
                   prefetch
-                  className="zaomeng-glass-panel flex w-full items-center justify-between rounded-[1.4rem] px-4 py-3.5 text-sm text-white transition hover:bg-white/[0.06]"
+                  className="zaomeng-glass-panel flex w-full items-center justify-between gap-3 rounded-[1.4rem] px-4 py-3.5 text-sm text-white transition hover:bg-white/[0.06]"
                 >
-                  <span>进入管理员后台</span>
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-2">
+                      <span>进入管理员后台</span>
+                      <span className="rounded-full border border-amber-300/20 bg-amber-400/12 px-2 py-0.5 text-[11px] font-medium text-amber-100">
+                        管理员
+                      </span>
+                    </span>
+                    <span className="mt-1 block text-xs text-white/36">
+                      查看订单、用户和兑换码管理
+                    </span>
+                  </span>
                   <span className="text-white/28">›</span>
                 </Link>
               )}
@@ -643,6 +677,7 @@ export default function ProfilePage() {
                   <span className="block text-sm text-white/44">当前密码</span>
                   <input
                     type="password"
+                    autoComplete="current-password"
                     value={oldPassword}
                     onChange={(e) => setOldPassword(e.target.value)}
                     placeholder="请输入当前密码"
@@ -656,6 +691,7 @@ export default function ProfilePage() {
                   <span className="block text-sm text-white/44">新密码</span>
                   <input
                     type="password"
+                    autoComplete="new-password"
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="至少 6 位"
@@ -671,6 +707,7 @@ export default function ProfilePage() {
                   </span>
                   <input
                     type="password"
+                    autoComplete="new-password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="再次输入新密码"
@@ -787,20 +824,7 @@ export default function ProfilePage() {
                                   disabled={!trans.orderNumber}
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    if (trans.orderNumber) {
-                                      navigator.clipboard
-                                        .writeText(trans.orderNumber)
-                                        .then(() => {
-                                          setShowCopySuccess(true);
-                                          setTimeout(
-                                            () => setShowCopySuccess(false),
-                                            2000,
-                                          );
-                                        })
-                                        .catch((err) => {
-                                          console.error("复制失败:", err);
-                                        });
-                                    }
+                                    void copyText(trans.orderNumber);
                                   }}
                                   className="min-w-0 max-w-full truncate rounded-full border border-white/10 bg-white/[0.045] px-2.5 py-1 text-left transition hover:bg-white/[0.08] disabled:cursor-default disabled:opacity-50"
                                   title="复制编号"

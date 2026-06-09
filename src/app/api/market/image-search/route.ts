@@ -29,8 +29,16 @@ type MarketSearchCandidate = Awaited<ReturnType<typeof marketManager.listApprove
 
 const marketImageFeatureCache = new Map<string, CachedFeature>();
 
-async function loadLocalPreviewMarketItems(keyword: string): Promise<MarketSearchCandidate[] | null> {
-  if (process.env.NODE_ENV === 'production') return null;
+
+function isLocalPreviewRequest(request: NextRequest) {
+  const hostname = request.nextUrl.hostname;
+  const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  const isLocalWorkspace = process.cwd().startsWith('/Users/andy/Documents/zaomeng/');
+  return isLocalHost && isLocalWorkspace;
+}
+
+async function loadLocalPreviewMarketItems(keyword: string, allowLocalPreview = process.env.NODE_ENV !== 'production'): Promise<MarketSearchCandidate[] | null> {
+  if (!allowLocalPreview) return null;
   try {
     const filePath = join(process.cwd(), '.cache', 'market-preview.json');
     const raw = await readFile(filePath, 'utf8');
@@ -374,7 +382,7 @@ export async function POST(request: NextRequest) {
     try {
       candidates = await marketManager.listApproved(userId, { keyword, limit: 120 });
     } catch (databaseError) {
-      const previewItems = await loadLocalPreviewMarketItems(keyword);
+      const previewItems = await loadLocalPreviewMarketItems(keyword, isLocalPreviewRequest(request));
       if (!previewItems) throw databaseError;
       console.warn('[图市] 本地数据库不可用，以图搜图使用 .cache/market-preview.json 预览数据:', databaseError);
       candidates = previewItems.slice(0, 120);

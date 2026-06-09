@@ -82,6 +82,7 @@ type HeroMarketTile = {
 const MARKET_HERO_COLUMN_COUNT = 6;
 const MARKET_HERO_ROWS_PER_COLUMN = 8;
 const MARKET_HERO_IMAGE_LIMIT = 24;
+const PUBLIC_MARKET_PREVIEW_LIMIT = 36;
 
 const MARKET_HERO_FALLBACK_IMAGES: HeroMarketImage[] = [
   {
@@ -201,21 +202,27 @@ function MarketPageContent() {
   }, [pendingCount, user?.isAdmin]);
 
   const marketToolbarPinned = activeTab !== "market" || marketBrowseLocked;
+  const publicMarketLocked = !user?.id && activeTab === "market";
+  const visibleItems = useMemo(
+    () => publicMarketLocked ? items.slice(0, PUBLIC_MARKET_PREVIEW_LIMIT) : items,
+    [items, publicMarketLocked],
+  );
+  const hasMorePublicItems = publicMarketLocked && items.length > visibleItems.length;
 
   const marketMasonryColumns = useMemo(() => {
     const displayColumnCount = Math.max(
       1,
-      Math.min(marketColumnCount, Math.max(items.length, 1)),
+      Math.min(marketColumnCount, Math.max(visibleItems.length, 1)),
     );
     const columns = Array.from(
       { length: displayColumnCount },
       () => [] as MarketItem[],
     );
-    items.forEach((item, index) => {
+    visibleItems.forEach((item, index) => {
       columns[index % displayColumnCount].push(item);
     });
     return columns;
-  }, [items, marketColumnCount]);
+  }, [visibleItems, marketColumnCount]);
 
   const heroImageColumns = useMemo(() => {
     const heroImages = items
@@ -269,13 +276,14 @@ function MarketPageContent() {
   }, [items]);
 
   useEffect(() => {
-    if (isLoading) return;
-    if (!user?.id) {
-      router.replace("/login?next=/market");
-      return;
-    }
+    if (isLoading || !user?.id) return;
     void refreshUser();
-  }, [isLoading, refreshUser, router, user?.id]);
+  }, [isLoading, refreshUser, user?.id]);
+
+  const requireLogin = useCallback((next = "/market") => {
+    showToast("登录后可继续使用完整图市功能", "info");
+    router.push(`/login?next=${encodeURIComponent(next)}`);
+  }, [router]);
 
   useEffect(() => {
     if (!user?.isAdmin) return;
@@ -307,7 +315,6 @@ function MarketPageContent() {
   }, [user?.isAdmin]);
 
   const loadItems = useCallback(async () => {
-    if (!user?.id) return;
     setLoading(true);
     try {
       const mode = activeTab === "market" ? "approved" : activeTab;
@@ -334,7 +341,7 @@ function MarketPageContent() {
     } finally {
       setLoading(false);
     }
-  }, [activeTab, keyword, user?.id]);
+  }, [activeTab, keyword]);
 
   const resetImageSearchState = useCallback(() => {
     setImageSearchPreviewUrl((current) => {
@@ -390,7 +397,6 @@ function MarketPageContent() {
 
   const runImageSearch = useCallback(
     async (file: File) => {
-      if (!user?.id) return;
       if (!file.type.startsWith("image/")) {
         showToast("请选择图片文件", "error");
         return;
@@ -447,7 +453,7 @@ function MarketPageContent() {
         }
       }
     },
-    [keyword, resetImageSearchState, scrollToBrowseMarket, user?.id],
+    [keyword, resetImageSearchState, scrollToBrowseMarket],
   );
 
   useEffect(() => {
@@ -763,14 +769,6 @@ function MarketPageContent() {
     selectedItem.sellerId !== user?.id,
   );
 
-  if (isLoading || !user) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-black text-white">
-        <div className="h-10 w-10 animate-spin rounded-full border-2 border-purple-400/30 border-t-purple-300" />
-      </div>
-    );
-  }
-
   return (
     <div className="relative min-h-screen overflow-hidden bg-black text-white">
       <div className="absolute inset-0">
@@ -895,7 +893,7 @@ function MarketPageContent() {
                       </h1>
                       <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-white/58 sm:mt-5 sm:text-lg">
                         自动识别电商主图里的手机壳背面彩绘，优先匹配可购买素材和
-                        PSD。
+                        PSD。游客可先搜索和浏览，详情、下载和更多素材登录后开放。
                       </p>
 
                       <div
@@ -978,6 +976,15 @@ function MarketPageContent() {
                         >
                           向下逛图市
                         </button>
+                        {!user?.id ? (
+                          <button
+                            type="button"
+                            onClick={() => requireLogin('/market')}
+                            className="rounded-full border border-cyan-200/20 bg-cyan-300/[0.08] px-5 py-2.5 text-sm font-medium text-cyan-100 transition hover:border-cyan-100/38 hover:bg-cyan-300/[0.14]"
+                          >
+                            登录解锁详情
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -1017,6 +1024,10 @@ function MarketPageContent() {
                     <button
                       key={tab.key}
                       onClick={() => {
+                        if (!user?.id && tab.key !== "market") {
+                          requireLogin(`/market?tab=${tab.key}`);
+                          return;
+                        }
                         if (imageSearchActive || imageSearchLoading) {
                           resetImageSearchState();
                         }
@@ -1175,6 +1186,19 @@ function MarketPageContent() {
                 </div>
               ) : null}
 
+              {publicMarketLocked ? (
+                <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-[1.35rem] border border-cyan-200/14 bg-cyan-300/[0.055] px-4 py-3 text-sm text-cyan-50/72">
+                  <span>游客模式：可搜索和预览图市首屏素材，点击详情、下载、已购/上架和加载更多需要登录。</span>
+                  <button
+                    type="button"
+                    onClick={() => requireLogin('/market')}
+                    className="rounded-full border border-cyan-100/24 bg-cyan-200/[0.1] px-3 py-1.5 text-xs font-semibold text-cyan-50 transition hover:bg-cyan-200/[0.16]"
+                  >
+                    登录/注册
+                  </button>
+                </div>
+              ) : null}
+
               {loading ? (
                 <div
                   className="flex items-start justify-center"
@@ -1242,6 +1266,10 @@ function MarketPageContent() {
                           marketImageRatios[item.id] ??
                           getStableMarketImageRatio(item.id);
                         const openItemDetail = () => {
+                          if (!user?.id) {
+                            requireLogin(`/market?item=${item.id}`);
+                            return;
+                          }
                           setSelectedLayerPreviewId("source");
                           setSelectedItem(item);
                         };
@@ -1328,6 +1356,18 @@ function MarketPageContent() {
                   ))}
                 </div>
               )}
+
+              {hasMorePublicItems ? (
+                <div className="mt-8 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => requireLogin('/market')}
+                    className="rounded-full border border-white/14 bg-white px-5 py-2.5 text-sm font-semibold text-black shadow-[0_14px_34px_rgba(255,255,255,0.12)] transition hover:bg-cyan-50"
+                  >
+                    登录后加载更多素材
+                  </button>
+                </div>
+              ) : null}
             </div>
           </section>
         </main>
@@ -1390,7 +1430,7 @@ function MarketPageContent() {
               const canAccessFullPreview =
                 selectedItem.purchased ||
                 selectedItem.sellerId === user?.id ||
-                user.isAdmin;
+                user?.isAdmin;
               const shouldProtectPreview = !canAccessFullPreview;
               const selectedLayerMeta = selectedLayer
                 ? `${selectedLayer.width}x${selectedLayer.height}${selectedLayer.visible ? "" : " / 已隐藏"}`
@@ -1536,7 +1576,7 @@ function MarketPageContent() {
                       ) : null}
 
                       <div className="mt-5 flex flex-wrap gap-2 border-t border-white/10 pt-4">
-                        {selectedItem.status === "pending" && user.isAdmin ? (
+                        {selectedItem.status === "pending" && user?.isAdmin ? (
                           <>
                             <button
                               onClick={() =>
@@ -1769,7 +1809,7 @@ function MarketPageContent() {
                         </div>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
-                        {selectedItem.status === "pending" && user.isAdmin ? (
+                        {selectedItem.status === "pending" && user?.isAdmin ? (
                           <>
                             <button
                               onClick={() =>

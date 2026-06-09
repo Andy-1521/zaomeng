@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { useUser } from '@/contexts/UserContext';
 
 type SidebarTabType = 'market' | 'material-library';
 
@@ -11,6 +12,7 @@ interface SidebarProps {
 
 export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
   const router = useRouter();
+  const { user, isLoading } = useUser();
   const tabs: Array<{ id: SidebarTabType; name: string; icon: React.ReactNode }> = [
     {
       id: 'market',
@@ -42,6 +44,11 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
         <button
           key={tab.id}
           onClick={() => {
+            if (tab.id === 'material-library' && isLoading) return;
+            if (tab.id === 'material-library' && !user?.id) {
+              router.push('/login?next=/home');
+              return;
+            }
             onTabChange(tab.id);
             router.push(tab.id === 'market' ? '/market' : '/home');
           }}

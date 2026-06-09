@@ -21,8 +21,8 @@ export type DevPreviewUser = {
   createdAt?: string;
 };
 
-export async function readDevPreviewUser(): Promise<DevPreviewUser | null> {
-  if (process.env.NODE_ENV === 'production') return null;
+export async function readDevPreviewUser(allowLocalPreview = process.env.NODE_ENV !== 'production'): Promise<DevPreviewUser | null> {
+  if (!allowLocalPreview) return null;
 
   try {
     const filePath = join(process.cwd(), '.cache', 'material-preview.json');
@@ -45,8 +45,8 @@ export async function readDevPreviewUser(): Promise<DevPreviewUser | null> {
   }
 }
 
-export async function readDevPreviewUserByEmail(email: string): Promise<DevPreviewUser | null> {
-  const user = await readDevPreviewUser();
+export async function readDevPreviewUserByEmail(email: string, allowLocalPreview = process.env.NODE_ENV !== 'production'): Promise<DevPreviewUser | null> {
+  const user = await readDevPreviewUser(allowLocalPreview);
   if (!user?.email || user.email.toLowerCase() !== email.trim().toLowerCase()) return null;
   return user;
 }

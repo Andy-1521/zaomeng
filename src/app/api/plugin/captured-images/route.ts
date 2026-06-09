@@ -5,6 +5,14 @@ import { getCookieUserId } from '@/lib/serverAuth';
 import { capturedImageManager } from '@/storage/database'
 import { getAliyunOSSThumbnailUrlFromUrl } from '@/lib/aliyunOSS'
 
+
+function isLocalPreviewRequest(request: NextRequest) {
+  const hostname = request.nextUrl.hostname
+  const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'
+  const isLocalWorkspace = process.cwd().startsWith('/Users/andy/Documents/zaomeng/')
+  return isLocalHost && isLocalWorkspace
+}
+
 function isLikelyDisplayableImage(imageUrl: string) {
   const normalized = imageUrl.split('?')[0].toLowerCase()
   return /\.(jpg|jpeg|png|webp|gif|bmp|avif)$/.test(normalized)
@@ -60,9 +68,10 @@ function normalizeLocalMaterialPreviewRecord(record: LocalMaterialPreviewRecord)
 async function loadLocalMaterialPreview(
   limit: number,
   offset: number,
-  filters: LocalMaterialPreviewFilters
+  filters: LocalMaterialPreviewFilters,
+  allowLocalPreview = process.env.NODE_ENV !== 'production'
 ) {
-  if (process.env.NODE_ENV === 'production') return null
+  if (!allowLocalPreview) return null
 
   try {
     const filePath = join(process.cwd(), '.cache', 'material-preview.json')
@@ -180,8 +189,8 @@ export async function GET(request: NextRequest) {
     })
   } catch (error) {
     console.error('[插件图库] 加载失败:', error)
-    if (process.env.NODE_ENV !== 'production') {
-      const preview = await loadLocalMaterialPreview(limit, offset, filters)
+    if (process.env.NODE_ENV !== 'production' || isLocalPreviewRequest(request)) {
+      const preview = await loadLocalMaterialPreview(limit, offset, filters, isLocalPreviewRequest(request))
       if (preview) {
         return NextResponse.json({
           success: true,

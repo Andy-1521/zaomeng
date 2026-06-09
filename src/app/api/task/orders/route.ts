@@ -1,10 +1,83 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { readFile } from 'fs/promises';
+import { join } from 'path';
 import { getDb } from '@/storage/database/client';
 import { transactions } from '@/storage/database/shared/schema';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { reconcileProcessingTransactions } from '@/lib/reconcileProcessingTransactions';
 import { getAliyunOSSThumbnailUrlFromUrl } from '@/lib/aliyunOSS';
 import { getCookieUserId } from '@/lib/serverAuth';
+
+
+function isLocalPreviewRequest(request: NextRequest) {
+  const hostname = request.nextUrl.hostname;
+  const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  const isLocalWorkspace = process.cwd().startsWith('/Users/andy/Documents/zaomeng/');
+  return isLocalHost && isLocalWorkspace;
+}
+
+type LocalMarketPreviewItem = {
+  id?: unknown;
+  sourceOrderNumber?: unknown;
+  sourceImageUrl?: unknown;
+  previewImageUrl?: unknown;
+  thumbnailUrl?: unknown;
+  title?: unknown;
+  description?: unknown;
+  pricePoints?: unknown;
+  createdAt?: unknown;
+  psdUrl?: unknown;
+};
+
+function normalizeLocalPreviewOrder(item: LocalMarketPreviewItem, index: number, userId: string) {
+  const sourceOrderNumber = typeof item.sourceOrderNumber === 'string' && item.sourceOrderNumber.trim()
+    ? item.sourceOrderNumber.trim()
+    : `LOCAL-PREVIEW-${index + 1}`;
+  const imageUrl = typeof item.sourceImageUrl === 'string' && item.sourceImageUrl.trim()
+    ? item.sourceImageUrl.trim()
+    : typeof item.previewImageUrl === 'string' ? item.previewImageUrl.trim() : '';
+  if (!imageUrl) return null;
+
+  const createdAt = typeof item.createdAt === 'string' ? item.createdAt : new Date(Date.now() - index * 60000).toISOString();
+  const thumbnailUrl = typeof item.thumbnailUrl === 'string' ? item.thumbnailUrl : '';
+  const title = typeof item.title === 'string' && item.title.trim() ? item.title.trim() : `本地预览订单 ${index + 1}`;
+  const points = typeof item.pricePoints === 'number' && Number.isFinite(item.pricePoints) ? item.pricePoints : 0;
+
+  return {
+    id: typeof item.id === 'string' ? `local-order-${item.id}` : `local-order-${sourceOrderNumber}`,
+    userId,
+    orderNumber: sourceOrderNumber,
+    toolPage: '彩绘提取',
+    description: title,
+    points,
+    actualPoints: points,
+    remainingPoints: 0,
+    status: '成功',
+    prompt: typeof item.description === 'string' ? item.description : '本地只读订单预览',
+    requestParams: thumbnailUrl ? JSON.stringify({ thumbnailUrl }) : null,
+    resultData: imageUrl,
+    psdUrl: typeof item.psdUrl === 'string' ? item.psdUrl : null,
+    uploadedImage: null,
+    createdAt,
+    thumbnailUrls: thumbnailUrl ? [thumbnailUrl] : [],
+  };
+}
+
+async function loadLocalOrderPreview(userId: string, limit: number) {
+  try {
+    const filePath = join(process.cwd(), '.cache', 'market-preview.json');
+    const raw = await readFile(filePath, 'utf8');
+    const parsed = JSON.parse(raw) as LocalMarketPreviewItem[];
+    if (!Array.isArray(parsed)) return null;
+    return parsed
+      .map((item, index) => normalizeLocalPreviewOrder(item, index, userId))
+      .filter((item): item is NonNullable<ReturnType<typeof normalizeLocalPreviewOrder>> => Boolean(item))
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+      .slice(0, limit);
+  } catch {
+    return null;
+  }
+}
 
 type RequestParamsObject = {
   thumbnailUrl?: unknown;
@@ -99,11 +172,12 @@ function extractThumbnailUrls(requestParams: unknown) {
  * - data: 订单列表
  */
 export async function GET(request: NextRequest) {
+  const searchParams = request.nextUrl.searchParams;
+  const limit = clampInteger(searchParams.get('limit'), 120, 20, 200);
+
   try {
-    const searchParams = request.nextUrl.searchParams;
     const requestedUserId = searchParams.get('userId');
     const toolPage = searchParams.get('toolPage');
-    const limit = clampInteger(searchParams.get('limit'), 120, 20, 200);
     const cookieUserId = getCookieUserId(request);
 
     if (!cookieUserId) {
@@ -176,12 +250,17 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error('[订单查询] 查询失败:', error);
-    if (process.env.NODE_ENV !== 'production') {
+    if (process.env.NODE_ENV !== 'production' || isLocalPreviewRequest(request)) {
+      const cookieUserId = getCookieUserId(request);
+      const previewOrders = cookieUserId && isLocalPreviewRequest(request)
+        ? await loadLocalOrderPreview(cookieUserId, limit)
+        : null;
+
       return NextResponse.json({
         success: true,
-        data: [],
+        data: previewOrders || [],
         preview: true,
-        message: '本地数据库暂不可用，已返回空订单预览',
+        message: previewOrders ? '本地使用生产只读订单缓存预览' : '本地数据库暂不可用，已返回空订单预览',
       });
     }
 

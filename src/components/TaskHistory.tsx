@@ -1,28 +1,49 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import Image, { type ImageLoaderProps, type ImageProps } from 'next/image';
-import { createPortal } from 'react-dom';
-import PointsIconLabel from '@/components/PointsIconLabel';
-import { showToast } from '@/lib/toast';
-import { clearCache } from '@/lib/globalRecordManager';
-import { ImageThumbnail } from '@/components/ui/ImageThumbnail';
-import { parseColorExtractionModeMeta, type ColorExtractionMode } from '@/lib/colorExtractionMode';
-import { toUserFacingErrorFromUnknown, toUserFacingErrorMessage } from '@/lib/userFacingError';
-import { formatPointsLabel, getGeneratePsdPoints } from '@/lib/pricing';
+import { useState, useEffect, useCallback, useRef } from "react";
+import Image, { type ImageLoaderProps, type ImageProps } from "next/image";
+import { createPortal } from "react-dom";
+import PointsIconLabel from "@/components/PointsIconLabel";
+import { showToast } from "@/lib/toast";
+import { clearCache } from "@/lib/globalRecordManager";
+import { ImageThumbnail } from "@/components/ui/ImageThumbnail";
+import {
+  parseColorExtractionModeMeta,
+  type ColorExtractionMode,
+} from "@/lib/colorExtractionMode";
+import {
+  toUserFacingErrorFromUnknown,
+  toUserFacingErrorMessage,
+} from "@/lib/userFacingError";
+import { formatPointsLabel, getGeneratePsdPoints } from "@/lib/pricing";
 
-export type TabType = 'color-extraction' | 'watermark' | 'hd-upscale' | 'remove-background' | 'custom' | 'ai-generate' | 'smart-edit';
-export type FilterType = 'all' | TabType;
-type TaskCenterFilter = 'all' | 'processing' | 'success' | 'failed';
-export type TaskStatus = '处理中' | '成功' | '失败' | '超时' | '部分成功';
-type PsdGenerationStatus = 'pending' | 'processing' | 'success' | 'failed';
+export type TabType =
+  | "color-extraction"
+  | "watermark"
+  | "hd-upscale"
+  | "remove-background"
+  | "custom"
+  | "ai-generate"
+  | "smart-edit";
+export type FilterType = "all" | TabType;
+type TaskCenterFilter = "all" | "processing" | "success" | "failed";
+export type TaskStatus = "处理中" | "成功" | "失败" | "超时" | "部分成功";
+type PsdGenerationStatus = "pending" | "processing" | "success" | "failed";
 type TaskHistoryUpdatedEventDetail = {
   highlight?: boolean;
 };
 const PSD_PROCESSING_STALE_MS = 12 * 60 * 1000;
 const TASK_HISTORY_PAGE_SIZE = 80;
 
-const TASK_FILTER_VALUES: FilterType[] = ['all', 'color-extraction', 'ai-generate', 'smart-edit', 'watermark', 'hd-upscale', 'remove-background'];
+const TASK_FILTER_VALUES: FilterType[] = [
+  "all",
+  "color-extraction",
+  "ai-generate",
+  "smart-edit",
+  "watermark",
+  "hd-upscale",
+  "remove-background",
+];
 
 export interface TaskRecord {
   id: string;
@@ -109,13 +130,15 @@ type PreviewImageState = {
 };
 
 const taskRecordCacheByUser = new Map<string, TaskRecord[]>();
-const TASK_CACHE_STORAGE_PREFIX = 'zaomeng:task-history-cache:';
+const TASK_CACHE_STORAGE_PREFIX = "zaomeng:task-history-cache:";
 const DEBUG_TASK_HISTORY = false;
 
 const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
 
-function SafeImage({ alt, ...props }: Omit<ImageProps, 'loader'>) {
-  return <Image {...props} alt={alt} loader={passthroughImageLoader} unoptimized />;
+function SafeImage({ alt, ...props }: Omit<ImageProps, "loader">) {
+  return (
+    <Image {...props} alt={alt} loader={passthroughImageLoader} unoptimized />
+  );
 }
 
 function debugTaskHistory(...args: unknown[]) {
@@ -126,108 +149,144 @@ function debugTaskHistory(...args: unknown[]) {
 
 function getFirstImage(value?: string | string[]): string | null {
   if (Array.isArray(value)) {
-    return value.find((item) => typeof item === 'string' && item.length > 0) || null;
+    return (
+      value.find((item) => typeof item === "string" && item.length > 0) || null
+    );
   }
 
-  return typeof value === 'string' && value.length > 0 ? value : null;
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function getImageList(value?: string | string[]): string[] {
   if (Array.isArray(value)) {
-    return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
+    return value.filter(
+      (item): item is string => typeof item === "string" && item.length > 0,
+    );
   }
 
-  return typeof value === 'string' && value.length > 0 ? [value] : [];
+  return typeof value === "string" && value.length > 0 ? [value] : [];
 }
 
 function isImageValue(value: string | null): value is string {
-  return !!value && (value.startsWith('http://') || value.startsWith('https://') || value.startsWith('/'));
+  return (
+    !!value &&
+    (value.startsWith("http://") ||
+      value.startsWith("https://") ||
+      value.startsWith("/"))
+  );
 }
 
 function getUrlExtension(imageUrl: string): string {
-  const cleanUrl = imageUrl.split('?')[0] || '';
+  const cleanUrl = imageUrl.split("?")[0] || "";
   const match = cleanUrl.match(/\.([a-zA-Z0-9]+)$/);
   const extension = match?.[1]?.toLowerCase();
-  return extension && extension.length <= 5 ? extension : 'png';
+  return extension && extension.length <= 5 ? extension : "png";
 }
 
-function getTaskPreviewFileName(task: TaskRecord, imageUrl: string, index = 0): string {
-  const orderPart = task.orderId || task.id || 'task';
-  const toolPart = task.tabName || task.tab || 'result';
-  const sanitizedTool = toolPart.replace(/[^\u4e00-\u9fa5a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-  return `${sanitizedTool || 'zaomeng'}-${orderPart}-${index + 1}.${getUrlExtension(imageUrl)}`;
+function getTaskPreviewFileName(
+  task: TaskRecord,
+  imageUrl: string,
+  index = 0,
+): string {
+  const orderPart = task.orderId || task.id || "task";
+  const toolPart = task.tabName || task.tab || "result";
+  const sanitizedTool = toolPart
+    .replace(/[^\u4e00-\u9fa5a-zA-Z0-9_-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return `${sanitizedTool || "zaomeng"}-${orderPart}-${index + 1}.${getUrlExtension(imageUrl)}`;
 }
 
 function getOrderSuffix(orderId?: string) {
-  if (!orderId) return '未生成';
+  if (!orderId) return "未生成";
   return orderId.slice(-6);
 }
 
 function getTaskDateGroup(timestamp: number) {
   const date = new Date(timestamp);
   const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const targetStart = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const todayStart = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
+  const targetStart = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+  ).getTime();
   const diffDays = Math.floor((todayStart - targetStart) / 86400000);
 
-  if (diffDays === 0) return '今天';
-  if (diffDays === 1) return '昨天';
-  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', weekday: 'short' });
+  if (diffDays === 0) return "今天";
+  if (diffDays === 1) return "昨天";
+  return date.toLocaleDateString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  });
 }
 
 function getTaskStatusLabel(task: TaskRecord) {
-  if (task.status === '成功') return '成功';
-  if (task.status === '失败') return '失败';
-  if (task.status === '超时') return '超时';
-  if (task.status === '部分成功') return '部分成功';
-  if (task.status === '处理中') return '处理中';
-  return '成功';
+  if (task.status === "成功") return "成功";
+  if (task.status === "失败") return "失败";
+  if (task.status === "超时") return "超时";
+  if (task.status === "部分成功") return "部分成功";
+  if (task.status === "处理中") return "处理中";
+  return "成功";
 }
 
 function getStatusClasses(status?: TaskStatus) {
-  if (status === '成功') return 'border-emerald-400/50 bg-emerald-500/12 text-emerald-200';
-  if (status === '失败') return 'border-red-400/50 bg-red-500/12 text-red-200';
-  if (status === '超时') return 'border-amber-400/50 bg-amber-500/12 text-amber-200';
-  if (status === '部分成功') return 'border-orange-400/50 bg-orange-500/12 text-orange-200';
-  return 'border-blue-400/50 bg-blue-500/12 text-blue-200';
+  if (status === "成功")
+    return "border-emerald-400/50 bg-emerald-500/12 text-emerald-200";
+  if (status === "失败") return "border-red-400/50 bg-red-500/12 text-red-200";
+  if (status === "超时")
+    return "border-amber-400/50 bg-amber-500/12 text-amber-200";
+  if (status === "部分成功")
+    return "border-orange-400/50 bg-orange-500/12 text-orange-200";
+  return "border-blue-400/50 bg-blue-500/12 text-blue-200";
 }
 
 function getTaskCardClasses(status?: TaskStatus) {
-  if (status === '成功') return 'border-emerald-400/16 bg-emerald-500/[0.055] hover:border-emerald-300/28 hover:bg-emerald-500/[0.075]';
-  if (status === '失败') return 'border-red-400/18 bg-red-500/[0.05] hover:border-red-300/28 hover:bg-red-500/[0.07]';
-  if (status === '超时') return 'border-amber-400/18 bg-amber-500/[0.05] hover:border-amber-300/28 hover:bg-amber-500/[0.07]';
-  if (status === '部分成功') return 'border-orange-400/18 bg-orange-500/[0.05] hover:border-orange-300/28 hover:bg-orange-500/[0.07]';
-  return 'border-blue-400/18 bg-blue-500/[0.05] hover:border-blue-300/28 hover:bg-blue-500/[0.07]';
+  if (status === "成功")
+    return "border-emerald-400/16 bg-emerald-500/[0.055] hover:border-emerald-300/28 hover:bg-emerald-500/[0.075]";
+  if (status === "失败")
+    return "border-red-400/18 bg-red-500/[0.05] hover:border-red-300/28 hover:bg-red-500/[0.07]";
+  if (status === "超时")
+    return "border-amber-400/18 bg-amber-500/[0.05] hover:border-amber-300/28 hover:bg-amber-500/[0.07]";
+  if (status === "部分成功")
+    return "border-orange-400/18 bg-orange-500/[0.05] hover:border-orange-300/28 hover:bg-orange-500/[0.07]";
+  return "border-blue-400/18 bg-blue-500/[0.05] hover:border-blue-300/28 hover:bg-blue-500/[0.07]";
 }
 
 function matchesTaskCenterFilter(task: TaskRecord, filter: TaskCenterFilter) {
-  if (filter === 'all') return true;
-  if (filter === 'processing') return task.status === '处理中';
-  if (filter === 'success') return task.status === '成功' || task.status === '部分成功' || !task.status;
-  return task.status === '失败' || task.status === '超时';
+  if (filter === "all") return true;
+  if (filter === "processing") return task.status === "处理中";
+  if (filter === "success")
+    return task.status === "成功" || task.status === "部分成功" || !task.status;
+  return task.status === "失败" || task.status === "超时";
 }
 
 function getStoredUserId(): string | null {
-  if (typeof window === 'undefined') {
+  if (typeof window === "undefined") {
     return null;
   }
 
-  const userFromLocalStorage = localStorage.getItem('user');
+  const userFromLocalStorage = localStorage.getItem("user");
   if (!userFromLocalStorage) {
     return null;
   }
 
   try {
     const userData = JSON.parse(userFromLocalStorage) as { id?: string };
-    return typeof userData.id === 'string' && userData.id ? userData.id : null;
+    return typeof userData.id === "string" && userData.id ? userData.id : null;
   } catch (error) {
-    console.error('[TaskHistory] 解析用户信息失败:', error);
+    console.error("[TaskHistory] 解析用户信息失败:", error);
     return null;
   }
 }
 
 function getTaskCacheKey(userId?: string): string {
-  return userId || getStoredUserId() || 'anonymous';
+  return userId || getStoredUserId() || "anonymous";
 }
 
 function getTaskCacheStorageKey(userId?: string): string {
@@ -235,7 +294,7 @@ function getTaskCacheStorageKey(userId?: string): string {
 }
 
 function readStoredTaskCache(userId?: string): TaskRecord[] {
-  if (typeof window === 'undefined') return [];
+  if (typeof window === "undefined") return [];
 
   try {
     const raw = window.localStorage.getItem(getTaskCacheStorageKey(userId));
@@ -243,10 +302,12 @@ function readStoredTaskCache(userId?: string): TaskRecord[] {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((item): item is TaskRecord => {
-      return !!item && typeof item.id === 'string' && typeof item.time === 'number';
+      return (
+        !!item && typeof item.id === "string" && typeof item.time === "number"
+      );
     });
   } catch (error) {
-    debugTaskHistory('[TaskHistory] 读取本地任务缓存失败:', error);
+    debugTaskHistory("[TaskHistory] 读取本地任务缓存失败:", error);
     return [];
   }
 }
@@ -264,19 +325,22 @@ function getTaskCache(userId?: string): TaskRecord[] {
 function setTaskCache(records: TaskRecord[], userId?: string) {
   const cacheKey = getTaskCacheKey(userId);
   taskRecordCacheByUser.set(cacheKey, records);
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
 
   try {
     const compactRecords = records.slice(0, 80);
-    window.localStorage.setItem(getTaskCacheStorageKey(userId), JSON.stringify(compactRecords));
+    window.localStorage.setItem(
+      getTaskCacheStorageKey(userId),
+      JSON.stringify(compactRecords),
+    );
   } catch (error) {
-    debugTaskHistory('[TaskHistory] 写入本地任务缓存失败:', error);
+    debugTaskHistory("[TaskHistory] 写入本地任务缓存失败:", error);
   }
 }
 
 function updateTaskCache(
   updater: (records: TaskRecord[]) => TaskRecord[],
-  userId?: string
+  userId?: string,
 ): TaskRecord[] {
   const nextRecords = updater([...getTaskCache(userId)]);
   setTaskCache(nextRecords, userId);
@@ -307,7 +371,11 @@ const cleanExpiredCache = (userId?: string) => {
   setTaskCache(filteredRecords, userId);
 
   if (filteredRecords.length < currentRecords.length) {
-    debugTaskHistory('[TaskHistory] 清理过期缓存记录:', currentRecords.length - filteredRecords.length, '条');
+    debugTaskHistory(
+      "[TaskHistory] 清理过期缓存记录:",
+      currentRecords.length - filteredRecords.length,
+      "条",
+    );
   }
 };
 
@@ -320,7 +388,7 @@ export const addTaskRecord = (
   duration?: number,
   uploadedImage?: string,
   status?: TaskStatus,
-  options?: Partial<Pick<TaskRecord, 'extractionMode'>>
+  options?: Partial<Pick<TaskRecord, "extractionMode">>,
 ) => {
   // 创建任务记录
   const record: TaskRecord = {
@@ -341,11 +409,14 @@ export const addTaskRecord = (
   updateTaskCache((records) => [record, ...records]);
 
   // 触发自定义事件，通知 TaskHistory 组件立即刷新
-  window.dispatchEvent(new Event('taskHistoryUpdated'));
+  window.dispatchEvent(new Event("taskHistoryUpdated"));
 };
 
 // 导出更新任务记录orderId的函数（用于将临时ID更新为真实订单号）
-export const updateTaskRecordOrderId = (tempOrderId: string, realOrderId: string) => {
+export const updateTaskRecordOrderId = (
+  tempOrderId: string,
+  realOrderId: string,
+) => {
   const record = getTaskCache().find((task) => task.orderId === tempOrderId);
   if (record) {
     updateTaskCache((records) =>
@@ -356,16 +427,25 @@ export const updateTaskRecordOrderId = (tempOrderId: string, realOrderId: string
               orderId: realOrderId,
               id: realOrderId,
             }
-          : task
-      )
+          : task,
+      ),
     );
-    debugTaskHistory('[TaskHistory] 更新任务记录orderId:', tempOrderId, '->', realOrderId);
-    window.dispatchEvent(new Event('taskHistoryUpdated'));
+    debugTaskHistory(
+      "[TaskHistory] 更新任务记录orderId:",
+      tempOrderId,
+      "->",
+      realOrderId,
+    );
+    window.dispatchEvent(new Event("taskHistoryUpdated"));
   }
 };
 
 // 导出更新任务记录状态的函数
-export const updateTaskRecordStatus = (orderId: string, status: TaskStatus, imageUrl?: string) => {
+export const updateTaskRecordStatus = (
+  orderId: string,
+  status: TaskStatus,
+  imageUrl?: string,
+) => {
   const record = getTaskCache().find((task) => task.orderId === orderId);
   if (record) {
     updateTaskCache((records) =>
@@ -376,39 +456,48 @@ export const updateTaskRecordStatus = (orderId: string, status: TaskStatus, imag
               status,
               imageUrl: imageUrl ?? task.imageUrl,
             }
-          : task
-      )
+          : task,
+      ),
     );
-    debugTaskHistory('[TaskHistory] 更新任务记录状态:', orderId, status);
-    window.dispatchEvent(new Event('taskHistoryUpdated'));
+    debugTaskHistory("[TaskHistory] 更新任务记录状态:", orderId, status);
+    window.dispatchEvent(new Event("taskHistoryUpdated"));
   }
 };
 
 // 从数据库加载历史记录（带缓存优化）
-const loadTasksFromDatabase = async (userId?: string, cursor?: string | null, limit = TASK_HISTORY_PAGE_SIZE): Promise<TaskRecord[]> => {
-  debugTaskHistory('[TaskHistory] loadTasksFromDatabase ========== 开始 ==========');
-  debugTaskHistory('[TaskHistory] loadTasksFromDatabase - userId:', userId);
+const loadTasksFromDatabase = async (
+  userId?: string,
+  cursor?: string | null,
+  limit = TASK_HISTORY_PAGE_SIZE,
+): Promise<TaskRecord[]> => {
+  debugTaskHistory(
+    "[TaskHistory] loadTasksFromDatabase ========== 开始 ==========",
+  );
+  debugTaskHistory("[TaskHistory] loadTasksFromDatabase - userId:", userId);
 
   try {
     // 优先使用传入的userId，否则从 localStorage 获取
-      let userData: { id: string };
+    let userData: { id: string };
 
     if (userId) {
       userData = { id: userId };
-      debugTaskHistory('[TaskHistory] loadTasksFromDatabase - 使用传入的userId:', userId);
-      debugTaskHistory('[TaskHistory] 使用传入的userId:', userId);
+      debugTaskHistory(
+        "[TaskHistory] loadTasksFromDatabase - 使用传入的userId:",
+        userId,
+      );
+      debugTaskHistory("[TaskHistory] 使用传入的userId:", userId);
     } else {
       // 从 localStorage 获取用户信息
-      const userFromLocalStorage = localStorage.getItem('user');
+      const userFromLocalStorage = localStorage.getItem("user");
       if (!userFromLocalStorage) {
-        debugTaskHistory('[TaskHistory] 未找到用户信息，请先登录');
+        debugTaskHistory("[TaskHistory] 未找到用户信息，请先登录");
         return [];
       }
 
       try {
         userData = JSON.parse(userFromLocalStorage);
       } catch (e) {
-        console.error('[TaskHistory] 解析用户信息失败:', e);
+        console.error("[TaskHistory] 解析用户信息失败:", e);
         return [];
       }
     }
@@ -421,34 +510,41 @@ const loadTasksFromDatabase = async (userId?: string, cursor?: string | null, li
         limit: String(limit),
       });
       if (cursor) {
-        params.set('cursor', cursor);
+        params.set("cursor", cursor);
       }
       response = await fetch(`/api/user/transactions?${params.toString()}`, {
-        credentials: 'include',
+        credentials: "include",
       });
-      } catch (fetchError: unknown) {
-        // 捕获fetch本身的错误（网络错误、超时等）
-        const errorMessage = fetchError instanceof Error ? fetchError.message : '未知错误';
-        console.error('[TaskHistory] Fetch请求失败:', errorMessage);
-        return [];
-      }
+    } catch (fetchError: unknown) {
+      // 捕获fetch本身的错误（网络错误、超时等）
+      const errorMessage =
+        fetchError instanceof Error ? fetchError.message : "未知错误";
+      console.error("[TaskHistory] Fetch请求失败:", errorMessage);
+      return [];
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[TaskHistory] 加载数据库历史记录失败:', errorText.substring(0, 500));
+      console.error(
+        "[TaskHistory] 加载数据库历史记录失败:",
+        errorText.substring(0, 500),
+      );
       return [];
     }
 
     // 检查响应内容是否是JSON格式
-    const contentType = response.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
+    const contentType = response.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
       const text = await response.text();
-      console.error('[TaskHistory] 响应不是JSON格式，内容:', text.substring(0, 500));
+      console.error(
+        "[TaskHistory] 响应不是JSON格式，内容:",
+        text.substring(0, 500),
+      );
       return [];
     }
 
-    const result = await response.json() as TaskRecordApiResponse;
-    debugTaskHistory('[TaskHistory] loadTasksFromDatabase - API返回数据:', {
+    const result = (await response.json()) as TaskRecordApiResponse;
+    debugTaskHistory("[TaskHistory] loadTasksFromDatabase - API返回数据:", {
       success: result.success,
       dataLength: result.data?.length,
       firstOrderNumber: result.data?.[0]?.orderNumber,
@@ -456,15 +552,19 @@ const loadTasksFromDatabase = async (userId?: string, cursor?: string | null, li
     });
 
     if (!result.success || !Array.isArray(result.data)) {
-      console.error('[TaskHistory] 数据库返回数据格式错误');
+      console.error("[TaskHistory] 数据库返回数据格式错误");
       return [];
     }
 
     const transformed = transformDatabaseData(result.data);
-    debugTaskHistory('[TaskHistory] loadTasksFromDatabase ========== 完成，返回', transformed.length, '条记录 ==========');
+    debugTaskHistory(
+      "[TaskHistory] loadTasksFromDatabase ========== 完成，返回",
+      transformed.length,
+      "条记录 ==========",
+    );
     return transformed;
   } catch (error) {
-    console.error('[TaskHistory] 从数据库加载历史记录异常:', error);
+    console.error("[TaskHistory] 从数据库加载历史记录异常:", error);
     return [];
   }
 };
@@ -473,120 +573,193 @@ const loadTasksFromDatabase = async (userId?: string, cursor?: string | null, li
 export const forceRefreshCache = (userId?: string) => {
   clearCache();
   setTaskCache([], userId);
-  window.dispatchEvent(new Event('taskHistoryUpdated'));
+  window.dispatchEvent(new Event("taskHistoryUpdated"));
 };
 
-  // 转换数据库数据到 TaskRecord 格式
-  const transformDatabaseData = (data: TaskRecordApiItem[]): TaskRecord[] => {
-    debugTaskHistory('[TaskHistory] transformDatabaseData ========== 开始 ==========');
-    debugTaskHistory('[TaskHistory] transformDatabaseData - 输入数据数量:', data.length);
-    if (data.length > 0) {
-      const firstItem = data[0];
-      const lastItem = data[data.length - 1];
-      debugTaskHistory('[TaskHistory] transformDatabaseData - 第一条数据:', {
-        orderNumber: firstItem.orderNumber,
-        resultData: firstItem.resultData ? (typeof firstItem.resultData === 'string' ? firstItem.resultData.substring(0, 100) + '...' : JSON.stringify(firstItem.resultData).substring(0, 100) + '...') : null,
-        createdAt: firstItem.createdAt,
-      });
-      debugTaskHistory('[TaskHistory] transformDatabaseData - 最后一条数据:', {
-        orderNumber: lastItem.orderNumber,
-        resultData: lastItem.resultData ? (typeof lastItem.resultData === 'string' ? lastItem.resultData.substring(0, 100) + '...' : JSON.stringify(lastItem.resultData).substring(0, 100) + '...') : null,
-        createdAt: lastItem.createdAt,
-      });
-    } else {
-      debugTaskHistory('[TaskHistory] transformDatabaseData - 输入数据为空！');
-    }
+// 转换数据库数据到 TaskRecord 格式
+const transformDatabaseData = (data: TaskRecordApiItem[]): TaskRecord[] => {
+  debugTaskHistory(
+    "[TaskHistory] transformDatabaseData ========== 开始 ==========",
+  );
+  debugTaskHistory(
+    "[TaskHistory] transformDatabaseData - 输入数据数量:",
+    data.length,
+  );
+  if (data.length > 0) {
+    const firstItem = data[0];
+    const lastItem = data[data.length - 1];
+    debugTaskHistory("[TaskHistory] transformDatabaseData - 第一条数据:", {
+      orderNumber: firstItem.orderNumber,
+      resultData: firstItem.resultData
+        ? typeof firstItem.resultData === "string"
+          ? firstItem.resultData.substring(0, 100) + "..."
+          : JSON.stringify(firstItem.resultData).substring(0, 100) + "..."
+        : null,
+      createdAt: firstItem.createdAt,
+    });
+    debugTaskHistory("[TaskHistory] transformDatabaseData - 最后一条数据:", {
+      orderNumber: lastItem.orderNumber,
+      resultData: lastItem.resultData
+        ? typeof lastItem.resultData === "string"
+          ? lastItem.resultData.substring(0, 100) + "..."
+          : JSON.stringify(lastItem.resultData).substring(0, 100) + "..."
+        : null,
+      createdAt: lastItem.createdAt,
+    });
+  } else {
+    debugTaskHistory("[TaskHistory] transformDatabaseData - 输入数据为空！");
+  }
 
-    // 映射数据库数据到 TaskRecord 格式
-    const tasks: TaskRecord[] = data
-      .filter((item) => item.orderNumber && (item.prompt || item.description) && item.toolPage !== '积分充值' && item.toolPage !== '图市收益') // 过滤没有订单号、提示词或描述的记录，以及充值和图市收益记录
-      .map((item) => {
+  // 映射数据库数据到 TaskRecord 格式
+  const tasks: TaskRecord[] = data
+    .filter(
+      (item) =>
+        item.orderNumber &&
+        (item.prompt || item.description) &&
+        item.toolPage !== "积分充值" &&
+        item.toolPage !== "图市收益",
+    ) // 过滤没有订单号、提示词或描述的记录，以及充值和图市收益记录
+    .map((item) => {
       // 【调试】打印订单的原始数据
-      debugTaskHistory('[TaskHistory] 解析订单:', {
+      debugTaskHistory("[TaskHistory] 解析订单:", {
         orderNumber: item.orderNumber,
         toolPage: item.toolPage,
-        resultData: item.resultData ? (typeof item.resultData === 'string' ? item.resultData.substring(0, 100) + '...' : JSON.stringify(item.resultData)) : null,
+        resultData: item.resultData
+          ? typeof item.resultData === "string"
+            ? item.resultData.substring(0, 100) + "..."
+            : JSON.stringify(item.resultData)
+          : null,
       });
 
       // 解析 resultData 获取图片 URL（支持多图片数组）
-      let imageUrl: string | string[] = '';
+      let imageUrl: string | string[] = "";
       let errorMessage: string | undefined;
       if (item.resultData) {
         if (Array.isArray(item.resultData)) {
           // 【新增】如果resultData已经是数组（多图片），直接使用
           imageUrl = item.resultData;
-          debugTaskHistory('[TaskHistory] resultData是数组，图片数量:', item.resultData.length);
-        } else if (typeof item.resultData === 'object') {
+          debugTaskHistory(
+            "[TaskHistory] resultData是数组，图片数量:",
+            item.resultData.length,
+          );
+        } else if (typeof item.resultData === "object") {
           // 如果resultData是对象，尝试获取imageUrl字段
           const resultDataObject = item.resultData as ResultDataObject;
-          imageUrl = resultDataObject.imageUrl || resultDataObject.image_url || resultDataObject.result_image_url || '';
+          imageUrl =
+            resultDataObject.imageUrl ||
+            resultDataObject.image_url ||
+            resultDataObject.result_image_url ||
+            "";
           const errorValue = resultDataObject.error;
-          if (typeof errorValue === 'string' && errorValue.trim()) {
-            errorMessage = toUserFacingErrorMessage(errorValue, '暂时未能完成处理，请稍后重试');
+          if (typeof errorValue === "string" && errorValue.trim()) {
+            errorMessage = toUserFacingErrorMessage(
+              errorValue,
+              "暂时未能完成处理，请稍后重试",
+            );
           }
-          debugTaskHistory('[TaskHistory] resultData是对象，提取imageUrl');
-        } else if (typeof item.resultData === 'string') {
+          debugTaskHistory("[TaskHistory] resultData是对象，提取imageUrl");
+        } else if (typeof item.resultData === "string") {
           // 如果resultData是字符串，可能是单个URL或JSON数组
-          debugTaskHistory('[TaskHistory] resultData是字符串，尝试解析:', item.resultData.substring(0, 80) + '...');
+          debugTaskHistory(
+            "[TaskHistory] resultData是字符串，尝试解析:",
+            item.resultData.substring(0, 80) + "...",
+          );
           try {
             // 尝试解析为JSON数组
             const parsed = JSON.parse(item.resultData);
             if (Array.isArray(parsed) && parsed.length > 0) {
               imageUrl = parsed;
-              debugTaskHistory('[TaskHistory] resultData解析为数组，图片数量:', parsed.length);
-            } else if (parsed && typeof parsed === 'object') {
+              debugTaskHistory(
+                "[TaskHistory] resultData解析为数组，图片数量:",
+                parsed.length,
+              );
+            } else if (parsed && typeof parsed === "object") {
               const parsedObject = parsed as ResultDataObject;
-              imageUrl = parsedObject.imageUrl || parsedObject.image_url || parsedObject.result_image_url || '';
+              imageUrl =
+                parsedObject.imageUrl ||
+                parsedObject.image_url ||
+                parsedObject.result_image_url ||
+                "";
               const errorValue = parsedObject.error;
-              if (typeof errorValue === 'string' && errorValue.trim()) {
-                errorMessage = toUserFacingErrorMessage(errorValue, '暂时未能完成处理，请稍后重试');
+              if (typeof errorValue === "string" && errorValue.trim()) {
+                errorMessage = toUserFacingErrorMessage(
+                  errorValue,
+                  "暂时未能完成处理，请稍后重试",
+                );
               }
-              debugTaskHistory('[TaskHistory] resultData解析为对象，提取图片或失败原因');
+              debugTaskHistory(
+                "[TaskHistory] resultData解析为对象，提取图片或失败原因",
+              );
             } else {
               imageUrl = item.resultData;
-              debugTaskHistory('[TaskHistory] 解析结果不是有效数组，使用原始字符串');
+              debugTaskHistory(
+                "[TaskHistory] 解析结果不是有效数组，使用原始字符串",
+              );
             }
           } catch {
             // 不是JSON格式，直接使用字符串
             imageUrl = item.resultData;
-            if (!item.resultData.startsWith('http://') && !item.resultData.startsWith('https://') && !item.resultData.startsWith('/')) {
-              errorMessage = toUserFacingErrorMessage(item.resultData, '暂时未能完成处理，请稍后重试');
+            if (
+              !item.resultData.startsWith("http://") &&
+              !item.resultData.startsWith("https://") &&
+              !item.resultData.startsWith("/")
+            ) {
+              errorMessage = toUserFacingErrorMessage(
+                item.resultData,
+                "暂时未能完成处理，请稍后重试",
+              );
             }
-            debugTaskHistory('[TaskHistory] resultData无法解析为JSON，使用原始字符串');
+            debugTaskHistory(
+              "[TaskHistory] resultData无法解析为JSON，使用原始字符串",
+            );
           }
         }
       }
-      debugTaskHistory('[TaskHistory] 解析后imageUrl:', {
+      debugTaskHistory("[TaskHistory] 解析后imageUrl:", {
         type: typeof imageUrl,
         isArray: Array.isArray(imageUrl),
         length: Array.isArray(imageUrl) ? imageUrl.length : 0,
-        value: typeof imageUrl === 'string' ? imageUrl.substring(0, 60) + '...' : JSON.stringify(imageUrl),
+        value:
+          typeof imageUrl === "string"
+            ? imageUrl.substring(0, 60) + "..."
+            : JSON.stringify(imageUrl),
       });
       const thumbnailUrl = Array.isArray(item.thumbnailUrls)
-        ? (Array.isArray(imageUrl) ? item.thumbnailUrls : item.thumbnailUrls[0])
+        ? Array.isArray(imageUrl)
+          ? item.thumbnailUrls
+          : item.thumbnailUrls[0]
         : undefined;
 
       // 解析 requestParams 获取上传的参考图片
-      let uploadedImage: string | string[] = item.uploadedImage || '';
+      let uploadedImage: string | string[] = item.uploadedImage || "";
       let aspectRatio: string | undefined = undefined;
       let imageSize: string | undefined = undefined;
       let generateCount: number | undefined = undefined; // 【新增】预期生成数量
-      let extractionMode: ColorExtractionMode = 'full';
+      let extractionMode: ColorExtractionMode = "full";
       let params: RequestParamsObject | undefined;
 
       if (item.requestParams) {
         try {
-          if (typeof item.requestParams === 'object') {
+          if (typeof item.requestParams === "object") {
             params = item.requestParams as RequestParamsObject;
-          } else if (typeof item.requestParams === 'string') {
+          } else if (typeof item.requestParams === "string") {
             // 尝试解析 JSON 字符串
             params = JSON.parse(item.requestParams) as RequestParamsObject;
           }
 
-          if (params && params.urls && Array.isArray(params.urls) && params.urls.length > 0) {
+          if (
+            params &&
+            params.urls &&
+            Array.isArray(params.urls) &&
+            params.urls.length > 0
+          ) {
             // 保存完整的图片数组
             uploadedImage = params.urls;
-          } else if (params && typeof params.imageUrl === 'string' && params.imageUrl) {
+          } else if (
+            params &&
+            typeof params.imageUrl === "string" &&
+            params.imageUrl
+          ) {
             uploadedImage = params.imageUrl;
           } else if (params && params.uploadedImage) {
             uploadedImage = params.uploadedImage;
@@ -605,69 +778,103 @@ export const forceRefreshCache = (userId?: string) => {
             generateCount = params.generateCount;
           }
 
-          const colorExtractionMeta = parseColorExtractionModeMeta(params || item.requestParams);
+          const colorExtractionMeta = parseColorExtractionModeMeta(
+            params || item.requestParams,
+          );
           extractionMode = colorExtractionMeta.requestedMode;
         } catch {
           // 解析失败
-          uploadedImage = item.uploadedImage || '';
+          uploadedImage = item.uploadedImage || "";
         }
       }
 
       // 提取 PSD URL
-      let psdUrl = '';
+      let psdUrl = "";
       if (item.psdUrl) {
         psdUrl = item.psdUrl;
       }
 
       const psdGenerationStatus = params?.psdGenerationStatus;
       const rawPsdGenerationStartedAt = params?.psdGenerationStartedAt;
-      const psdGenerationStartedAt = typeof rawPsdGenerationStartedAt === 'number'
-        ? rawPsdGenerationStartedAt
-        : typeof rawPsdGenerationStartedAt === 'string'
-          ? new Date(rawPsdGenerationStartedAt).getTime()
-          : undefined;
+      const psdGenerationStartedAt =
+        typeof rawPsdGenerationStartedAt === "number"
+          ? rawPsdGenerationStartedAt
+          : typeof rawPsdGenerationStartedAt === "string"
+            ? new Date(rawPsdGenerationStartedAt).getTime()
+            : undefined;
       const psdPoints = params?.psdPoints;
 
-      const isSmartEditOrder = item.toolPage === '智能改图'
-        || item.toolPage === '局部改图'
-        || item.description?.includes('智能改图')
-        || item.description?.includes('局部改图')
-        || item.orderNumber?.startsWith('LCL-');
+      const isSmartEditOrder =
+        item.toolPage === "智能改图" ||
+        item.toolPage === "局部改图" ||
+        item.description?.includes("智能改图") ||
+        item.description?.includes("局部改图") ||
+        item.orderNumber?.startsWith("LCL-");
 
       // 确保 description 是字符串。智能改图不向用户侧展示最终提示词。
-      let description = '未知';
+      let description = "未知";
       if (isSmartEditOrder) {
-        const smartEditSummary = item.description?.replace(/^智能改图[:：]\s*/, '').replace(/^局部改图[:：]\s*/, '').trim()
-          || (params?.summary || params?.promptSummary || params?.userInstruction || '')
-          || '智能改图结果';
-        description = typeof smartEditSummary === 'string' ? smartEditSummary : '智能改图结果';
-      } else if (typeof item.prompt === 'string' && item.prompt.trim() !== '') {
+        const smartEditSummary =
+          item.description
+            ?.replace(/^智能改图[:：]\s*/, "")
+            .replace(/^局部改图[:：]\s*/, "")
+            .trim() ||
+          params?.summary ||
+          params?.promptSummary ||
+          params?.userInstruction ||
+          "" ||
+          "智能改图结果";
+        description =
+          typeof smartEditSummary === "string"
+            ? smartEditSummary
+            : "智能改图结果";
+      } else if (typeof item.prompt === "string" && item.prompt.trim() !== "") {
         description = item.prompt.trim();
-      } else if (typeof item.description === 'string' && item.description.trim() !== '') {
+      } else if (
+        typeof item.description === "string" &&
+        item.description.trim() !== ""
+      ) {
         description = item.description.trim();
       }
 
       // 映射状态
-      let status: TaskStatus = '成功';
-      if (item.status === '失败' || item.status === 'failed') {
-        status = '失败';
-      } else if (item.status === '处理中' || item.status === 'pending') {
-        status = '处理中';
-      } else if (item.status === '超时' || item.status === 'timeout') {
-        status = '超时';
-      } else if (item.status !== '成功' && item.status !== 'success') {
+      let status: TaskStatus = "成功";
+      if (item.status === "失败" || item.status === "failed") {
+        status = "失败";
+      } else if (item.status === "处理中" || item.status === "pending") {
+        status = "处理中";
+      } else if (item.status === "超时" || item.status === "timeout") {
+        status = "超时";
+      } else if (item.status !== "成功" && item.status !== "success") {
         // 如果状态不是预期的任何值，标记为失败（修复状态异常的情况）
-        debugTaskHistory('[TaskHistory] 订单状态异常:', item.orderNumber, 'status:', item.status, '将标记为失败');
-        status = '失败';
+        debugTaskHistory(
+          "[TaskHistory] 订单状态异常:",
+          item.orderNumber,
+          "status:",
+          item.status,
+          "将标记为失败",
+        );
+        status = "失败";
       }
 
       // 【新增】判断是否为"部分成功"：预期生成数量 > 实际生成数量
-      if (status === '成功' && generateCount && generateCount > 1) {
-        const actualCount = Array.isArray(imageUrl) ? imageUrl.length : (imageUrl ? 1 : 0);
+      if (status === "成功" && generateCount && generateCount > 1) {
+        const actualCount = Array.isArray(imageUrl)
+          ? imageUrl.length
+          : imageUrl
+            ? 1
+            : 0;
         if (actualCount > 0 && actualCount < generateCount) {
-          status = '部分成功';
+          status = "部分成功";
           description += `（生成${actualCount}/${generateCount}张）`;
-          debugTaskHistory('[TaskHistory] 订单部分成功:', item.orderNumber, '预期:', generateCount, '实际:', actualCount);
+          debugTaskHistory(
+            "[TaskHistory] 订单部分成功:",
+            item.orderNumber,
+            "预期:",
+            generateCount,
+            "实际:",
+            actualCount,
+          );
         }
       }
 
@@ -678,9 +885,9 @@ export const forceRefreshCache = (userId?: string) => {
       let time = 0;
       if (item.time) {
         // 如果 item.time 已经是时间戳（数字），直接使用
-        if (typeof item.time === 'number') {
+        if (typeof item.time === "number") {
           time = item.time;
-        } else if (typeof item.time === 'string') {
+        } else if (typeof item.time === "string") {
           // 如果是字符串，尝试解析为日期
           const parsedTime = new Date(item.time).getTime();
           if (!isNaN(parsedTime)) {
@@ -689,9 +896,9 @@ export const forceRefreshCache = (userId?: string) => {
         }
       } else if (item.createdAt) {
         // 使用 createdAt 字段作为后备
-        if (typeof item.createdAt === 'number') {
+        if (typeof item.createdAt === "number") {
           time = item.createdAt;
-        } else if (typeof item.createdAt === 'string') {
+        } else if (typeof item.createdAt === "string") {
           const parsedTime = new Date(item.createdAt).getTime();
           if (!isNaN(parsedTime)) {
             time = parsedTime;
@@ -700,52 +907,83 @@ export const forceRefreshCache = (userId?: string) => {
       }
 
       // 根据 toolPage 映射到正确的 tab
-      let tab: TabType = 'color-extraction';
-      let tabName: string = '彩绘提取';
+      let tab: TabType = "color-extraction";
+      let tabName: string = "彩绘提取";
 
-      if (item.toolPage === '裁切工具' || item.description?.includes('裁切')) {
-        tab = 'custom';
-        tabName = '裁切工具';
-      } else if (item.toolPage === 'AI生图' || item.toolPage === 'AI生图（图生图）' || item.description?.includes('AI生图') || item.orderNumber?.startsWith('AIG')) {
-        tab = 'ai-generate';
-        tabName = 'AI生图';
-      } else if (item.toolPage === '彩绘提取' || item.toolPage === '彩绘提取2' || item.description?.includes('彩绘提取')) {
-        tab = 'color-extraction';
-        tabName = '彩绘提取';
-      } else if (item.toolPage === '高清+扩图2' || item.description?.includes('高清+扩图2') || item.orderNumber?.startsWith('HDO2-')) {
-        tab = 'watermark';
-        tabName = '高清+扩图';
-      } else if (item.toolPage === '高清+扩图' || item.description?.includes('高清+扩图') || item.orderNumber?.startsWith('HDO-')) {
-        tab = 'watermark';
-        tabName = '高清+扩图';
-      } else if (item.toolPage === 'AI扩图' || item.toolPage === '去除水印' || item.description?.includes('去除水印') || item.description?.includes('AI扩图') || item.orderNumber?.startsWith('RW-')) {
-        tab = 'watermark';
-        tabName = '高清+扩图';
+      if (item.toolPage === "裁切工具" || item.description?.includes("裁切")) {
+        tab = "custom";
+        tabName = "裁切工具";
+      } else if (
+        item.toolPage === "AI生图" ||
+        item.toolPage === "AI生图（图生图）" ||
+        item.description?.includes("AI生图") ||
+        item.orderNumber?.startsWith("AIG")
+      ) {
+        tab = "ai-generate";
+        tabName = "AI生图";
+      } else if (
+        item.toolPage === "彩绘提取" ||
+        item.toolPage === "彩绘提取2" ||
+        item.description?.includes("彩绘提取")
+      ) {
+        tab = "color-extraction";
+        tabName = "彩绘提取";
+      } else if (
+        item.toolPage === "高清+扩图2" ||
+        item.description?.includes("高清+扩图2") ||
+        item.orderNumber?.startsWith("HDO2-")
+      ) {
+        tab = "watermark";
+        tabName = "高清+扩图";
+      } else if (
+        item.toolPage === "高清+扩图" ||
+        item.description?.includes("高清+扩图") ||
+        item.orderNumber?.startsWith("HDO-")
+      ) {
+        tab = "watermark";
+        tabName = "高清+扩图";
+      } else if (
+        item.toolPage === "AI扩图" ||
+        item.toolPage === "去除水印" ||
+        item.description?.includes("去除水印") ||
+        item.description?.includes("AI扩图") ||
+        item.orderNumber?.startsWith("RW-")
+      ) {
+        tab = "watermark";
+        tabName = "高清+扩图";
       } else if (isSmartEditOrder) {
-        tab = 'smart-edit';
-        tabName = '智能改图';
-      } else if (item.toolPage === '高清放大' || item.description?.includes('高清放大') || item.orderNumber?.startsWith('HD-')) {
-        tab = 'hd-upscale';
-        tabName = '高清放大';
-      } else if (item.toolPage === '移除背景' || item.description?.includes('移除背景') || item.orderNumber?.startsWith('RB-')) {
-        tab = 'remove-background';
-        tabName = '移除背景';
-      } else if (item.toolPage === '去水印') {
+        tab = "smart-edit";
+        tabName = "智能改图";
+      } else if (
+        item.toolPage === "高清放大" ||
+        item.description?.includes("高清放大") ||
+        item.orderNumber?.startsWith("HD-")
+      ) {
+        tab = "hd-upscale";
+        tabName = "高清放大";
+      } else if (
+        item.toolPage === "移除背景" ||
+        item.description?.includes("移除背景") ||
+        item.orderNumber?.startsWith("RB-")
+      ) {
+        tab = "remove-background";
+        tabName = "移除背景";
+      } else if (item.toolPage === "去水印") {
         // 兼容性处理：旧数据可能使用'去水印'
-        tab = 'watermark';
-        tabName = '高清+扩图';
-      } else if (item.toolPage === '快速制作') {
+        tab = "watermark";
+        tabName = "高清+扩图";
+      } else if (item.toolPage === "快速制作") {
         // Keep legacy history visible without restoring the old page mode.
-        tab = 'custom';
-        tabName = '历史工具记录';
-      } else if (item.toolPage === '图市购买') {
-        tab = 'custom';
-        tabName = '图市购买';
+        tab = "custom";
+        tabName = "历史工具记录";
+      } else if (item.toolPage === "图市购买") {
+        tab = "custom";
+        tabName = "图市购买";
       }
 
       // 调试日志：记录toolPage映射
-      if (process.env.NODE_ENV === 'development') {
-        debugTaskHistory('[TaskHistory] 订单映射:', {
+      if (process.env.NODE_ENV === "development") {
+        debugTaskHistory("[TaskHistory] 订单映射:", {
           orderNumber: item.orderNumber,
           toolPage: item.toolPage,
           description: item.description,
@@ -760,7 +998,7 @@ export const forceRefreshCache = (userId?: string) => {
         tabName,
         description,
         time,
-        imageUrl,  // 可能是string（单图片）或string[]（多图片）
+        imageUrl, // 可能是string（单图片）或string[]（多图片）
         thumbnailUrl,
         orderId: item.orderNumber,
         duration,
@@ -768,7 +1006,9 @@ export const forceRefreshCache = (userId?: string) => {
         status,
         psdUrl,
         psdGenerationStatus,
-        psdGenerationStartedAt: Number.isFinite(psdGenerationStartedAt) ? psdGenerationStartedAt : undefined,
+        psdGenerationStartedAt: Number.isFinite(psdGenerationStartedAt)
+          ? psdGenerationStartedAt
+          : undefined,
         psdPoints,
         aspectRatio,
         imageSize,
@@ -783,7 +1023,13 @@ export const forceRefreshCache = (userId?: string) => {
 };
 
 // 导出更新任务记录状态的函数
-export const updateTaskStatus = async (orderId: string, status: TaskStatus, imageUrl?: string, duration?: number, imageUrls?: string[]) => {
+export const updateTaskStatus = async (
+  orderId: string,
+  status: TaskStatus,
+  imageUrl?: string,
+  duration?: number,
+  imageUrls?: string[],
+) => {
   // 【关键修复】直接调用 API 更新数据库，不依赖后端的延迟更新
   try {
     // 准备更新数据
@@ -798,14 +1044,14 @@ export const updateTaskStatus = async (orderId: string, status: TaskStatus, imag
     if (imageUrls && imageUrls.length > 0) {
       updateData.resultData = JSON.stringify(imageUrls);
     } else if (imageUrl) {
-      updateData.resultData = imageUrl;  // 单张图片
+      updateData.resultData = imageUrl; // 单张图片
     }
 
-    const response = await fetch('/api/transaction/update', {
-      method: 'POST',
-      credentials: 'include',
+    const response = await fetch("/api/transaction/update", {
+      method: "POST",
+      credentials: "include",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         orderId,
@@ -815,32 +1061,44 @@ export const updateTaskStatus = async (orderId: string, status: TaskStatus, imag
 
     if (response.ok) {
       const result = await response.json();
-      debugTaskHistory('[TaskHistory] 数据库更新成功:', result);
+      debugTaskHistory("[TaskHistory] 数据库更新成功:", result);
     } else {
-      debugTaskHistory('[TaskHistory] 数据库更新失败，但继续刷新历史记录');
+      debugTaskHistory("[TaskHistory] 数据库更新失败，但继续刷新历史记录");
     }
   } catch (error) {
-    console.error('[TaskHistory] 更新数据库失败:', error);
+    console.error("[TaskHistory] 更新数据库失败:", error);
     // 即使更新失败，也继续刷新历史记录（因为缓存记录会被移除）
   }
 
   // 从缓存中移除对应的记录（因为数据库中已经有了最新的数据）
-  updateTaskCache((records) => records.filter((task) => task.orderId !== orderId));
+  updateTaskCache((records) =>
+    records.filter((task) => task.orderId !== orderId),
+  );
 
   // 立即触发刷新事件（不需要延迟，因为我们已经直接更新了数据库）
-  window.dispatchEvent(new Event('taskHistoryUpdated'));
+  window.dispatchEvent(new Event("taskHistoryUpdated"));
 };
 
-export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHistoryProps) {
+export default function TaskHistory({
+  activeTab,
+  onTaskClick,
+  userId,
+}: TaskHistoryProps) {
   const [isCollapsed, setIsCollapsed] = useState(true);
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
-  const [showCopySuccessForOrder, setShowCopySuccessForOrder] = useState<string | null>(null);
-  const [previewImage, setPreviewImage] = useState<PreviewImageState | null>(null);
+  const [showCopySuccessForOrder, setShowCopySuccessForOrder] = useState<
+    string | null
+  >(null);
+  const [previewImage, setPreviewImage] = useState<PreviewImageState | null>(
+    null,
+  );
   const [deletingOrder, setDeletingOrder] = useState<string | null>(null);
-  const [generatingPsdOrders, setGeneratingPsdOrders] = useState<Set<string>>(new Set());
+  const [generatingPsdOrders, setGeneratingPsdOrders] = useState<Set<string>>(
+    new Set(),
+  );
   const [retryingOrder, setRetryingOrder] = useState<string | null>(null);
-  const [filterTab, setFilterTab] = useState<FilterType>('all');
-  const [statusFilter, setStatusFilter] = useState<TaskCenterFilter>('all');
+  const [filterTab, setFilterTab] = useState<FilterType>("all");
+  const [statusFilter, setStatusFilter] = useState<TaskCenterFilter>("all");
   const [isToolFilterOpen, setIsToolFilterOpen] = useState(false);
   const [showAllHistory, setShowAllHistory] = useState(false);
   const [hasMoreDatabaseTasks, setHasMoreDatabaseTasks] = useState(false);
@@ -849,50 +1107,81 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   const toolFilterRef = useRef<HTMLDivElement>(null);
   const taskCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const hasLoadedDatabaseRef = useRef(false);
-  const processingCount = tasks.filter((task) => task.status === '处理中').length;
+  const processingCount = tasks.filter(
+    (task) => task.status === "处理中",
+  ).length;
 
   const historySourceTasks = showAllHistory ? tasks : tasks.slice(0, 20);
-  const visibleTasks = historySourceTasks.filter((task) =>
-    (filterTab === 'all' || task.tab === filterTab) && matchesTaskCenterFilter(task, statusFilter)
+  const visibleTasks = historySourceTasks.filter(
+    (task) =>
+      (filterTab === "all" || task.tab === filterTab) &&
+      matchesTaskCenterFilter(task, statusFilter),
   );
-  const previewResultImage = useCallback((originalUrl: string | null, instantPreviewUrl?: string | null, downloadFileName?: string) => {
-    if (!originalUrl) return;
-    const fallbackUrl = instantPreviewUrl || originalUrl;
-    setPreviewImage({
-      originalUrl,
-      displayUrl: fallbackUrl,
-      downloadFileName: downloadFileName || `zaomeng-order.${getUrlExtension(originalUrl)}`,
-    });
-
-    fetch(`/api/image/thumbnail-url?url=${encodeURIComponent(originalUrl)}&size=1600`, { credentials: 'include' })
-      .then((response) => response.ok ? response.json() : null)
-      .then((result: { success?: boolean; data?: { thumbnailUrl?: string; passthrough?: boolean } } | null) => {
-        const previewUrl = result?.success && result.data?.thumbnailUrl && !result.data.passthrough
-          ? result.data.thumbnailUrl
-          : '';
-        if (!previewUrl) return;
-        setPreviewImage((current) => current?.originalUrl === originalUrl ? { ...current, displayUrl: previewUrl } : current);
-      })
-      .catch(() => {
-        // 超大 OSS 原图可能超过在线处理限制，保留已加载的小图预览。
+  const previewResultImage = useCallback(
+    (
+      originalUrl: string | null,
+      instantPreviewUrl?: string | null,
+      downloadFileName?: string,
+    ) => {
+      if (!originalUrl) return;
+      const fallbackUrl = instantPreviewUrl || originalUrl;
+      setPreviewImage({
+        originalUrl,
+        displayUrl: fallbackUrl,
+        downloadFileName:
+          downloadFileName || `zaomeng-order.${getUrlExtension(originalUrl)}`,
       });
-  }, []);
+
+      fetch(
+        `/api/image/thumbnail-url?url=${encodeURIComponent(originalUrl)}&size=1600`,
+        { credentials: "include" },
+      )
+        .then((response) => (response.ok ? response.json() : null))
+        .then(
+          (
+            result: {
+              success?: boolean;
+              data?: { thumbnailUrl?: string; passthrough?: boolean };
+            } | null,
+          ) => {
+            const previewUrl =
+              result?.success &&
+              result.data?.thumbnailUrl &&
+              !result.data.passthrough
+                ? result.data.thumbnailUrl
+                : "";
+            if (!previewUrl) return;
+            setPreviewImage((current) =>
+              current?.originalUrl === originalUrl
+                ? { ...current, displayUrl: previewUrl }
+                : current,
+            );
+          },
+        )
+        .catch(() => {
+          // 超大 OSS 原图可能超过在线处理限制，保留已加载的小图预览。
+        });
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!previewImage) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         setPreviewImage(null);
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener("keydown", handleKeyDown);
     };
   }, [previewImage]);
-  const groupedVisibleTasks = visibleTasks.reduce<Array<{ label: string; tasks: TaskRecord[] }>>((groups, task) => {
+  const groupedVisibleTasks = visibleTasks.reduce<
+    Array<{ label: string; tasks: TaskRecord[] }>
+  >((groups, task) => {
     const label = getTaskDateGroup(task.time);
     const existing = groups.find((group) => group.label === label);
     if (existing) {
@@ -948,18 +1237,25 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       const dbTasks = await loadTasksFromDatabase(userId);
       setHasMoreDatabaseTasks(dbTasks.length === TASK_HISTORY_PAGE_SIZE);
 
-      debugTaskHistory('[TaskHistory] 从数据库加载到', dbTasks.length, '条记录');
+      debugTaskHistory(
+        "[TaskHistory] 从数据库加载到",
+        dbTasks.length,
+        "条记录",
+      );
 
       // 获取数据库中所有订单号
-      const dbOrderIds = new Set(dbTasks.map(task => task.orderId));
+      const dbOrderIds = new Set(dbTasks.map((task) => task.orderId));
 
       // 移除缓存中已经在数据库中存在的记录（避免重复）
-      const filteredCache = getTaskCache(userId).filter(task => {
+      const filteredCache = getTaskCache(userId).filter((task) => {
         const shouldRemove = task.orderId && dbOrderIds.has(task.orderId);
         return !shouldRemove;
       });
 
-      debugTaskHistory('[TaskHistory] 过滤后的缓存记录数:', filteredCache.length);
+      debugTaskHistory(
+        "[TaskHistory] 过滤后的缓存记录数:",
+        filteredCache.length,
+      );
 
       setTaskCache(filteredCache, userId);
 
@@ -969,12 +1265,15 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       // 按时间倒序排列
       combinedTasks.sort((a, b) => b.time - a.time);
 
-      debugTaskHistory('[TaskHistory] 合并后的任务记录数:', combinedTasks.length);
+      debugTaskHistory(
+        "[TaskHistory] 合并后的任务记录数:",
+        combinedTasks.length,
+      );
 
       setTasks(combinedTasks);
     } catch (error) {
       hasLoadedDatabaseRef.current = false;
-      console.error('[TaskHistory] 加载历史记录时发生错误:', error);
+      console.error("[TaskHistory] 加载历史记录时发生错误:", error);
       // 不抛出异常，避免影响组件渲染
     }
   }, []);
@@ -984,24 +1283,31 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
     setIsLoadingMoreTasks(true);
     try {
-      const oldestTask = tasks.reduce((oldest, task) => (task.time < oldest.time ? task : oldest), tasks[0]);
+      const oldestTask = tasks.reduce(
+        (oldest, task) => (task.time < oldest.time ? task : oldest),
+        tasks[0],
+      );
       const cursor = new Date(oldestTask.time).toISOString();
       const moreTasks = await loadTasksFromDatabase(userId, cursor);
       setHasMoreDatabaseTasks(moreTasks.length === TASK_HISTORY_PAGE_SIZE);
       if (moreTasks.length === 0) return;
 
       setTasks((current) => {
-        const existingOrderIds = new Set(current.map((task) => task.orderId).filter(Boolean));
+        const existingOrderIds = new Set(
+          current.map((task) => task.orderId).filter(Boolean),
+        );
         const merged = [
           ...current,
-          ...moreTasks.filter((task) => !task.orderId || !existingOrderIds.has(task.orderId)),
+          ...moreTasks.filter(
+            (task) => !task.orderId || !existingOrderIds.has(task.orderId),
+          ),
         ];
         merged.sort((a, b) => b.time - a.time);
         return merged;
       });
     } catch (error) {
-      console.error('[TaskHistory] 加载更多历史记录失败:', error);
-      showToast('加载更早订单失败，请稍后重试', 'error');
+      console.error("[TaskHistory] 加载更多历史记录失败:", error);
+      showToast("加载更早订单失败，请稍后重试", "error");
     } finally {
       setIsLoadingMoreTasks(false);
     }
@@ -1012,7 +1318,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       cleanExpiredCache(userId);
       const cachedTasks = getTaskCache(userId).sort((a, b) => b.time - a.time);
       setTasks(cachedTasks);
-      if (cachedTasks.some((task) => task.status === '处理中')) {
+      if (cachedTasks.some((task) => task.status === "处理中")) {
         void loadTasks(userId);
       }
     });
@@ -1021,12 +1327,18 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   // 监听 localStorage 变化（用于自动刷新）
   useEffect(() => {
     const handleStorageChange = () => {
-      debugTaskHistory('[TaskHistory] 检测到 localStorage 变化，重新加载历史记录');
+      debugTaskHistory(
+        "[TaskHistory] 检测到 localStorage 变化，重新加载历史记录",
+      );
       void loadTasks();
     };
 
     const handleTaskHistoryUpdate = (event: Event) => {
-      const shouldHighlight = !(event instanceof CustomEvent && (event.detail as TaskHistoryUpdatedEventDetail | undefined)?.highlight === false);
+      const shouldHighlight = !(
+        event instanceof CustomEvent &&
+        (event.detail as TaskHistoryUpdatedEventDetail | undefined)
+          ?.highlight === false
+      );
       const latestTask = getTaskCache(userId)[0];
       if (shouldHighlight && latestTask?.id) {
         setIsCollapsed(false);
@@ -1035,11 +1347,11 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       void loadTasks(userId);
     };
 
-    window.addEventListener('storage', handleStorageChange);
-    window.addEventListener('taskHistoryUpdated', handleTaskHistoryUpdate);
+    window.addEventListener("storage", handleStorageChange);
+    window.addEventListener("taskHistoryUpdated", handleTaskHistoryUpdate);
     return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('taskHistoryUpdated', handleTaskHistoryUpdate);
+      window.removeEventListener("storage", handleStorageChange);
+      window.removeEventListener("taskHistoryUpdated", handleTaskHistoryUpdate);
     };
   }, [loadTasks, userId]);
 
@@ -1050,13 +1362,15 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
     const frame = window.requestAnimationFrame(() => {
       taskCardRefs.current[highlightTaskId]?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'nearest',
+        behavior: "smooth",
+        block: "nearest",
       });
     });
 
     const timer = window.setTimeout(() => {
-      setHighlightTaskId((current) => (current === highlightTaskId ? null : current));
+      setHighlightTaskId((current) =>
+        current === highlightTaskId ? null : current,
+      );
     }, 5000);
 
     return () => {
@@ -1076,14 +1390,17 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       setIsCollapsed(true);
     };
 
-    window.addEventListener('taskHistoryCollapseRequest', collapsePanel);
-    return () => window.removeEventListener('taskHistoryCollapseRequest', collapsePanel);
+    window.addEventListener("taskHistoryCollapseRequest", collapsePanel);
+    return () =>
+      window.removeEventListener("taskHistoryCollapseRequest", collapsePanel);
   }, []);
 
   useEffect(() => {
-    window.dispatchEvent(new CustomEvent('taskHistoryPanelState', {
-      detail: { expanded: !isCollapsed },
-    }));
+    window.dispatchEvent(
+      new CustomEvent("taskHistoryPanelState", {
+        detail: { expanded: !isCollapsed },
+      }),
+    );
   }, [isCollapsed]);
 
   useEffect(() => {
@@ -1093,7 +1410,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   }, [isCollapsed, loadTasks, userId]);
 
   useEffect(() => {
-    const hasProcessingTask = tasks.some((task) => task.status === '处理中');
+    const hasProcessingTask = tasks.some((task) => task.status === "处理中");
     if (!hasProcessingTask) {
       return;
     }
@@ -1117,20 +1434,18 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         setIsToolFilterOpen(false);
       }
     };
 
-    document.addEventListener('pointerdown', handlePointerDown);
-    window.addEventListener('keydown', handleKeyDown);
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
     return () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
-      window.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
     };
   }, [isToolFilterOpen]);
-
-
 
   // 格式化时间
   const formatTime = (timestamp: number) => {
@@ -1139,7 +1454,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     const diff = now.getTime() - date.getTime();
 
     if (diff < 60000) {
-      return '刚刚';
+      return "刚刚";
     } else if (diff < 3600000) {
       return `${Math.floor(diff / 60000)}分钟前`;
     } else if (diff < 86400000) {
@@ -1152,46 +1467,116 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
   // 获取标签页图标
   const getTabIcon = (tab: TabType) => {
     switch (tab) {
-      case 'color-extraction':
+      case "color-extraction":
         return (
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"
+            />
           </svg>
         );
-      case 'watermark':
+      case "watermark":
         return (
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M13 10V3L4 14h7v7l9-11h-7z"
+            />
           </svg>
         );
-      case 'hd-upscale':
+      case "hd-upscale":
         return (
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4-4 4 4m-4-4v9m8-16l4 4-4 4m4-4H7" />
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 16l4-4 4 4m-4-4v9m8-16l4 4-4 4m4-4H7"
+            />
           </svg>
         );
-      case 'remove-background':
+      case "remove-background":
         return (
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16M8 4v16M16 4v16" />
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 8h16M4 16h16M8 4v16M16 4v16"
+            />
           </svg>
         );
-      case 'ai-generate':
+      case "ai-generate":
         return (
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+            />
           </svg>
         );
-      case 'smart-edit':
+      case "smart-edit":
         return (
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M4 20h4.586a1 1 0 00.707-.293l10.414-10.414a2 2 0 000-2.828l-2.172-2.172a2 2 0 00-2.828 0L4.293 14.707A1 1 0 004 15.414V20z" />
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15.232 5.232l3.536 3.536M4 20h4.586a1 1 0 00.707-.293l10.414-10.414a2 2 0 000-2.828l-2.172-2.172a2 2 0 00-2.828 0L4.293 14.707A1 1 0 004 15.414V20z"
+            />
           </svg>
         );
-      case 'custom':
+      case "custom":
         return (
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"
+            />
           </svg>
         );
       default:
@@ -1203,27 +1588,35 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     const imagesToDownload = getImageList(task.imageUrl);
 
     if (imagesToDownload.length === 0) {
-      showToast('没有可下载的图片', 'error');
+      showToast("没有可下载的图片", "error");
       return;
     }
 
     try {
-      showToast('正在下载图片...', 'info');
+      showToast("正在下载图片...", "info");
       let successCount = 0;
 
       for (let i = 0; i < imagesToDownload.length; i++) {
         const url = imagesToDownload[i];
-        if (!url.startsWith('http')) {
+        if (!url.startsWith("http")) {
           continue;
         }
 
-        await new Promise(resolve => setTimeout(resolve, i * 200));
+        await new Promise((resolve) => setTimeout(resolve, i * 200));
         const fileName = `image-${task.orderId || task.id}-${i + 1}.png`;
-        const signedResponse = await fetch(`/api/image/download-url?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fileName)}`, { credentials: 'include' });
+        const signedResponse = await fetch(
+          `/api/image/download-url?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fileName)}`,
+          { credentials: "include" },
+        );
         if (signedResponse.ok) {
-          const signedResult = await signedResponse.json().catch(() => null) as { success?: boolean; data?: { downloadUrl?: string } } | null;
+          const signedResult = (await signedResponse
+            .json()
+            .catch(() => null)) as {
+            success?: boolean;
+            data?: { downloadUrl?: string };
+          } | null;
           if (signedResult?.success && signedResult.data?.downloadUrl) {
-            const link = document.createElement('a');
+            const link = document.createElement("a");
             link.href = signedResult.data.downloadUrl;
             link.download = fileName;
             document.body.appendChild(link);
@@ -1234,13 +1627,16 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
           }
         }
 
-        const response = await fetch(`/api/image/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fileName)}`, { credentials: 'include' });
+        const response = await fetch(
+          `/api/image/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fileName)}`,
+          { credentials: "include" },
+        );
         if (!response.ok) {
           throw new Error(`下载失败: ${response.status}`);
         }
         const blob = await response.blob();
         const blobUrl = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
+        const link = document.createElement("a");
         link.href = blobUrl;
         link.download = fileName;
         document.body.appendChild(link);
@@ -1251,92 +1647,107 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       }
 
       if (successCount === 0) {
-        showToast('没有可下载的图片', 'error');
+        showToast("没有可下载的图片", "error");
         return;
       }
 
-      showToast(successCount === 1 ? '图片下载成功' : `已下载 ${successCount} 张图片`, 'success');
+      showToast(
+        successCount === 1 ? "图片下载成功" : `已下载 ${successCount} 张图片`,
+        "success",
+      );
     } catch (error) {
-      console.error('下载图片失败:', error);
-      showToast('下载失败，请重试', 'error');
+      console.error("下载图片失败:", error);
+      showToast("下载失败，请重试", "error");
     }
   };
 
   const downloadPreviewImage = async (imageUrl: string, fileName: string) => {
-    if (!imageUrl.startsWith('http')) {
-      showToast('当前图片链接暂不支持下载', 'error');
+    if (!imageUrl.startsWith("http")) {
+      showToast("当前图片链接暂不支持下载", "error");
       return;
     }
 
     try {
-      showToast('正在准备下载...', 'info');
-      const signedResponse = await fetch(`/api/image/download-url?url=${encodeURIComponent(imageUrl)}&filename=${encodeURIComponent(fileName)}`, { credentials: 'include' });
+      showToast("正在准备下载...", "info");
+      const signedResponse = await fetch(
+        `/api/image/download-url?url=${encodeURIComponent(imageUrl)}&filename=${encodeURIComponent(fileName)}`,
+        { credentials: "include" },
+      );
       if (signedResponse.ok) {
-        const signedResult = await signedResponse.json().catch(() => null) as { success?: boolean; data?: { downloadUrl?: string } } | null;
+        const signedResult = (await signedResponse
+          .json()
+          .catch(() => null)) as {
+          success?: boolean;
+          data?: { downloadUrl?: string };
+        } | null;
         if (signedResult?.success && signedResult.data?.downloadUrl) {
-          const link = document.createElement('a');
+          const link = document.createElement("a");
           link.href = signedResult.data.downloadUrl;
           link.download = fileName;
           document.body.appendChild(link);
           link.click();
           link.remove();
-          showToast('下载已开始', 'success');
+          showToast("下载已开始", "success");
           return;
         }
       }
 
-      const response = await fetch(`/api/image/download?url=${encodeURIComponent(imageUrl)}&filename=${encodeURIComponent(fileName)}`, { credentials: 'include' });
+      const response = await fetch(
+        `/api/image/download?url=${encodeURIComponent(imageUrl)}&filename=${encodeURIComponent(fileName)}`,
+        { credentials: "include" },
+      );
       if (!response.ok) {
         throw new Error(`下载失败: ${response.status}`);
       }
 
       const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
+      const link = document.createElement("a");
       link.href = blobUrl;
       link.download = fileName;
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(blobUrl);
-      showToast('下载已开始', 'success');
+      showToast("下载已开始", "success");
     } catch (error) {
-      console.error('下载预览图失败:', error);
-      showToast('下载失败，请重试', 'error');
+      console.error("下载预览图失败:", error);
+      showToast("下载失败，请重试", "error");
     }
   };
 
   const handleGeneratePsd = async (task: TaskRecord) => {
     if (!task.orderId) {
-      showToast('订单号缺失，无法生成PSD', 'error');
+      showToast("订单号缺失，无法生成PSD", "error");
       return;
     }
 
-    const psdProcessingIsFresh = task.psdGenerationStatus === 'processing'
-      && task.psdGenerationStartedAt
-      && Date.now() - task.psdGenerationStartedAt <= PSD_PROCESSING_STALE_MS;
+    const psdProcessingIsFresh =
+      task.psdGenerationStatus === "processing" &&
+      task.psdGenerationStartedAt &&
+      Date.now() - task.psdGenerationStartedAt <= PSD_PROCESSING_STALE_MS;
 
     if (psdProcessingIsFresh) {
-      showToast('PSD正在生成中，请稍后查看', 'info');
+      showToast("PSD正在生成中，请稍后查看", "info");
       return;
     }
 
     const resultImage = getFirstImage(task.imageUrl);
     if (!isImageValue(resultImage)) {
-      showToast('该订单暂无可用于分层的结果图', 'error');
+      showToast("该订单暂无可用于分层的结果图", "error");
       return;
     }
 
     setGeneratingPsdOrders((current) => new Set(current).add(task.orderId!));
     try {
-      const response = await fetch('/api/color-extraction/generate-psd', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
+      const response = await fetch("/api/color-extraction/generate-psd", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ orderNumber: task.orderId }),
       });
 
-      const result = await response.json() as {
+      const result = (await response.json()) as {
         success?: boolean;
         message?: string;
         error?: string;
@@ -1345,20 +1756,27 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
         };
       };
       if (!result.success) {
-        throw new Error(toUserFacingErrorMessage(result.error, 'PSD生成失败，请重试'));
+        throw new Error(
+          toUserFacingErrorMessage(result.error, "PSD生成失败，请重试"),
+        );
       }
 
-      if (typeof result.data?.remainingPoints === 'number') {
-        window.dispatchEvent(new CustomEvent('userPointsChanged', {
-          detail: { points: result.data.remainingPoints },
-        }));
+      if (typeof result.data?.remainingPoints === "number") {
+        window.dispatchEvent(
+          new CustomEvent("userPointsChanged", {
+            detail: { points: result.data.remainingPoints },
+          }),
+        );
       }
 
-      showToast(result.message || 'PSD生成成功', 'success');
+      showToast(result.message || "PSD生成成功", "success");
       await loadTasks();
     } catch (error) {
-      console.error('[TaskHistory] 手动生成PSD失败:', error);
-      showToast(toUserFacingErrorFromUnknown(error, 'PSD生成失败，请重试'), 'error');
+      console.error("[TaskHistory] 手动生成PSD失败:", error);
+      showToast(
+        toUserFacingErrorFromUnknown(error, "PSD生成失败，请重试"),
+        "error",
+      );
     } finally {
       setGeneratingPsdOrders((current) => {
         const next = new Set(current);
@@ -1368,51 +1786,67 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     }
   };
 
-  const handleRetryFailedTask = async (task: TaskRecord, e: React.MouseEvent) => {
+  const handleRetryFailedTask = async (
+    task: TaskRecord,
+    e: React.MouseEvent,
+  ) => {
     e.stopPropagation();
 
-    if (task.tab !== 'color-extraction' && task.tab !== 'smart-edit') {
-      showToast('当前仅支持重新提交彩绘提取和智能改图任务', 'info');
+    if (task.tab !== "color-extraction" && task.tab !== "smart-edit") {
+      showToast("当前仅支持重新提交彩绘提取和智能改图任务", "info");
       return;
     }
 
     if (!task.orderId) {
-      showToast('订单号缺失，无法重新提交', 'error');
+      showToast("订单号缺失，无法重新提交", "error");
       return;
     }
 
-    if (task.tab === 'smart-edit') {
+    if (task.tab === "smart-edit") {
       setRetryingOrder(task.orderId);
       try {
-        const response = await fetch('/api/material-editor', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'retry-redraw', orderId: task.orderId }),
+        const response = await fetch("/api/material-editor", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "retry-redraw",
+            orderId: task.orderId,
+          }),
         });
 
-        const result = await response.json() as {
+        const result = (await response.json()) as {
           success?: boolean;
           message?: string;
           data?: { remainingPoints?: number };
         };
 
         if (!response.ok || !result.success) {
-          throw new Error(toUserFacingErrorMessage(result.message, '重新提交失败，请稍后重试'));
+          throw new Error(
+            toUserFacingErrorMessage(
+              result.message,
+              "重新提交失败，请稍后重试",
+            ),
+          );
         }
 
-        if (typeof result.data?.remainingPoints === 'number') {
-          window.dispatchEvent(new CustomEvent('userPointsChanged', {
-            detail: { points: result.data.remainingPoints },
-          }));
+        if (typeof result.data?.remainingPoints === "number") {
+          window.dispatchEvent(
+            new CustomEvent("userPointsChanged", {
+              detail: { points: result.data.remainingPoints },
+            }),
+          );
         }
 
         await loadTasks(userId);
-        window.dispatchEvent(new Event('taskHistoryUpdated'));
-        showToast('已重新提交智能改图任务', 'success');
+        window.dispatchEvent(new Event("taskHistoryUpdated"));
+        showToast("已重新提交智能改图任务", "success");
       } catch (error) {
-        console.error('[TaskHistory] 重新提交智能改图失败:', error);
-        showToast(toUserFacingErrorFromUnknown(error, '重新提交失败，请稍后重试'), 'error');
+        console.error("[TaskHistory] 重新提交智能改图失败:", error);
+        showToast(
+          toUserFacingErrorFromUnknown(error, "重新提交失败，请稍后重试"),
+          "error",
+        );
       } finally {
         setRetryingOrder(null);
       }
@@ -1421,54 +1855,63 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
     const userIdToUse = userId || getStoredUserId();
     if (!userIdToUse) {
-      showToast('未找到用户信息，请先登录', 'error');
+      showToast("未找到用户信息，请先登录", "error");
       return;
     }
 
     const retryImageUrl = getFirstImage(task.uploadedImage);
     if (!isImageValue(retryImageUrl)) {
-      showToast('未找到该任务的原始图片，无法重新提交', 'error');
+      showToast("未找到该任务的原始图片，无法重新提交", "error");
       return;
     }
 
-    const normalizedRetryImageUrl = retryImageUrl.startsWith('http://') || retryImageUrl.startsWith('https://')
-      ? retryImageUrl
-      : new URL(retryImageUrl, window.location.origin).toString();
+    const normalizedRetryImageUrl =
+      retryImageUrl.startsWith("http://") ||
+      retryImageUrl.startsWith("https://")
+        ? retryImageUrl
+        : new URL(retryImageUrl, window.location.origin).toString();
 
     setRetryingOrder(task.orderId);
     try {
-      const response = await fetch('/api/color-extraction/run', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/color-extraction/run", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId: userIdToUse,
           imageUrl: normalizedRetryImageUrl,
         }),
       });
 
-      const result = await response.json() as {
+      const result = (await response.json()) as {
         success?: boolean;
         message?: string;
         data?: { remainingPoints?: number };
       };
 
       if (!response.ok || !result.success) {
-        throw new Error(toUserFacingErrorMessage(result.message, '重新提交失败，请稍后重试'));
+        throw new Error(
+          toUserFacingErrorMessage(result.message, "重新提交失败，请稍后重试"),
+        );
       }
 
-      if (typeof result.data?.remainingPoints === 'number') {
-        window.dispatchEvent(new CustomEvent('userPointsChanged', {
-          detail: { points: result.data.remainingPoints },
-        }));
+      if (typeof result.data?.remainingPoints === "number") {
+        window.dispatchEvent(
+          new CustomEvent("userPointsChanged", {
+            detail: { points: result.data.remainingPoints },
+          }),
+        );
       }
 
       await loadTasks(userId);
-      window.dispatchEvent(new Event('taskHistoryUpdated'));
-      showToast('已重新提交彩绘提取任务', 'success');
+      window.dispatchEvent(new Event("taskHistoryUpdated"));
+      showToast("已重新提交彩绘提取任务", "success");
     } catch (error) {
-      console.error('[TaskHistory] 重新提交彩绘提取失败:', error);
-      showToast(toUserFacingErrorFromUnknown(error, '重新提交失败，请稍后重试'), 'error');
+      console.error("[TaskHistory] 重新提交彩绘提取失败:", error);
+      showToast(
+        toUserFacingErrorFromUnknown(error, "重新提交失败，请稍后重试"),
+        "error",
+      );
     } finally {
       setRetryingOrder(null);
     }
@@ -1476,37 +1919,41 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
   const openPsdUrl = (task: TaskRecord) => {
     if (!task.psdUrl) {
-      showToast('PSD文件尚未生成完成', 'error');
+      showToast("PSD文件尚未生成完成", "error");
       return;
     }
 
-    if (typeof task.psdUrl !== 'string' || !task.psdUrl.startsWith('http')) {
-      showToast('PSD链接无效', 'error');
+    if (typeof task.psdUrl !== "string" || !task.psdUrl.startsWith("http")) {
+      showToast("PSD链接无效", "error");
       return;
     }
 
-    window.open(task.psdUrl, '_blank');
-    showToast('已在新标签页打开下载链接', 'info');
+    window.open(task.psdUrl, "_blank");
+    showToast("已在新标签页打开下载链接", "info");
   };
 
   const copyOrderId = (task: TaskRecord, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!task.orderId) return;
 
-    navigator.clipboard.writeText(task.orderId).then(() => {
-      setShowCopySuccessForOrder(task.orderId || null);
-      setTimeout(() => setShowCopySuccessForOrder(null), 2000);
-    }).catch(() => {
-      showToast('复制失败，请手动选择订单号复制', 'error');
-    });
+    navigator.clipboard
+      .writeText(task.orderId)
+      .then(() => {
+        setShowCopySuccessForOrder(task.orderId || null);
+        setTimeout(() => setShowCopySuccessForOrder(null), 2000);
+      })
+      .catch(() => {
+        showToast("复制失败，请手动选择订单号复制", "error");
+      });
   };
 
   // 清空历史记录
   const clearHistory = async () => {
     // 确认弹窗
-    const message = filterTab === 'all'
-      ? '确定要清空所有历史记录吗？此操作不可恢复。'
-      : `确定要清空所有"${getFilterLabel(filterTab)}"的历史记录吗？此操作不可恢复。`;
+    const message =
+      filterTab === "all"
+        ? "确定要清空所有历史记录吗？此操作不可恢复。"
+        : `确定要清空所有"${getFilterLabel(filterTab)}"的历史记录吗？此操作不可恢复。`;
     const confirmed = window.confirm(message);
     if (!confirmed) {
       return;
@@ -1514,22 +1961,27 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
     try {
       // 从 localStorage 获取用户信息
-      const userFromLocalStorage = localStorage.getItem('user');
+      const userFromLocalStorage = localStorage.getItem("user");
       if (!userFromLocalStorage) {
-        showToast('未找到用户信息，请先登录', 'error');
+        showToast("未找到用户信息，请先登录", "error");
         return;
       }
 
       const userData = JSON.parse(userFromLocalStorage);
-      debugTaskHistory('[TaskHistory] 清空历史记录，用户ID:', userData.id, '筛选:', filterTab);
+      debugTaskHistory(
+        "[TaskHistory] 清空历史记录，用户ID:",
+        userData.id,
+        "筛选:",
+        filterTab,
+      );
 
-      if (filterTab === 'all') {
+      if (filterTab === "all") {
         // 清空所有记录
-        const response = await fetch('/api/user/transactions/clear', {
-          method: 'POST',
-          credentials: 'include',
+        const response = await fetch("/api/user/transactions/clear", {
+          method: "POST",
+          credentials: "include",
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
             userId: userData.id,
@@ -1538,12 +1990,23 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
-          console.error('清空历史记录失败:', errorData.message || response.statusText);
-          showToast(toUserFacingErrorMessage(errorData.message, '清空历史记录失败，请稍后重试'), 'error');
+          console.error(
+            "清空历史记录失败:",
+            errorData.message || response.statusText,
+          );
+          showToast(
+            toUserFacingErrorMessage(
+              errorData.message,
+              "清空历史记录失败，请稍后重试",
+            ),
+            "error",
+          );
           return;
         }
 
-        const result = await response.json() as { data?: { deletedCount?: number } };
+        const result = (await response.json()) as {
+          data?: { deletedCount?: number };
+        };
 
         // 清空任务记录缓存
         setTaskCache([], userData.id);
@@ -1552,60 +2015,82 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
         await loadTasks(userData.id);
 
         // 【关键修复】触发 taskHistoryUpdated 事件，通知其他组件（如彩绘提取页面）刷新订单记录
-        debugTaskHistory('[TaskHistory] 清空历史记录成功，触发 taskHistoryUpdated 事件');
-        window.dispatchEvent(new CustomEvent<TaskHistoryUpdatedEventDetail>('taskHistoryUpdated', { detail: { highlight: false } }));
+        debugTaskHistory(
+          "[TaskHistory] 清空历史记录成功，触发 taskHistoryUpdated 事件",
+        );
+        window.dispatchEvent(
+          new CustomEvent<TaskHistoryUpdatedEventDetail>("taskHistoryUpdated", {
+            detail: { highlight: false },
+          }),
+        );
 
         // 显示成功提示
-        showToast(`成功清空 ${result.data?.deletedCount || 0} 条历史记录`, 'success');
+        showToast(
+          `成功清空 ${result.data?.deletedCount || 0} 条历史记录`,
+          "success",
+        );
       } else {
         // 清空特定类型的记录
-        const filteredTasks = tasks.filter(task => task.tab === filterTab);
+        const filteredTasks = tasks.filter((task) => task.tab === filterTab);
         const deletePromises = filteredTasks
-          .filter(task => task.orderId)
-          .map(task => fetch('/api/user/transactions/delete', {
-            method: 'POST',
-            credentials: 'include',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              orderNumber: task.orderId,
+          .filter((task) => task.orderId)
+          .map((task) =>
+            fetch("/api/user/transactions/delete", {
+              method: "POST",
+              credentials: "include",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                orderNumber: task.orderId,
+              }),
             }),
-          }));
+          );
 
         await Promise.all(deletePromises);
 
         // 清空缓存中对应类型的记录
-        const filteredCache = getTaskCache(userData.id).filter(task => task.tab !== filterTab);
+        const filteredCache = getTaskCache(userData.id).filter(
+          (task) => task.tab !== filterTab,
+        );
         setTaskCache(filteredCache, userData.id);
 
         // 重新加载历史记录
         await loadTasks(userData.id);
 
         // 【关键修复】触发 taskHistoryUpdated 事件，通知其他组件（如彩绘提取页面）刷新订单记录
-        debugTaskHistory('[TaskHistory] 清空筛选历史记录成功，触发 taskHistoryUpdated 事件');
-        window.dispatchEvent(new CustomEvent<TaskHistoryUpdatedEventDetail>('taskHistoryUpdated', { detail: { highlight: false } }));
+        debugTaskHistory(
+          "[TaskHistory] 清空筛选历史记录成功，触发 taskHistoryUpdated 事件",
+        );
+        window.dispatchEvent(
+          new CustomEvent<TaskHistoryUpdatedEventDetail>("taskHistoryUpdated", {
+            detail: { highlight: false },
+          }),
+        );
 
         // 显示成功提示
-        showToast(`成功清空 ${filteredTasks.length} 条${getFilterLabel(filterTab)}记录`, 'success');
+        showToast(
+          `成功清空 ${filteredTasks.length} 条${getFilterLabel(filterTab)}记录`,
+          "success",
+        );
       }
     } catch (error) {
-      console.error('清空历史记录异常:', error);
-      showToast('清空历史记录失败，请稍后重试', 'error');
+      console.error("清空历史记录异常:", error);
+      showToast("清空历史记录失败，请稍后重试", "error");
     }
   };
 
   // 获取筛选器标签
   const getFilterLabel = (filter: FilterType): string => {
     const labels: Record<FilterType, string> = {
-      'all': '全部',
-      'color-extraction': '彩绘提取',
-      'ai-generate': 'AI生图',
-      'smart-edit': '智能改图',
-      'watermark': '高清+扩图',
-      'hd-upscale': '高清放大',
-      'remove-background': '移除背景',
-      'custom': '其他历史',
+      all: "全部",
+      "color-extraction": "彩绘提取",
+      "ai-generate": "AI生图",
+      "smart-edit": "智能改图",
+      watermark: "高清+扩图",
+      "hd-upscale": "高清放大",
+      "remove-background": "移除背景",
+      custom: "其他历史",
     };
     return labels[filter] || filter;
   };
@@ -1615,7 +2100,9 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     e.stopPropagation();
 
     // 确认弹窗
-    const confirmed = window.confirm('确定要删除这条历史记录吗？此操作不可恢复。');
+    const confirmed = window.confirm(
+      "确定要删除这条历史记录吗？此操作不可恢复。",
+    );
     if (!confirmed) {
       return;
     }
@@ -1623,11 +2110,11 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     try {
       setDeletingOrder(orderNumber);
       // 调用 API 删除历史记录
-      const response = await fetch('/api/user/transactions/delete', {
-        method: 'POST',
-        credentials: 'include',
+      const response = await fetch("/api/user/transactions/delete", {
+        method: "POST",
+        credentials: "include",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           orderNumber,
@@ -1636,26 +2123,44 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
       if (!response.ok && response.status !== 404) {
         const errorData = await response.json().catch(() => ({}));
-        console.error('删除历史记录失败:', errorData.message || response.statusText);
-        showToast(toUserFacingErrorMessage(errorData.message, '删除历史记录失败，请稍后重试'), 'error');
+        console.error(
+          "删除历史记录失败:",
+          errorData.message || response.statusText,
+        );
+        showToast(
+          toUserFacingErrorMessage(
+            errorData.message,
+            "删除历史记录失败，请稍后重试",
+          ),
+          "error",
+        );
         return;
       }
 
       // 从缓存中移除对应的记录
-      updateTaskCache((records) => records.filter((task) => task.orderId !== orderNumber), userId);
+      updateTaskCache(
+        (records) => records.filter((task) => task.orderId !== orderNumber),
+        userId,
+      );
 
       // 重新加载历史记录
       await loadTasks(userId);
 
       // 【关键修复】触发 taskHistoryUpdated 事件，通知其他组件（如彩绘提取页面）刷新订单记录
-      debugTaskHistory('[TaskHistory] 删除历史记录成功，触发 taskHistoryUpdated 事件');
-      window.dispatchEvent(new CustomEvent<TaskHistoryUpdatedEventDetail>('taskHistoryUpdated', { detail: { highlight: false } }));
+      debugTaskHistory(
+        "[TaskHistory] 删除历史记录成功，触发 taskHistoryUpdated 事件",
+      );
+      window.dispatchEvent(
+        new CustomEvent<TaskHistoryUpdatedEventDetail>("taskHistoryUpdated", {
+          detail: { highlight: false },
+        }),
+      );
 
       // 显示成功提示
-      showToast('删除成功', 'success');
+      showToast("删除成功", "success");
     } catch (error) {
-      console.error('删除历史记录异常:', error);
-      showToast('删除历史记录失败，请稍后重试', 'error');
+      console.error("删除历史记录异常:", error);
+      showToast("删除历史记录失败，请稍后重试", "error");
     } finally {
       setDeletingOrder(null);
     }
@@ -1665,8 +2170,8 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
     <div
       className={`fixed z-[70] flex ${
         isCollapsed
-          ? 'bottom-24 right-4 top-auto items-end sm:bottom-4 sm:right-5 sm:top-[5.5rem] sm:items-center'
-          : 'bottom-24 left-3 right-3 top-auto items-end sm:bottom-4 sm:left-auto sm:right-5 sm:top-[5.5rem] sm:items-center'
+          ? "bottom-24 right-4 top-auto items-end sm:bottom-4 sm:right-5 sm:top-[5.5rem] sm:items-center"
+          : "bottom-24 left-3 right-3 top-auto items-end sm:bottom-4 sm:left-auto sm:right-5 sm:top-[5.5rem] sm:items-center"
       }`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
@@ -1674,21 +2179,37 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       <div
         className={`
           flex max-h-[min(76vh,620px)] overflow-hidden border border-white/15 bg-[#050509]/82 shadow-[0_24px_80px_rgba(0,0,0,0.42)] backdrop-blur-2xl transition-all duration-300 sm:max-h-full
-          ${isCollapsed ? 'h-14 w-14 rounded-full sm:h-auto sm:w-[58px] sm:rounded-[1.35rem]' : 'w-full flex-col rounded-[1.45rem] sm:w-[min(390px,calc(100vw-1.5rem))] sm:rounded-[1.7rem]'}
+          ${isCollapsed ? "h-14 w-14 rounded-full sm:h-auto sm:w-[58px] sm:rounded-[1.35rem]" : "w-full flex-col rounded-[1.45rem] sm:w-[min(390px,calc(100vw-1.5rem))] sm:rounded-[1.7rem]"}
         `}
       >
         <button
           type="button"
-          className={`relative w-full transition-colors hover:bg-white/[0.06] ${isCollapsed ? 'flex h-14 items-center justify-center p-0 sm:min-h-[170px] sm:flex-col sm:gap-3 sm:px-2 sm:py-4' : 'border-b border-white/10 px-4 py-4 text-left'}`}
+          className={`relative w-full transition-colors hover:bg-white/[0.06] ${isCollapsed ? "flex h-14 items-center justify-center p-0 sm:min-h-[170px] sm:flex-col sm:gap-3 sm:px-2 sm:py-4" : "border-b border-white/10 px-4 py-4 text-left"}`}
           onClick={() => setIsCollapsed(!isCollapsed)}
-          aria-label={isCollapsed ? '展开订单记录' : '收起订单记录'}
+          aria-label={isCollapsed ? "展开订单记录" : "收起订单记录"}
         >
           {isCollapsed ? (
             <>
-              <div className={`relative flex h-10 w-10 items-center justify-center rounded-2xl border ${processingCount > 0 ? 'border-blue-300/45 bg-blue-500/18 text-blue-200' : 'border-white/12 bg-white/8 text-white/70'}`}>
-                {processingCount > 0 && <span className="absolute inset-[-3px] rounded-[1.15rem] border border-blue-300/35 animate-pulse" />}
-                <svg className={processingCount > 0 ? 'h-5 w-5 animate-spin' : 'h-5 w-5'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              <div
+                className={`relative flex h-10 w-10 items-center justify-center rounded-2xl border ${processingCount > 0 ? "border-blue-300/45 bg-blue-500/18 text-blue-200" : "border-white/12 bg-white/8 text-white/70"}`}
+              >
+                {processingCount > 0 && (
+                  <span className="absolute inset-[-3px] rounded-[1.15rem] border border-blue-300/35 animate-pulse" />
+                )}
+                <svg
+                  className={
+                    processingCount > 0 ? "h-5 w-5 animate-spin" : "h-5 w-5"
+                  }
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                  />
                 </svg>
                 {processingCount > 0 && (
                   <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500 px-1 text-[10px] font-semibold text-white shadow-lg shadow-blue-500/30">
@@ -1697,9 +2218,13 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                 )}
               </div>
               <div className="hidden flex-col items-center gap-2 sm:flex">
-                <span className="[writing-mode:vertical-rl] text-xs font-medium tracking-[0.22em] text-white/78">订单记录</span>
+                <span className="[writing-mode:vertical-rl] text-xs font-medium tracking-[0.22em] text-white/78">
+                  订单记录
+                </span>
                 {processingCount > 0 ? (
-                  <span className="rounded-full bg-blue-500/20 px-1.5 py-1 text-[10px] text-blue-200 [writing-mode:vertical-rl]">处理中{processingCount}</span>
+                  <span className="rounded-full bg-blue-500/20 px-1.5 py-1 text-[10px] text-blue-200 [writing-mode:vertical-rl]">
+                    处理中{processingCount}
+                  </span>
                 ) : (
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                 )}
@@ -1710,19 +2235,42 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
               <div>
                 <div className="mb-2 flex items-center gap-2">
                   <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-purple-300/25 bg-purple-500/15 text-purple-200">
-                    <svg className="h-4.5 w-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    <svg
+                      className="h-4.5 w-4.5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                      />
                     </svg>
                   </div>
                   <div>
-                    <h3 className="text-base font-semibold text-white">订单记录</h3>
-                    <p className="text-xs text-white/42">订单进度、结果与下载</p>
+                    <h3 className="text-base font-semibold text-white">
+                      订单记录
+                    </h3>
+                    <p className="text-xs text-white/42">
+                      订单进度、结果与下载
+                    </p>
                   </div>
                 </div>
-              
               </div>
-              <svg className="h-5 w-5 rotate-180 text-white/45" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              <svg
+                className="h-5 w-5 rotate-180 text-white/45"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 5l7 7-7 7"
+                />
               </svg>
             </div>
           )}
@@ -1732,7 +2280,11 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
           <>
             <div className="border-b border-white/10 px-4 py-3">
               <div className="mb-3 flex items-center gap-2">
-                <div ref={toolFilterRef} data-role="task-history-tool-filter" className="relative min-w-[150px]">
+                <div
+                  ref={toolFilterRef}
+                  data-role="task-history-tool-filter"
+                  className="relative min-w-[150px]"
+                >
                   <button
                     type="button"
                     data-role="task-history-tool-filter-button"
@@ -1744,12 +2296,22 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                     aria-expanded={isToolFilterOpen}
                     aria-haspopup="listbox"
                   >
-                    <span className="truncate">{getFilterLabel(filterTab)}</span>
-                    <span className={`text-[10px] text-white/45 transition ${isToolFilterOpen ? 'rotate-180' : ''}`}>▾</span>
+                    <span className="truncate">
+                      {getFilterLabel(filterTab)}
+                    </span>
+                    <span
+                      className={`text-[10px] text-white/45 transition ${isToolFilterOpen ? "rotate-180" : ""}`}
+                    >
+                      ▾
+                    </span>
                   </button>
 
                   {isToolFilterOpen ? (
-                    <div data-role="task-history-tool-filter-menu" className="absolute left-0 top-full z-40 mt-2 w-[190px] overflow-hidden rounded-[1rem] border border-white/12 bg-[#0d0d12]/98 p-1 shadow-[0_18px_40px_rgba(0,0,0,0.42)] backdrop-blur-xl" role="listbox">
+                    <div
+                      data-role="task-history-tool-filter-menu"
+                      className="absolute left-0 top-full z-40 mt-2 w-[190px] overflow-hidden rounded-[1rem] border border-white/12 bg-[#0d0d12]/98 p-1 shadow-[0_18px_40px_rgba(0,0,0,0.42)] backdrop-blur-xl"
+                      role="listbox"
+                    >
                       {TASK_FILTER_VALUES.map((filter) => {
                         const selected = filter === filterTab;
                         return (
@@ -1761,12 +2323,18 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                               setFilterTab(filter);
                               setIsToolFilterOpen(false);
                             }}
-                            className={`flex w-full items-center gap-2 rounded-[0.8rem] border px-3 py-2 text-left text-xs transition ${selected ? 'border-purple-300/24 bg-purple-500/16 text-purple-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]' : 'border-transparent text-white/72 hover:bg-white/[0.08] hover:text-white'}`}
+                            className={`flex w-full items-center gap-2 rounded-[0.8rem] border px-3 py-2 text-left text-xs transition ${selected ? "border-purple-300/24 bg-purple-500/16 text-purple-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]" : "border-transparent text-white/72 hover:bg-white/[0.08] hover:text-white"}`}
                             role="option"
                             aria-selected={selected}
                           >
-                            <span className="flex-1 truncate">{getFilterLabel(filter)}</span>
-                            {selected ? <span className="text-[10px] text-purple-100">✓</span> : null}
+                            <span className="flex-1 truncate">
+                              {getFilterLabel(filter)}
+                            </span>
+                            {selected ? (
+                              <span className="text-[10px] text-purple-100">
+                                ✓
+                              </span>
+                            ) : null}
                           </button>
                         );
                       })}
@@ -1775,17 +2343,19 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                 </div>
               </div>
               <div className="grid grid-cols-4 gap-1 rounded-2xl border border-white/8 bg-white/[0.035] p-1">
-                {([
-                  ['all', '全部'],
-                  ['processing', '处理中'],
-                  ['success', '成功'],
-                  ['failed', '失败'],
-                ] as Array<[TaskCenterFilter, string]>).map(([value, label]) => (
+                {(
+                  [
+                    ["all", "全部"],
+                    ["processing", "处理中"],
+                    ["success", "成功"],
+                    ["failed", "失败"],
+                  ] as Array<[TaskCenterFilter, string]>
+                ).map(([value, label]) => (
                   <button
                     key={value}
                     type="button"
                     onClick={() => setStatusFilter(value)}
-                    className={`rounded-xl px-2 py-1.5 text-xs transition-colors ${statusFilter === value ? 'bg-white/14 text-white shadow-sm' : 'text-white/45 hover:bg-white/8 hover:text-white/75'}`}
+                    className={`rounded-xl px-2 py-1.5 text-xs transition-colors ${statusFilter === value ? "bg-white/14 text-white shadow-sm" : "text-white/45 hover:bg-white/8 hover:text-white/75"}`}
                   >
                     {label}
                   </button>
@@ -1794,15 +2364,27 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 history-scrollbar">
-                {visibleTasks.length === 0 ? (
-                  <div className="rounded-2xl border border-white/8 bg-white/[0.035] px-5 py-10 text-center">
+              {visibleTasks.length === 0 ? (
+                <div className="rounded-2xl border border-white/8 bg-white/[0.035] px-5 py-10 text-center">
                   <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-white/8 text-white/36">
-                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    <svg
+                      className="h-5 w-5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                      />
                     </svg>
                   </div>
                   <p className="text-sm text-white/56">暂无匹配任务</p>
-                  <p className="mt-1 text-xs text-white/32">提交图片处理后会自动出现在这里</p>
+                  <p className="mt-1 text-xs text-white/32">
+                    提交图片处理后会自动出现在这里
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -1813,22 +2395,36 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                         <span className="h-px flex-1 bg-white/8" />
                       </div>
                       {group.tasks.map((task) => {
-                        const originalResultImage = getFirstImage(task.imageUrl);
-                        const resultImage = getFirstImage(task.thumbnailUrl || task.imageUrl);
+                        const originalResultImage = getFirstImage(
+                          task.imageUrl,
+                        );
+                        const resultImage = getFirstImage(
+                          task.thumbnailUrl || task.imageUrl,
+                        );
                         const hasResult = isImageValue(originalResultImage);
-                        const previewFileName = hasResult ? getTaskPreviewFileName(task, originalResultImage) : '';
+                        const previewFileName = hasResult
+                          ? getTaskPreviewFileName(task, originalResultImage)
+                          : "";
                         const statusLabel = getTaskStatusLabel(task);
-                        const isSuccessTask = task.status === '成功' || task.status === '部分成功' || !task.status;
-                        const isFailedTask = task.status === '失败' || task.status === '超时';
-                        const psdProcessingIsFresh = task.psdGenerationStatus === 'processing'
-                          && task.psdGenerationStartedAt
-                          && Date.now() - task.psdGenerationStartedAt <= PSD_PROCESSING_STALE_MS;
+                        const isSuccessTask =
+                          task.status === "成功" ||
+                          task.status === "部分成功" ||
+                          !task.status;
+                        const isFailedTask =
+                          task.status === "失败" || task.status === "超时";
+                        const psdProcessingIsFresh =
+                          task.psdGenerationStatus === "processing" &&
+                          task.psdGenerationStartedAt &&
+                          Date.now() - task.psdGenerationStartedAt <=
+                            PSD_PROCESSING_STALE_MS;
                         const isPsdGenerating = task.orderId
-                          ? generatingPsdOrders.has(task.orderId) || Boolean(psdProcessingIsFresh)
+                          ? generatingPsdOrders.has(task.orderId) ||
+                            Boolean(psdProcessingIsFresh)
                           : Boolean(psdProcessingIsFresh);
-                        const psdPoints = task.psdPoints || getGeneratePsdPoints();
+                        const psdPoints =
+                          task.psdPoints || getGeneratePsdPoints();
 
-                        const canDelete = task.status !== '处理中';
+                        const canDelete = task.status !== "处理中";
 
                         return (
                           <div
@@ -1837,16 +2433,41 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                               taskCardRefs.current[task.id] = node;
                             }}
                             onClick={() => onTaskClick?.(task)}
-                            className={`group rounded-2xl border p-3 transition-all ${task.status === '失败' || task.status === '超时' ? 'border-red-300/35 bg-red-500/[0.075] hover:border-red-200/50 hover:bg-red-500/[0.095]' : task.tab === activeTab ? 'border-white/22 bg-white/[0.075]' : getTaskCardClasses(task.status)} ${highlightTaskId === task.id ? 'ring-2 ring-purple-300/70 shadow-[0_0_0_1px_rgba(196,181,253,0.26),0_0_32px_rgba(139,92,246,0.24)]' : ''}`}
+                            className={`group rounded-2xl border p-3 transition-all ${task.status === "失败" || task.status === "超时" ? "border-red-300/35 bg-red-500/[0.075] hover:border-red-200/50 hover:bg-red-500/[0.095]" : task.tab === activeTab ? "border-white/22 bg-white/[0.075]" : getTaskCardClasses(task.status)} ${highlightTaskId === task.id ? "ring-2 ring-purple-300/70 shadow-[0_0_0_1px_rgba(196,181,253,0.26),0_0_32px_rgba(139,92,246,0.24)]" : ""}`}
                           >
                             <div className="flex items-center gap-3">
                               <div className="w-[88px] shrink-0 overflow-hidden rounded-xl border border-white/8 bg-black/30 self-start transition-colors group-hover:border-white/16">
-                                <button type="button" onClick={(e) => { e.stopPropagation(); if (hasResult) previewResultImage(originalResultImage, resultImage, previewFileName); }} className="block w-full text-left">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (hasResult)
+                                      previewResultImage(
+                                        originalResultImage,
+                                        resultImage,
+                                        previewFileName,
+                                      );
+                                  }}
+                                  className="block w-full text-left"
+                                >
                                   {hasResult ? (
-                                    <ImageThumbnail src={resultImage || undefined} fallbackSrc={originalResultImage || undefined} alt="结果图" width={88} height={88} thumbnailSize="small" useProcessedThumbnail={!task.thumbnailUrl} className="h-[88px] w-[88px] object-cover transition duration-200 group-hover:scale-[1.02] group-hover:opacity-90" />
+                                    <ImageThumbnail
+                                      src={resultImage || undefined}
+                                      fallbackSrc={
+                                        originalResultImage || undefined
+                                      }
+                                      alt="结果图"
+                                      width={88}
+                                      height={88}
+                                      thumbnailSize="small"
+                                      useProcessedThumbnail={!task.thumbnailUrl}
+                                      className="h-[88px] w-[88px] object-cover transition duration-200 group-hover:scale-[1.02] group-hover:opacity-90"
+                                    />
                                   ) : (
                                     <div className="flex h-[88px] w-[88px] items-center justify-center text-[11px] text-white/32 text-center leading-tight px-2">
-                                      {task.status === '处理中' ? '处理中' : '暂无结果'}
+                                      {task.status === "处理中"
+                                        ? "处理中"
+                                        : "暂无结果"}
                                     </div>
                                   )}
                                 </button>
@@ -1860,32 +2481,90 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                                     </div>
                                     <div className="min-w-0">
                                       <div className="flex items-center gap-1.5">
-                                        <h4 className="truncate text-sm font-medium text-white/95 leading-tight">{task.tabName}</h4>
-                                        <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] leading-tight tracking-[0.02em] ${getStatusClasses(task.status)}`}>{statusLabel}</span>
+                                        <h4 className="truncate text-sm font-medium text-white/95 leading-tight">
+                                          {task.tabName}
+                                        </h4>
+                                        <span
+                                          className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] leading-tight tracking-[0.02em] ${getStatusClasses(task.status)}`}
+                                        >
+                                          {statusLabel}
+                                        </span>
                                       </div>
                                       <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-white/30 flex-wrap leading-tight">
                                         <div className="inline-flex items-center gap-1">
-                                          <span>订单#{getOrderSuffix(task.orderId)}</span>
-                                          <button type="button" onClick={(e) => copyOrderId(task, e)} className="rounded p-0.5 transition-colors hover:bg-white/8 hover:text-white/80" title="复制订单号">
-                                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                          <span>
+                                            订单#{getOrderSuffix(task.orderId)}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={(e) =>
+                                              copyOrderId(task, e)
+                                            }
+                                            className="rounded p-0.5 transition-colors hover:bg-white/8 hover:text-white/80"
+                                            title="复制订单号"
+                                          >
+                                            <svg
+                                              className="h-3 w-3"
+                                              fill="none"
+                                              stroke="currentColor"
+                                              viewBox="0 0 24 24"
+                                            >
+                                              <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeWidth={2}
+                                                d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                              />
                                             </svg>
                                           </button>
                                         </div>
                                         <span>{formatTime(task.time)}</span>
-                                        {task.duration && <span>{task.duration.toFixed(1)}秒</span>}
+                                        {task.duration && (
+                                          <span>
+                                            {task.duration.toFixed(1)}秒
+                                          </span>
+                                        )}
                                       </div>
-                                      {task.status !== '成功' && task.errorMessage && (
-                                        <div className="mt-1 text-[11px] text-red-300/80 line-clamp-2 leading-tight">
-                                          失败原因: {task.errorMessage}
-                                        </div>
-                                      )}
+                                      {task.status !== "成功" &&
+                                        task.errorMessage && (
+                                          <div className="mt-1 text-[11px] text-red-300/80 line-clamp-2 leading-tight">
+                                            失败原因: {task.errorMessage}
+                                          </div>
+                                        )}
                                     </div>
                                   </div>
-                                    <div className="flex items-center gap-1 text-white/35">
-                                     <button type="button" onClick={(e) => task.orderId && canDelete && void deleteTask(task.orderId, e)} disabled={!task.orderId || deletingOrder === task.orderId || !canDelete} className="rounded-lg p-1.5 transition-colors hover:bg-red-500/15 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-40" title={canDelete ? '删除记录' : '处理中任务不能删除'}>
-                                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  <div className="flex items-center gap-1 text-white/25 opacity-70 transition-opacity group-hover:opacity-100">
+                                    <button
+                                      type="button"
+                                      onClick={(e) =>
+                                        task.orderId &&
+                                        canDelete &&
+                                        void deleteTask(task.orderId, e)
+                                      }
+                                      disabled={
+                                        !task.orderId ||
+                                        deletingOrder === task.orderId ||
+                                        !canDelete
+                                      }
+                                      className="rounded-lg p-1.5 transition-colors hover:bg-red-500/15 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-40"
+                                      title={
+                                        canDelete
+                                          ? "删除记录"
+                                          : "处理中任务不能删除"
+                                      }
+                                    >
+                                      <svg
+                                        className="h-3.5 w-3.5"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                      >
+                                        <path
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                          strokeWidth={2}
+                                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                        />
                                       </svg>
                                     </button>
                                   </div>
@@ -1893,10 +2572,18 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
                                 {isSuccessTask && (
                                   <div className="mt-2.5 flex flex-wrap gap-1.5">
-                                    <button type="button" onClick={(e) => { e.stopPropagation(); void downloadTaskImages(task); }} disabled={!hasResult} className="rounded-full border border-white/8 bg-white/[0.05] px-2.5 py-1 text-[11px] text-white/72 transition-colors hover:bg-white/12 disabled:cursor-not-allowed disabled:opacity-40">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        void downloadTaskImages(task);
+                                      }}
+                                      disabled={!hasResult}
+                                      className="rounded-full border border-white/8 bg-white/[0.05] px-2.5 py-1 text-[11px] text-white/72 transition-colors hover:bg-white/12 disabled:cursor-not-allowed disabled:opacity-40"
+                                    >
                                       下载
                                     </button>
-                                    {task.tab === 'color-extraction' && (
+                                    {task.tab === "color-extraction" && (
                                       <button
                                         type="button"
                                         onClick={(e) => {
@@ -1908,14 +2595,35 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                                           }
                                         }}
                                         disabled={isPsdGenerating}
-                                        className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${task.psdUrl ? 'border-[#31a8ff]/20 bg-[#001e36] text-[#31a8ff] hover:bg-[#001e36]/80' : 'border-violet-300/25 bg-violet-500/15 text-violet-200 hover:bg-violet-500/22'}`}
-                                        title={isPsdGenerating ? 'PSD生成中' : task.psdUrl ? '下载PSD文件' : task.psdGenerationStatus === 'processing' ? '上次生成中断，点击重新生成PSD' : `点击生成PSD（${formatPointsLabel(psdPoints)}）`}
+                                        className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${task.psdUrl ? "border-[#31a8ff]/20 bg-[#001e36] text-[#31a8ff] hover:bg-[#001e36]/80" : "border-violet-300/25 bg-violet-500/15 text-violet-200 hover:bg-violet-500/22"}`}
+                                        title={
+                                          isPsdGenerating
+                                            ? "PSD生成中"
+                                            : task.psdUrl
+                                              ? "下载PSD文件"
+                                              : task.psdGenerationStatus ===
+                                                  "processing"
+                                                ? "上次生成中断，点击重新生成PSD"
+                                                : `点击生成PSD（${formatPointsLabel(psdPoints)}）`
+                                        }
                                       >
-                                        {isPsdGenerating ? '生成中...' : task.psdUrl ? '下载PSD' : task.psdGenerationStatus === 'processing' ? '重新生成PSD' : (
+                                        {isPsdGenerating ? (
+                                          "生成中..."
+                                        ) : task.psdUrl ? (
+                                          "下载PSD"
+                                        ) : task.psdGenerationStatus ===
+                                          "processing" ? (
+                                          "重新生成PSD"
+                                        ) : (
                                           <span className="inline-flex items-center gap-1.5">
                                             <span>生成PSD</span>
-                                            <span className="text-violet-100/45">·</span>
-                                            <PointsIconLabel points={psdPoints} iconClassName="h-3 w-3" />
+                                            <span className="text-violet-100/45">
+                                              ·
+                                            </span>
+                                            <PointsIconLabel
+                                              points={psdPoints}
+                                              iconClassName="h-3 w-3"
+                                            />
                                           </span>
                                         )}
                                       </button>
@@ -1927,11 +2635,19 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                                   <div className="mt-2.5 flex flex-wrap gap-1.5">
                                     <button
                                       type="button"
-                                      onClick={(e) => void handleRetryFailedTask(task, e)}
-                                      disabled={retryingOrder === task.orderId || (task.tab !== 'color-extraction' && task.tab !== 'smart-edit')}
-                                      className="rounded-full border border-red-300/18 bg-red-500/14 px-2.5 py-1 text-[11px] text-red-200 transition-colors hover:bg-red-500/22 disabled:cursor-not-allowed disabled:opacity-40"
+                                      onClick={(e) =>
+                                        void handleRetryFailedTask(task, e)
+                                      }
+                                      disabled={
+                                        retryingOrder === task.orderId ||
+                                        (task.tab !== "color-extraction" &&
+                                          task.tab !== "smart-edit")
+                                      }
+                                      className="rounded-full border border-red-200/28 bg-red-500/22 px-3 py-1.5 text-[11px] font-semibold text-red-50 shadow-[0_8px_20px_rgba(239,68,68,0.12)] transition-colors hover:bg-red-500/32 disabled:cursor-not-allowed disabled:opacity-40"
                                     >
-                                      {retryingOrder === task.orderId ? '重新提交中...' : '重新提交'}
+                                      {retryingOrder === task.orderId
+                                        ? "重新提交中..."
+                                        : "重新提交"}
                                     </button>
                                   </div>
                                 )}
@@ -1952,7 +2668,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                   onClick={() => setShowAllHistory((current) => !current)}
                   className="flex-1 rounded-xl bg-white/8 px-4 py-2 text-sm text-white/75 transition-colors hover:bg-white/14"
                 >
-                  {showAllHistory ? '只看最近20条' : '显示全部历史'}
+                  {showAllHistory ? "只看最近20条" : "显示全部历史"}
                 </button>
                 {showAllHistory && hasMoreDatabaseTasks && (
                   <button
@@ -1960,7 +2676,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                     disabled={isLoadingMoreTasks}
                     className="rounded-xl bg-white/8 px-4 py-2 text-sm text-white/75 transition-colors hover:bg-white/14 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {isLoadingMoreTasks ? '加载中...' : '更早'}
+                    {isLoadingMoreTasks ? "加载中..." : "更早"}
                   </button>
                 )}
                 <button
@@ -1978,84 +2694,110 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
       {/* 复制成功提示 */}
       {showCopySuccessForOrder && (
         <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white/10 backdrop-blur-xl border border-white/20 text-white px-3 py-1.5 rounded-2xl shadow-lg text-xs flex items-center gap-2 z-50">
-          <svg className="w-3.5 h-3.5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          <svg
+            className="w-3.5 h-3.5 text-green-400"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M5 13l4 4L19 7"
+            />
           </svg>
           <span>复制成功</span>
         </div>
       )}
 
       {/* 大图预览弹窗 - 使用 Portal 渲染到 body */}
-      {previewImage && createPortal(
-        <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/92 px-4 py-4"
-          onClick={() => setPreviewImage(null)}
-        >
+      {previewImage &&
+        createPortal(
           <div
-            className="absolute left-4 right-4 top-4 z-10 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/58 px-3 py-2 backdrop-blur-xl sm:left-6 sm:right-6 sm:top-6"
-            onClick={(event) => event.stopPropagation()}
+            className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/92 px-4 py-4"
+            onClick={() => setPreviewImage(null)}
           >
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-white/82">订单大图</p>
-              <p className="max-w-[56vw] truncate text-xs text-white/38">{previewImage.downloadFileName}</p>
+            <div
+              className="absolute left-4 right-4 top-4 z-10 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/58 px-3 py-2 backdrop-blur-xl sm:left-6 sm:right-6 sm:top-6"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-white/82">订单大图</p>
+                <p className="max-w-[56vw] truncate text-xs text-white/38">
+                  {previewImage.downloadFileName}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void downloadPreviewImage(
+                      previewImage.originalUrl,
+                      previewImage.downloadFileName,
+                    );
+                  }}
+                  className="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm font-medium text-white/72 transition-colors hover:bg-white/[0.16] hover:text-white"
+                >
+                  下载
+                </button>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    window.open(
+                      previewImage.originalUrl,
+                      "_blank",
+                      "noopener,noreferrer",
+                    );
+                  }}
+                  className="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm font-medium text-white/72 transition-colors hover:bg-white/[0.16] hover:text-white"
+                >
+                  原图
+                </button>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void navigator.clipboard
+                      .writeText(previewImage.originalUrl)
+                      .then(() => showToast("图片链接已复制", "success"))
+                      .catch(() =>
+                        showToast("复制失败，请手动打开原图复制", "error"),
+                      );
+                  }}
+                  className="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm font-medium text-white/72 transition-colors hover:bg-white/[0.16] hover:text-white"
+                >
+                  复制链接
+                </button>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setPreviewImage(null);
+                  }}
+                  className="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm font-medium text-white/72 transition-colors hover:bg-white/[0.16] hover:text-white"
+                >
+                  关闭
+                </button>
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void downloadPreviewImage(previewImage.originalUrl, previewImage.downloadFileName);
-                }}
-                className="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm font-medium text-white/72 transition-colors hover:bg-white/[0.16] hover:text-white"
-              >
-                下载
-              </button>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  window.open(previewImage.originalUrl, '_blank', 'noopener,noreferrer');
-                }}
-                className="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm font-medium text-white/72 transition-colors hover:bg-white/[0.16] hover:text-white"
-              >
-                原图
-              </button>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void navigator.clipboard.writeText(previewImage.originalUrl)
-                    .then(() => showToast('图片链接已复制', 'success'))
-                    .catch(() => showToast('复制失败，请手动打开原图复制', 'error'));
-                }}
-                className="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm font-medium text-white/72 transition-colors hover:bg-white/[0.16] hover:text-white"
-              >
-                复制链接
-              </button>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setPreviewImage(null);
-                }}
-                className="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm font-medium text-white/72 transition-colors hover:bg-white/[0.16] hover:text-white"
-              >
-                关闭
-              </button>
+            <div
+              className="relative flex h-[90vh] w-[94vw] max-w-[94vw] items-center justify-center pt-16"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <SafeImage
+                src={previewImage.displayUrl}
+                alt="订单大图预览"
+                fill
+                sizes="92vw"
+                className="pointer-events-none rounded-2xl object-contain shadow-[0_28px_90px_rgba(0,0,0,0.5)]"
+              />
             </div>
-          </div>
-          <div className="relative flex h-[90vh] w-[94vw] max-w-[94vw] items-center justify-center pt-16" onClick={(event) => event.stopPropagation()}>
-            <SafeImage
-              src={previewImage.displayUrl}
-              alt="订单大图预览"
-              fill
-              sizes="92vw"
-              className="pointer-events-none rounded-2xl object-contain shadow-[0_28px_90px_rgba(0,0,0,0.5)]"
-            />
-          </div>
-        </div>,
-        document.body
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
