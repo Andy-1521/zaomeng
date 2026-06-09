@@ -3936,9 +3936,9 @@ export default function QuickCreatePage() {
 
       <div
         ref={gallerySectionRef}
-        className={`relative max-w-[92vw] 2xl:max-w-[1780px] mx-auto transition-all ${isDragging ? 'scale-[0.995]' : ''}`}
+        className={`relative mx-auto max-w-full transition-all sm:max-w-[92vw] 2xl:max-w-[1780px] ${isDragging ? 'scale-[0.995]' : ''}`}
       >
-        <div className="mb-7 flex flex-wrap items-end justify-between gap-5">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 sm:mb-5">
           <div className="flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.045] p-1">
             {([
               ['gallery', '图库'],
@@ -3969,7 +3969,7 @@ export default function QuickCreatePage() {
               }
               void loadOrderResults();
             }}
-            className="group inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.07] px-4 py-2.5 text-sm font-medium text-white/78 shadow-[0_14px_34px_rgba(0,0,0,0.22)] transition-all hover:-translate-y-0.5 hover:border-purple-300/25 hover:bg-gradient-to-r hover:from-purple-600 hover:to-blue-600 hover:text-white"
+            className="group inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.07] px-4 py-2.5 text-sm font-medium text-white/78 shadow-[0_10px_26px_rgba(0,0,0,0.2)] transition-all hover:-translate-y-0.5 hover:border-purple-300/25 hover:bg-white/[0.11] hover:text-white"
             title={libraryView === 'gallery' ? '上传本地素材' : '刷新订单记录'}
           >
             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/12 text-lg leading-none transition-colors group-hover:bg-white/20">{libraryView === 'gallery' ? '+' : '↻'}</span>
@@ -3977,9 +3977,9 @@ export default function QuickCreatePage() {
           </button>
         </div>
 
-        <div className="relative z-10 mb-5 rounded-[1.8rem] border border-white/[0.08] bg-black/28 p-3 shadow-[0_18px_70px_rgba(0,0,0,0.2)] backdrop-blur-2xl ring-1 ring-white/[0.03]">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className={`flex min-w-0 flex-1 items-center gap-2 pb-1 ${libraryView === 'gallery' ? 'overflow-x-auto' : 'overflow-visible'}`}>
+        <div className="relative z-10 mb-4 rounded-[1.55rem] border border-white/[0.08] bg-black/24 p-2.5 shadow-[0_12px_44px_rgba(0,0,0,0.18)] backdrop-blur-2xl ring-1 ring-white/[0.03] sm:mb-5 sm:rounded-[1.8rem] sm:p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            <div className={`scrollbar-auto-hide flex min-w-0 flex-1 items-center gap-2 pb-0.5 ${libraryView === 'gallery' ? 'overflow-x-auto' : 'overflow-visible'}`}>
               {libraryView === 'gallery' ? (
                 <>
                   {([
@@ -3991,7 +3991,7 @@ export default function QuickCreatePage() {
                       type="button"
                       key={scope}
                       onClick={() => handleMaterialScopeChange(scope)}
-                      className={`shrink-0 rounded-full border px-3.5 py-2 text-xs transition-all ${materialScope === scope ? 'border-white/18 bg-white/16 text-white shadow-[0_8px_22px_rgba(255,255,255,0.06)]' : 'border-white/[0.07] bg-white/[0.045] text-white/48 hover:bg-white/[0.08] hover:text-white/78'}`}
+                      className={`shrink-0 rounded-full border px-3 py-1.5 text-xs transition-all sm:px-3.5 sm:py-2 ${materialScope === scope ? 'border-white/18 bg-white/16 text-white shadow-[0_8px_22px_rgba(255,255,255,0.06)]' : 'border-white/[0.07] bg-white/[0.045] text-white/48 hover:bg-white/[0.08] hover:text-white/78'}`}
                     >
                       {label}{materialScope === scope && galleryTotalCount > 0 ? <span className="ml-1 text-white/32">{galleryTotalCount}</span> : null}
                     </button>
@@ -4004,7 +4004,7 @@ export default function QuickCreatePage() {
                         type="button"
                         key={folder.id}
                         onClick={() => handleMaterialScopeChange(scope)}
-                        className={`shrink-0 rounded-full border px-3.5 py-2 text-xs transition-all ${materialScope === scope ? 'border-blue-300/28 bg-blue-400/18 text-blue-50 shadow-[0_10px_26px_rgba(59,130,246,0.12)]' : 'border-white/[0.07] bg-white/[0.045] text-white/48 hover:bg-white/[0.08] hover:text-white/78'}`}
+                        className={`shrink-0 rounded-full border px-3 py-1.5 text-xs transition-all sm:px-3.5 sm:py-2 ${materialScope === scope ? 'border-blue-300/28 bg-blue-400/18 text-blue-50 shadow-[0_10px_26px_rgba(59,130,246,0.12)]' : 'border-white/[0.07] bg-white/[0.045] text-white/48 hover:bg-white/[0.08] hover:text-white/78'}`}
                       >
                         {folder.name}{materialScope === scope && galleryTotalCount > 0 ? <span className="ml-1 text-white/32">{galleryTotalCount}</span> : null}
                       </button>
@@ -4130,8 +4130,8 @@ export default function QuickCreatePage() {
           )}
         </div>
 
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-2 text-sm text-white/42">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 sm:mb-6 sm:gap-4">
+          <div className="flex items-center gap-2 text-xs text-white/38 sm:text-sm sm:text-white/42">
             <span className="h-1.5 w-1.5 rounded-full bg-purple-300/70" />
             {libraryView === 'gallery'
               ? `当前显示 ${galleryLoadedCount}${galleryTotalCount > galleryLoadedCount ? ` / ${galleryTotalCount}` : ''} 张`
