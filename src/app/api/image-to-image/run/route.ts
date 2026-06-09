@@ -17,6 +17,10 @@ export const maxDuration = 300;
 const FIXED_PROMPT = '请将商品主图中的手机壳背面彩绘图案精准提取为可直接用于工厂打印的平面印刷稿，并严格执行以下要求：\n1. 只保留手机壳背面的彩绘/印刷图案区域，彻底移除所有与手机壳硬件结构相关的内容，包括但不限于摄像头开孔、镜头边框、壳体边缘、侧边、按键位、孔位、阴影、高光、反射、手持道具、背景布景及其他非图案元素；\n2. 将原商品图中的透视角度、倾斜变形、弯曲展示效果自动校正为正视、平整、无透视畸变的二维平面图；\n3. 输出结果必须是手机壳背面图案的完整平面印刷稿，不是商品效果图，不要保留产品摄影感、立体感、材质反光或展示场景；\n4. 严格保留原图中的全部设计内容与细节，包括纹理、笔触、线条、渐变、边缘、图案层次、细小装饰元素，禁止擅自增删、重绘、简化、脑补或风格化；\n5. 色彩必须高度还原原商品图中的设计颜色，禁止出现偏色、灰化、过饱和、失真或对比度异常；\n6. 图案内容必须完整覆盖整个输出画布，边界完整，不留白，不内缩，不裁掉边缘图案；\n7. 如果原商品主图中图案区域本身没有独立背景，请自动补出与主体设计清晰区分、适合打印生产识别的纯色平整背景；如果原本已有明确背景设计，则完整保留原背景设计；\n8. 输出图像必须清晰、干净、无水印、无噪点、无压缩痕迹、无模糊、无锯齿，达到印刷生产可用标准；\n9. 输出结果为高精度、高清晰度、适合后续喷绘、UV打印、彩绘生产使用的手机壳背面平面图。\n这是一个生产提取任务，不是创意生成任务。禁止风格迁移、禁止自动美化、禁止重新设计、禁止脑补缺失内容、禁止增加原图中不存在的元素，只允许在提取与校正范围内进行最小必要处理。';
 
 function getUserFacingImageGenerationMessage(error: unknown) {
+  if (isDatabaseUnavailable(error)) {
+    return '订单/积分服务暂时不可用，请稍后重试';
+  }
+
   if (isImageEditTimeoutError(error)) {
     return '处理时间较长，请稍后重试';
   }
@@ -25,7 +29,21 @@ function getUserFacingImageGenerationMessage(error: unknown) {
 }
 
 function getUserFacingImageGenerationStatus(error: unknown) {
+  if (isDatabaseUnavailable(error)) return 503;
   return isImageEditTimeoutError(error) ? 504 : 500;
+}
+
+function isDatabaseUnavailable(error: unknown) {
+  const message = [
+    error instanceof Error ? error.message : '',
+    error instanceof Error && error.cause instanceof Error ? error.cause.message : '',
+  ].join(' ');
+  return (
+    message.includes('ECONNREFUSED') ||
+    message.includes('ETIMEDOUT') ||
+    message.includes('connect ') ||
+    message.includes('数据库')
+  );
 }
 
 function normalizeSourceSize(sourceSize?: { width?: number | null; height?: number | null }) {
