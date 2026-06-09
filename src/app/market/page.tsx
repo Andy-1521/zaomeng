@@ -1170,15 +1170,14 @@ function MarketPageContent() {
                         </p>
                       </div>
 
-                      <div className="pointer-events-none mx-auto mt-7 flex w-full max-w-[26rem] items-center justify-start gap-3 text-left">
-                        <span className="h-px w-10 bg-gradient-to-r from-transparent via-cyan-100/35 to-cyan-100/10" />
-                        <span className="text-sm font-medium tracking-wide text-white/56">
+                      <div className="pointer-events-none mx-auto mt-7 flex flex-col items-center text-center">
+                        <span className="text-sm font-semibold tracking-[0.16em] text-cyan-200/88 drop-shadow-[0_0_14px_rgba(103,232,249,0.28)]">
                           下滑浏览热门素材
                         </span>
-                        <span className="relative grid h-8 w-8 place-items-center rounded-full border border-white/10 bg-white/[0.045] text-cyan-100/78 shadow-[0_12px_32px_rgba(0,0,0,0.28)]">
-                          <span className="absolute inset-0 rounded-full bg-cyan-200/10 blur-md" />
+                        <span className="relative mt-2 grid h-11 w-11 place-items-center text-cyan-200 motion-safe:animate-bounce">
+                          <span className="absolute inset-1 rounded-full bg-cyan-300/12 blur-xl" />
                           <svg
-                            className="relative h-4 w-4 motion-safe:animate-bounce"
+                            className="relative h-9 w-9 drop-shadow-[0_0_18px_rgba(103,232,249,0.42)]"
                             fill="none"
                             stroke="currentColor"
                             viewBox="0 0 24 24"
@@ -1187,8 +1186,8 @@ function MarketPageContent() {
                             <path
                               strokeLinecap="round"
                               strokeLinejoin="round"
-                              strokeWidth={1.8}
-                              d="M12 5v14m0 0 5-5m-5 5-5-5"
+                              strokeWidth={2.8}
+                              d="m5.5 7.5 6.5 6.5 6.5-6.5M5.5 13l6.5 6.5L18.5 13"
                             />
                           </svg>
                         </span>
