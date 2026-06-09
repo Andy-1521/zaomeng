@@ -3,10 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import dotenv from 'dotenv';
 import sharp from 'sharp';
-import { inArray } from 'drizzle-orm';
-import { getDb, getMysqlPool, userManager } from '@/storage/database';
-import { capturedImageManager } from '@/storage/database/capturedImageManager';
-import { marketItems, marketPurchases } from '@/storage/database/shared/schema';
+import { getMysqlPool, userManager } from '@/storage/database';
 
 dotenv.config({ path: path.join(process.cwd(), '.env.local') });
 
@@ -358,7 +355,6 @@ async function runMaterialAndPluginChecks(user: SmokeUser, imageUrl: string) {
 
 async function cleanupUsers() {
   const pool = await getMysqlPool();
-  const db = await getDb();
   const ids = new Set(createdUserIds);
 
   const poolForLookup = await getMysqlPool();
@@ -379,6 +375,7 @@ async function cleanupUsers() {
   if (userIds.length === 0) return;
 
   try {
+    const placeholders = userIds.map(() => '?').join(',');
     const [itemRows] = await pool.query<any[]>(
       `SELECT id FROM market_items WHERE seller_id IN (${userIds.map(() => '?').join(',')})`,
       userIds,
@@ -388,21 +385,43 @@ async function cleanupUsers() {
     }
 
     const itemIds = [...createdMarketItemIds].filter(Boolean);
+    await pool.query(
+      `DELETE FROM market_purchases WHERE buyer_id IN (${placeholders}) OR seller_id IN (${placeholders})`,
+      [...userIds, ...userIds],
+    );
+
     if (itemIds.length > 0) {
-      await db.delete(marketPurchases).where(inArray(marketPurchases.itemId, itemIds));
-      await db.delete(marketItems).where(inArray(marketItems.id, itemIds));
+      await pool.query(
+        `DELETE FROM market_purchases WHERE item_id IN (${itemIds.map(() => '?').join(',')})`,
+        itemIds,
+      );
+      await pool.query(
+        `DELETE FROM market_items WHERE id IN (${itemIds.map(() => '?').join(',')})`,
+        itemIds,
+      );
     }
 
-    await db.delete(marketPurchases).where(inArray(marketPurchases.buyerId, userIds));
-    await db.delete(marketPurchases).where(inArray(marketPurchases.sellerId, userIds));
+    await pool.query(`DELETE FROM captured_images WHERE user_id IN (${placeholders})`, userIds);
+    await pool.query(`DELETE FROM chat_messages WHERE user_id IN (${placeholders})`, userIds);
+    await pool.query(`DELETE FROM material_folders WHERE user_id IN (${placeholders})`, userIds);
+    await pool.query(
+      `DELETE FROM recharge_codes WHERE created_by IN (${placeholders}) OR redeemed_by IN (${placeholders})`,
+      [...userIds, ...userIds],
+    );
+    await pool.query(`DELETE FROM transactions WHERE user_id IN (${placeholders})`, userIds);
+    await pool.query(`DELETE FROM users WHERE id IN (${placeholders})`, userIds);
 
-    for (const userId of userIds) {
-      await capturedImageManager.clearUserCapturedImages(userId).catch(() => {});
-      await pool.query('DELETE FROM transactions WHERE user_id = ?', [userId]).catch(() => {});
-      await userManager.deleteUser(userId).catch(() => {});
-    }
+    const [remainingRows] = await pool.query<any[]>(
+      'SELECT COUNT(*) AS count FROM users WHERE email LIKE ? OR email = ?',
+      ['assistant-prod-smoke-%@example.test', 'assistant-real-smoke@example.test'],
+    );
+    const remainingUsers = Number((remainingRows as Array<{ count?: number }>)[0]?.count || 0);
 
-    push('cleanup test users/data', true, { userIds: userIds.length, marketItems: createdMarketItemIds.size });
+    push('cleanup test users/data', remainingUsers === 0, {
+      userIds: userIds.length,
+      marketItems: createdMarketItemIds.size,
+      remainingUsers,
+    });
   } catch (error) {
     push('cleanup test users/data', false, { error: error instanceof Error ? error.message : String(error) });
     throw error;

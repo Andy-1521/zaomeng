@@ -1,8 +1,5 @@
 import dotenv from 'dotenv';
-import { inArray } from 'drizzle-orm';
-import { getDb, getMysqlPool, userManager } from '@/storage/database';
-import { capturedImageManager } from '@/storage/database/capturedImageManager';
-import { marketItems, marketPurchases } from '@/storage/database/shared/schema';
+import { getMysqlPool } from '@/storage/database';
 
 dotenv.config({ path: '.env.local' });
 
@@ -16,7 +13,6 @@ async function tableExists(pool: Awaited<ReturnType<typeof getMysqlPool>>, table
 
 async function main() {
   const pool = await getMysqlPool();
-  const db = await getDb();
   const [userRows] = await pool.query(
     'SELECT id, email FROM users WHERE email LIKE ? OR email = ?',
     ['assistant-prod-smoke-%@example.test', 'assistant-real-smoke@example.test'],
@@ -31,10 +27,14 @@ async function main() {
 
   const hasMarketItems = await tableExists(pool, 'market_items');
   const hasMarketPurchases = await tableExists(pool, 'market_purchases');
+  const hasCapturedImages = await tableExists(pool, 'captured_images');
+  const hasChatMessages = await tableExists(pool, 'chat_messages');
+  const hasMaterialFolders = await tableExists(pool, 'material_folders');
+  const hasRechargeCodes = await tableExists(pool, 'recharge_codes');
+  const placeholders = userIds.map(() => '?').join(',');
   let itemIds: string[] = [];
 
   if (hasMarketItems) {
-    const placeholders = userIds.map(() => '?').join(',');
     const [itemRows] = await pool.query(
       `SELECT id FROM market_items WHERE seller_id IN (${placeholders})`,
       userIds,
@@ -43,24 +43,57 @@ async function main() {
   }
 
   if (hasMarketPurchases) {
+    await pool.query(
+      `DELETE FROM market_purchases WHERE buyer_id IN (${placeholders}) OR seller_id IN (${placeholders})`,
+      [...userIds, ...userIds],
+    );
     if (itemIds.length > 0) {
-      await db.delete(marketPurchases).where(inArray(marketPurchases.itemId, itemIds));
+      await pool.query(
+        `DELETE FROM market_purchases WHERE item_id IN (${itemIds.map(() => '?').join(',')})`,
+        itemIds,
+      );
     }
-    await db.delete(marketPurchases).where(inArray(marketPurchases.buyerId, userIds));
-    await db.delete(marketPurchases).where(inArray(marketPurchases.sellerId, userIds));
   }
 
   if (hasMarketItems && itemIds.length > 0) {
-    await db.delete(marketItems).where(inArray(marketItems.id, itemIds));
+    await pool.query(
+      `DELETE FROM market_items WHERE id IN (${itemIds.map(() => '?').join(',')})`,
+      itemIds,
+    );
   }
 
-  for (const userId of userIds) {
-    await capturedImageManager.clearUserCapturedImages(userId).catch(() => {});
-    await pool.query('DELETE FROM transactions WHERE user_id = ?', [userId]).catch(() => {});
-    await userManager.deleteUser(userId).catch(() => {});
+  if (hasCapturedImages) {
+    await pool.query(`DELETE FROM captured_images WHERE user_id IN (${placeholders})`, userIds);
   }
 
-  console.log(JSON.stringify({ ok: true, users: userIds.length, marketItems: itemIds.length }));
+  if (hasChatMessages) {
+    await pool.query(`DELETE FROM chat_messages WHERE user_id IN (${placeholders})`, userIds);
+  }
+
+  if (hasMaterialFolders) {
+    await pool.query(`DELETE FROM material_folders WHERE user_id IN (${placeholders})`, userIds);
+  }
+
+  if (hasRechargeCodes) {
+    await pool.query(
+      `DELETE FROM recharge_codes WHERE created_by IN (${placeholders}) OR redeemed_by IN (${placeholders})`,
+      [...userIds, ...userIds],
+    );
+  }
+
+  await pool.query(`DELETE FROM transactions WHERE user_id IN (${placeholders})`, userIds);
+  await pool.query(`DELETE FROM users WHERE id IN (${placeholders})`, userIds);
+
+  const [remainingRows] = await pool.query(
+    'SELECT COUNT(*) AS count FROM users WHERE email LIKE ? OR email = ?',
+    ['assistant-prod-smoke-%@example.test', 'assistant-real-smoke@example.test'],
+  );
+  const remainingUsers = Number((remainingRows as Array<{ count?: number }>)[0]?.count || 0);
+
+  console.log(JSON.stringify({ ok: remainingUsers === 0, users: userIds.length, marketItems: itemIds.length, remainingUsers }));
+  if (remainingUsers !== 0) {
+    process.exitCode = 1;
+  }
   await pool.end();
 }
 
