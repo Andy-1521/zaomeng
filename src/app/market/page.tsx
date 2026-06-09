@@ -1908,11 +1908,11 @@ function MarketPageContent() {
 
       {selectedItem ? (
         <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/76 px-4 py-6 backdrop-blur-sm"
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/78 px-3 py-5 backdrop-blur-sm"
           onClick={() => setSelectedItem(null)}
         >
           <div
-            className="grid max-h-[92vh] w-full max-w-7xl overflow-hidden rounded-[1.55rem] border border-white/12 bg-[#07070b]/96 shadow-[0_28px_90px_rgba(0,0,0,0.55)] lg:grid-cols-[minmax(0,1fr)_360px]"
+            className="grid max-h-[86vh] w-full max-w-6xl overflow-hidden rounded-[1.35rem] border border-white/12 bg-[#07070b]/96 shadow-[0_24px_76px_rgba(0,0,0,0.52)] lg:grid-cols-[minmax(0,1fr)_320px]"
             onClick={(event) => event.stopPropagation()}
           >
             {(() => {
@@ -1939,8 +1939,8 @@ function MarketPageContent() {
 
               return (
                 <>
-                  <div className="min-h-0 overflow-y-auto bg-black/28 p-4 sm:p-5">
-                    <div className="relative flex h-[min(64vh,720px)] min-h-[340px] items-center justify-center overflow-hidden rounded-[1.35rem] border border-white/10 bg-[#050507] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                  <div className="min-h-0 overflow-y-auto bg-black/24 p-3 sm:p-4">
+                    <div className="relative flex h-[min(54vh,620px)] min-h-[280px] items-center justify-center overflow-hidden rounded-[1.15rem] border border-white/10 bg-[#050507] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                       {isLayerPreview ? (
                         <div
                           className="absolute inset-3 rounded-2xl opacity-55"
@@ -1960,19 +1960,19 @@ function MarketPageContent() {
                           src={getDisplayImageUrl(previewUrl)}
                           alt={previewTitle}
                           fill
-                          sizes="min(68vw, 980px)"
-                          className="object-contain p-5"
+                          sizes="min(62vw, 820px)"
+                          className="object-contain p-4"
                         />
                       ) : (
-                        <div className="flex h-full min-h-[360px] items-center justify-center text-sm text-white/34">
+                        <div className="flex h-full min-h-[280px] items-center justify-center text-sm text-white/34">
                           该图层暂无预览
                         </div>
                       )}
-                      <div className="pointer-events-none absolute bottom-4 left-4 flex max-w-[calc(100%-2rem)] flex-wrap items-center gap-2">
-                        <span className="rounded-full border border-white/10 bg-black/62 px-3 py-1.5 text-xs text-white/72 backdrop-blur">
+                      <div className="pointer-events-none absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-1.5">
+                        <span className="rounded-full border border-white/10 bg-black/62 px-2.5 py-1 text-[11px] text-white/72 backdrop-blur">
                           {previewTitle}
                         </span>
-                        <span className="rounded-full border border-white/10 bg-black/52 px-3 py-1.5 text-xs text-white/46 backdrop-blur">
+                        <span className="rounded-full border border-white/10 bg-black/52 px-2.5 py-1 text-[11px] text-white/46 backdrop-blur">
                           {selectedLayerMeta}
                         </span>
                       </div>
@@ -1995,45 +1995,45 @@ function MarketPageContent() {
                       ) : null}
                     </div>
 
-                    <section className="mt-4 rounded-2xl border border-white/10 bg-white/[0.035] p-4 sm:p-5">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <h2 className="text-xl font-semibold text-white">
+                    <section className="mt-3 rounded-[1.15rem] border border-white/10 bg-white/[0.032] p-3 sm:p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-2.5">
+                        <div className="min-w-0">
+                          <h2 className="truncate text-lg font-semibold text-white">
                             {selectedItem.title}
                           </h2>
-                          <p className="mt-1 text-sm text-white/42">
+                          <p className="mt-1 text-xs text-white/42">
                             {selectedItem.category} /{" "}
                             {selectedItem.sellerName || "创作者"} /{" "}
                             {formatDate(selectedItem.createdAt)}
                           </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
-                          <div className="inline-flex items-center gap-2 rounded-full border border-yellow-500/20 bg-yellow-500/10 px-3 py-2 text-yellow-200">
+                          <div className="inline-flex items-center gap-1.5 rounded-full border border-yellow-500/20 bg-yellow-500/10 px-2.5 py-1.5 text-yellow-200">
                             <PointsIconLabel
                               points={selectedItem.pricePoints}
-                              iconClassName="h-4 w-4"
+                              iconClassName="h-3.5 w-3.5"
                             />
                           </div>
                         </div>
                       </div>
 
-                      <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-white/58">
+                      <p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-white/54">
                         {selectedItem.description ||
                           "购买后可用于商品铺货，不可二次转售素材文件。"}
                       </p>
 
-                      <div className="mt-4 flex flex-wrap gap-2">
+                      <div className="mt-3 flex flex-wrap gap-1.5">
                         {(selectedItem.tags || []).map((tag) => (
                           <span
                             key={tag}
-                            className="rounded-full border border-white/10 bg-white/[0.055] px-2.5 py-1 text-xs text-white/48"
+                            className="rounded-full border border-white/10 bg-white/[0.055] px-2 py-0.5 text-[11px] text-white/48"
                           >
                             {tag}
                           </span>
                         ))}
                       </div>
 
-                      <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-3 text-xs leading-5 text-white/42">
+                      <div className="mt-3 rounded-xl border border-white/10 bg-black/18 px-3 py-2 text-[11px] leading-5 text-white/38">
                         购买后可用于手机壳商品铺货、印刷打样和店铺展示；不提供独家买断，不允许二次转售素材包。
                       </div>
                       {purchaseCompletedItemId === selectedItem.id ? (
@@ -2076,7 +2076,7 @@ function MarketPageContent() {
                         </div>
                       ) : null}
 
-                      <div className="mt-5 flex flex-wrap gap-2 border-t border-white/10 pt-4">
+                      <div className="mt-4 flex flex-wrap gap-2 border-t border-white/10 pt-3">
                         {selectedItem.status === "pending" && user?.isAdmin ? (
                           <>
                             <button
@@ -2130,8 +2130,8 @@ function MarketPageContent() {
                     </section>
                   </div>
 
-                  <aside className="flex min-h-0 flex-col border-t border-white/10 bg-[#0b0b12]/92 p-4 lg:border-l lg:border-t-0">
-                    <div className="mb-4 flex items-start justify-between gap-3">
+                  <aside className="flex min-h-0 flex-col border-t border-white/10 bg-[#0b0b12]/90 p-3 lg:border-l lg:border-t-0">
+                    <div className="mb-3 flex items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-semibold text-white/88">
                           PSD 图层
@@ -2145,16 +2145,30 @@ function MarketPageContent() {
                       </div>
                       <button
                         onClick={() => setSelectedItem(null)}
-                        className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-sm text-white/55 hover:bg-white/[0.12] hover:text-white"
+                        aria-label="关闭详情"
+                        className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-white/10 bg-white/[0.055] text-white/50 transition hover:bg-white/[0.1] hover:text-white"
                       >
-                        关闭
+                        <svg
+                          className="h-3.5 w-3.5"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                          aria-hidden="true"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={1.8}
+                            d="M6 6l12 12M18 6 6 18"
+                          />
+                        </svg>
                       </button>
                     </div>
 
                     <div className="min-h-0 flex-1 overflow-y-auto pr-1">
                       {selectedItem.psdUrl ? (
-                        <div className="mb-3 grid grid-cols-2 gap-2">
-                          <div className="rounded-2xl border border-white/10 bg-white/[0.035] px-3 py-2">
+                        <div className="mb-2.5 grid grid-cols-2 gap-2">
+                          <div className="rounded-xl border border-white/10 bg-white/[0.03] px-2.5 py-2">
                             <p className="text-[11px] text-white/34">
                               文件类型
                             </p>
@@ -2162,7 +2176,7 @@ function MarketPageContent() {
                               PSD 素材包
                             </p>
                           </div>
-                          <div className="rounded-2xl border border-white/10 bg-white/[0.035] px-3 py-2">
+                          <div className="rounded-xl border border-white/10 bg-white/[0.03] px-2.5 py-2">
                             <p className="text-[11px] text-white/34">
                               预览权限
                             </p>
@@ -2175,9 +2189,9 @@ function MarketPageContent() {
                       <button
                         type="button"
                         onClick={() => setSelectedLayerPreviewId("source")}
-                        className={`mb-3 flex w-full items-center gap-3 rounded-2xl border p-2 text-left transition-colors ${selectedLayerPreviewId === "source" ? "border-[#31a8ff]/55 bg-[#31a8ff]/12" : "border-white/10 bg-white/[0.035] hover:bg-white/[0.07]"}`}
+                        className={`mb-2.5 flex w-full items-center gap-2.5 rounded-xl border p-2 text-left transition-colors ${selectedLayerPreviewId === "source" ? "border-[#31a8ff]/55 bg-[#31a8ff]/12" : "border-white/10 bg-white/[0.03] hover:bg-white/[0.065]"}`}
                       >
-                        <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-black/35">
+                        <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-black/35">
                           <SafeImage
                             src={getDisplayImageUrl(
                               selectedItem.thumbnailUrl ||
@@ -2185,7 +2199,7 @@ function MarketPageContent() {
                             )}
                             alt="整图预览"
                             fill
-                            sizes="64px"
+                            sizes="48px"
                             className="object-cover"
                           />
                         </div>
@@ -2211,10 +2225,10 @@ function MarketPageContent() {
                                   onClick={() =>
                                     setSelectedLayerPreviewId(layer.id)
                                   }
-                                  className={`flex w-full items-center gap-3 rounded-2xl border p-2 text-left transition-colors ${selectedLayerPreviewId === layer.id ? "border-[#31a8ff]/55 bg-[#31a8ff]/12" : "border-white/10 bg-white/[0.035] hover:bg-white/[0.07]"}`}
+                                  className={`flex w-full items-center gap-2.5 rounded-xl border p-2 text-left transition-colors ${selectedLayerPreviewId === layer.id ? "border-[#31a8ff]/55 bg-[#31a8ff]/12" : "border-white/10 bg-white/[0.03] hover:bg-white/[0.065]"}`}
                                 >
                                   <div
-                                    className="relative h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-white/[0.035]"
+                                    className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-white/[0.035]"
                                     style={{
                                       backgroundImage:
                                         "linear-gradient(45deg, rgba(255,255,255,.08) 25%, transparent 25%), linear-gradient(-45deg, rgba(255,255,255,.08) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(255,255,255,.08) 75%), linear-gradient(-45deg, transparent 75%, rgba(255,255,255,.08) 75%)",
@@ -2228,7 +2242,7 @@ function MarketPageContent() {
                                         src={layer.previewUrl}
                                         alt={layer.name}
                                         fill
-                                        sizes="64px"
+                                        sizes="48px"
                                         className="object-contain p-1"
                                       />
                                     ) : (
@@ -2261,22 +2275,25 @@ function MarketPageContent() {
                               ))}
                             </div>
                           ) : psdPreviewingItemId === selectedItem.id ? (
-                            <div className="rounded-2xl border border-[#31a8ff]/15 bg-[#31a8ff]/[0.06] px-4 py-5 text-sm text-[#b8e4ff]">
+                            <div className="rounded-xl border border-[#31a8ff]/15 bg-[#31a8ff]/[0.06] px-3 py-4 text-xs text-[#b8e4ff]">
                               <div className="mb-3 h-2 overflow-hidden rounded-full bg-white/10">
                                 <div className="h-full w-1/2 animate-pulse rounded-full bg-[#31a8ff]" />
                               </div>
                               正在解析 PSD 图层...
                             </div>
                           ) : psdPreviewErrorByItemId[selectedItem.id] ? (
-                            <div className="rounded-2xl border border-amber-300/18 bg-amber-400/[0.07] p-4">
-                              <p className="text-sm text-amber-100">
-                                {psdPreviewErrorByItemId[selectedItem.id]}
+                            <div className="rounded-xl border border-amber-300/14 bg-amber-400/[0.055] p-3">
+                              <p className="text-xs font-medium text-amber-100/90">
+                                PSD 解析失败
+                              </p>
+                              <p className="mt-1 text-[11px] leading-4 text-amber-100/48">
+                                图层暂不可预览，可继续查看整图。
                               </p>
                               <button
                                 onClick={() =>
                                   void requestPsdPreview(selectedItem, true)
                                 }
-                                className="mt-3 rounded-full border border-amber-200/25 px-3 py-1.5 text-xs text-amber-100 transition-colors hover:bg-amber-300/12"
+                                className="mt-2 rounded-full border border-amber-200/20 px-2.5 py-1 text-[11px] text-amber-100/78 transition-colors hover:bg-amber-300/12"
                               >
                                 重新解析图层
                               </button>
@@ -2286,20 +2303,20 @@ function MarketPageContent() {
                               onClick={() =>
                                 void requestPsdPreview(selectedItem, true)
                               }
-                              className="w-full rounded-2xl border border-white/10 bg-white/[0.045] px-4 py-4 text-sm text-white/52 transition-colors hover:bg-white/[0.08] hover:text-white"
+                              className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3 text-xs text-white/52 transition-colors hover:bg-white/[0.08] hover:text-white"
                             >
                               解析 PSD 图层预览
                             </button>
                           )}
                         </>
                       ) : (
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 text-sm text-white/40">
+                        <div className="rounded-xl border border-white/10 bg-white/[0.035] p-3 text-xs text-white/40">
                           该素材未附带 PSD 文件。
                         </div>
                       )}
                     </div>
 
-                    <div className="mt-4 shrink-0 rounded-2xl border border-white/10 bg-white/[0.045] p-3">
+                    <div className="mt-3 shrink-0 rounded-xl border border-white/10 bg-white/[0.04] p-2.5">
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-xs text-white/42">素材价格</span>
                         <div className="inline-flex items-center gap-1.5 rounded-full bg-yellow-500/10 px-2.5 py-1 text-yellow-200">
