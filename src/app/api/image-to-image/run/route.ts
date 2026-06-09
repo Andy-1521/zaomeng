@@ -8,6 +8,7 @@ import { downloadSafeRemoteImage } from '@/lib/safeRemoteImage';
 import { DEFAULT_SMART_EDIT_SIZE_OPTION, getSmartEditOutputSize, isSmartEditAspectRatioOption, isSmartEditResolution } from '@/lib/smartEditSize';
 import { tryCreateAndUploadResultThumbnail } from '@/lib/resultThumbnail';
 import { getCookieUserId, isBodyUserMismatch } from '@/lib/serverAuth';
+import { readDevPreviewUser } from '@/lib/devPreviewUser';
 
 const IMAGE_TO_IMAGE_EDIT_TIMEOUT_MS = 300000;
 
@@ -46,6 +47,27 @@ function isDatabaseUnavailable(error: unknown) {
   );
 }
 
+function isLocalPreviewRequest(request: NextRequest) {
+  const hostname = request.nextUrl.hostname;
+  const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  const isLocalWorkspace = process.cwd().startsWith('/Users/andy/Documents/zaomeng/');
+  return isLocalHost && isLocalWorkspace;
+}
+
+async function getImageGenerationUser(userId: string, request: NextRequest) {
+  try {
+    const user = await userManager.getUserById(userId);
+    return user ? { points: user.points || 0, preview: false } : null;
+  } catch (error) {
+    const previewUser = await readDevPreviewUser(isLocalPreviewRequest(request));
+    if (isDatabaseUnavailable(error) && previewUser?.id === userId) {
+      console.warn('[AI生图] 本地数据库不可用，使用 .cache/material-preview.json 预览用户继续测试:', error);
+      return { points: previewUser.points, preview: true };
+    }
+    throw error;
+  }
+}
+
 function normalizeSourceSize(sourceSize?: { width?: number | null; height?: number | null }) {
   const width = sourceSize?.width ?? 0;
   const height = sourceSize?.height ?? 0;
@@ -72,6 +94,7 @@ export async function POST(request: NextRequest) {
   let chargedUserId = '';
   let chargedPoints = 0;
   let aiGeneratePointsCharged = false;
+  let localPreviewMode = false;
 
   try {
     console.log('[AI生图] ========== 开始处理请求 ==========' );
@@ -121,10 +144,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: '图片URL格式不正确' }, { status: 400 });
     }
 
-    const user = await userManager.getUserById(userId);
+    const user = await getImageGenerationUser(userId, request);
     if (!user) {
       return NextResponse.json({ success: false, message: '用户不存在' }, { status: 404 });
     }
+    localPreviewMode = user.preview;
 
     if ((user.points || 0) < requiredPoints) {
       return NextResponse.json({ success: false, message: `积分不足，当前 ${user.points || 0}，需要 ${requiredPoints}` }, { status: 400 });
@@ -139,37 +163,41 @@ export async function POST(request: NextRequest) {
       ? `${FIXED_PROMPT}\n输出比例：${targetOutputSize.resolvedAspectRatio}，清晰度：${requestedResolution}。\n附加要求：${userPrompt}`
       : `${FIXED_PROMPT}\n输出比例：${targetOutputSize.resolvedAspectRatio}，清晰度：${requestedResolution}。`;
 
-    await transactionManager.createTransaction({
-      userId,
-      orderNumber: orderId,
-      toolPage: 'AI生图',
-      description: 'AI生图（图生图）',
-      prompt: finalPrompt,
-      points: requiredPoints,
-      remainingPoints: user.points,
-      resultData: null,
-      requestParams: JSON.stringify({
-        imageUrl,
-        userPrompt: userPrompt || '',
-        mode: 'image-to-image',
-        aspectRatio: requestedAspectRatio,
-        imageSize: requestedResolution,
-        requestedAspectRatio,
-        resolvedAspectRatio: targetOutputSize.resolvedAspectRatio,
-        requestedResolution,
-        requiredPoints,
-        requestedOutputSize: {
-          width: targetOutputSize.width,
-          height: targetOutputSize.height,
-        },
-        sourceSize,
-      }),
-      status: '处理中',
-    });
+    if (!localPreviewMode) {
+      await transactionManager.createTransaction({
+        userId,
+        orderNumber: orderId,
+        toolPage: 'AI生图',
+        description: 'AI生图（图生图）',
+        prompt: finalPrompt,
+        points: requiredPoints,
+        remainingPoints: user.points,
+        resultData: null,
+        requestParams: JSON.stringify({
+          imageUrl,
+          userPrompt: userPrompt || '',
+          mode: 'image-to-image',
+          aspectRatio: requestedAspectRatio,
+          imageSize: requestedResolution,
+          requestedAspectRatio,
+          resolvedAspectRatio: targetOutputSize.resolvedAspectRatio,
+          requestedResolution,
+          requiredPoints,
+          requestedOutputSize: {
+            width: targetOutputSize.width,
+            height: targetOutputSize.height,
+          },
+          sourceSize,
+        }),
+        status: '处理中',
+      });
+    }
 
     chargedUserId = userId;
     chargedPoints = requiredPoints;
-    const chargedUser = await userManager.deductPointsAtomically(userId, requiredPoints);
+    const chargedUser = localPreviewMode
+      ? { points: Math.max(0, user.points - requiredPoints) }
+      : await userManager.deductPointsAtomically(userId, requiredPoints);
     if (!chargedUser) {
       await transactionManager.updateTransaction(orderId, {
         status: '失败',
@@ -179,11 +207,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: `积分不足，当前 ${user.points || 0}，需要 ${requiredPoints}` }, { status: 400 });
     }
 
-    aiGeneratePointsCharged = true;
-    await transactionManager.updateTransaction(orderId, {
-      actualPoints: requiredPoints,
-      remainingPoints: chargedUser.points,
-    });
+    aiGeneratePointsCharged = !localPreviewMode;
+    if (!localPreviewMode) {
+      await transactionManager.updateTransaction(orderId, {
+        actualPoints: requiredPoints,
+        remainingPoints: chargedUser.points,
+      });
+    }
 
     const imageEditBuffer = await runPsydoImageEditFromUrl({
       imageUrl,
@@ -206,7 +236,7 @@ export async function POST(request: NextRequest) {
       `thumbnails/image-to-image/${orderId}.webp`,
       'AI生图',
     );
-    const currentTransaction = await transactionManager.getTransactionByOrderNumber(orderId);
+    const currentTransaction = localPreviewMode ? null : await transactionManager.getTransactionByOrderNumber(orderId);
     let requestParams: Record<string, unknown> = {};
     try {
       requestParams = currentTransaction?.requestParams ? JSON.parse(currentTransaction.requestParams) : {};
@@ -214,17 +244,19 @@ export async function POST(request: NextRequest) {
       requestParams = {};
     }
 
-    await transactionManager.updateTransaction(orderId, {
-      status: '成功',
-      points: requiredPoints,
-      actualPoints: requiredPoints,
-      remainingPoints: chargedUser.points,
-      resultData: uploadedUrl,
-      requestParams: JSON.stringify({
-        ...requestParams,
-        thumbnailUrl,
-      }),
-    });
+    if (!localPreviewMode) {
+      await transactionManager.updateTransaction(orderId, {
+        status: '成功',
+        points: requiredPoints,
+        actualPoints: requiredPoints,
+        remainingPoints: chargedUser.points,
+        resultData: uploadedUrl,
+        requestParams: JSON.stringify({
+          ...requestParams,
+          thumbnailUrl,
+        }),
+      });
+    }
 
     return NextResponse.json({
       success: true,
@@ -233,6 +265,7 @@ export async function POST(request: NextRequest) {
         url: uploadedUrl,
         remainingPoints: chargedUser.points,
       },
+      ...(localPreviewMode ? { preview: true } : {}),
     });
   } catch (error) {
     console.error('[AI生图] 处理失败:', error);
@@ -248,7 +281,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (orderId) {
+    if (orderId && !localPreviewMode) {
       try {
         await transactionManager.updateTransaction(orderId, {
           status: isImageEditTimeoutError(error) ? '超时' : '失败',
