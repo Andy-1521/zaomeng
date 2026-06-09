@@ -1390,13 +1390,10 @@ function MarketPageContent() {
         onClick={scrollToMarketTop}
         aria-label="回到图市顶部"
         title="回到顶部"
-        className={`group fixed bottom-6 right-6 z-[90] inline-flex h-11 items-center justify-center overflow-hidden rounded-full border border-white/12 bg-black/72 text-sm font-medium text-white/76 shadow-[0_18px_48px_rgba(0,0,0,0.38)] backdrop-blur-2xl transition-all duration-300 hover:w-32 hover:-translate-y-0.5 hover:border-[#31a8ff]/45 hover:bg-white/[0.12] hover:text-white focus-visible:w-32 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#31a8ff]/55 ${showMarketBackToTop ? "w-11 translate-y-0 opacity-100" : "pointer-events-none w-11 translate-y-3 opacity-0"}`}
+        className={`group fixed bottom-24 right-4 z-[80] grid h-11 w-11 place-items-center rounded-[1.05rem] border border-white/12 bg-black/68 text-white/78 shadow-[0_18px_48px_rgba(0,0,0,0.34)] backdrop-blur-2xl transition-all duration-300 hover:-translate-y-0.5 hover:border-[#31a8ff]/42 hover:bg-white/[0.12] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#31a8ff]/55 sm:bottom-6 sm:right-6 ${showMarketBackToTop ? "translate-y-0 scale-100 opacity-100" : "pointer-events-none translate-y-3 scale-95 opacity-0"}`}
       >
-        <span
-          className="absolute left-3 top-1/2 h-px w-3 -translate-y-1/2 bg-white/34 transition-all duration-300 group-hover:w-4 group-hover:bg-[#31a8ff]/70 group-focus-visible:w-4 group-focus-visible:bg-[#31a8ff]/70"
-          aria-hidden="true"
-        />
-        <span className="grid h-7 w-7 place-items-center rounded-full border border-white/12 bg-white/[0.06] transition-all duration-300 group-hover:ml-2 group-hover:border-[#31a8ff]/35 group-hover:bg-[#31a8ff]/12 group-focus-visible:ml-2">
+        <span className="absolute inset-0 rounded-[inherit] bg-[radial-gradient(circle_at_35%_20%,rgba(49,168,255,0.22),transparent_58%)] opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+        <span className="relative grid h-8 w-8 place-items-center rounded-full border border-white/12 bg-white/[0.065] transition-all duration-300 group-hover:border-[#31a8ff]/35 group-hover:bg-[#31a8ff]/12">
           <svg
             className="h-4 w-4"
             fill="none"
@@ -1412,7 +1409,7 @@ function MarketPageContent() {
             />
           </svg>
         </span>
-        <span className="max-w-0 whitespace-nowrap opacity-0 transition-all duration-300 group-hover:ml-2 group-hover:max-w-20 group-hover:opacity-100 group-focus-visible:ml-2 group-focus-visible:max-w-20 group-focus-visible:opacity-100">
+        <span className="sr-only">
           回到顶部
         </span>
       </button>
