@@ -1581,7 +1581,7 @@ function MarketPageContent() {
         </main>
       </div>
 
-      <div className="fixed bottom-24 right-4 z-[80] flex flex-col items-center gap-2 sm:bottom-6 sm:right-6">
+      <div className="fixed bottom-24 right-4 z-[80] flex flex-col items-center gap-3 sm:bottom-6 sm:right-6">
         <button
           type="button"
           onClick={openMarketListingEntry}
@@ -1613,7 +1613,7 @@ function MarketPageContent() {
           onClick={scrollToMarketTop}
           aria-label="回到图市顶部"
           title="回到顶部"
-          className={`group grid h-9 w-9 place-items-center rounded-full bg-transparent p-0 text-white/62 transition-all duration-300 hover:-translate-y-0.5 hover:text-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#31a8ff]/45 ${showMarketBackToTop ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0"}`}
+          className={`group grid h-9 w-9 place-items-center rounded-full bg-transparent p-0 text-white/62 transition-all duration-300 hover:translate-y-2 hover:text-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#31a8ff]/45 ${showMarketBackToTop ? "translate-y-2 opacity-100" : "pointer-events-none translate-y-5 opacity-0"}`}
         >
           <span className="grid h-8 w-8 place-items-center rounded-full border border-white/10 bg-black/56 shadow-[0_12px_32px_rgba(0,0,0,0.24)] backdrop-blur-2xl transition group-hover:border-[#31a8ff]/34 group-hover:bg-white/[0.1]">
             <svg
