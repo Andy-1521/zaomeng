@@ -21,7 +21,7 @@ export default function AuthPage() {
   const [countdown, setCountdown] = useState(0);
   const [loading, setLoading] = useState(false);
   const [isClient, setIsClient] = useState(false);
-  const [nextPath, setNextPath] = useState("/home");
+  const [nextPath, setNextPath] = useState("/market");
   const [formData, setFormData] = useState({
     email: "",
     username: "",
@@ -45,13 +45,13 @@ export default function AuthPage() {
       setIsClient(true);
     });
     const params = new URLSearchParams(window.location.search);
-    const rawNext = params.get("next") || "/home";
+    const rawNext = params.get("next") || "/market";
     const safeNext =
       rawNext.startsWith("/") &&
       !rawNext.startsWith("//") &&
       !rawNext.startsWith("/login")
         ? rawNext
-        : "/home";
+        : "/market";
     setNextPath(safeNext);
     router.prefetch(safeNext);
   }, [router]);
