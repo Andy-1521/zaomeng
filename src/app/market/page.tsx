@@ -414,6 +414,20 @@ function MarketPageContent() {
     }, 1000);
   }, []);
 
+  const openMarketListingEntry = useCallback(() => {
+    if (!user?.id) {
+      requireLogin("/market");
+      return;
+    }
+
+    resetImageSearchState();
+    setActiveTab("mine");
+    marketBrowseLockedRef.current = true;
+    setMarketBrowseLocked(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    showToast("从订单结果图点击“上架”，可自定义标题、售价和 PSD。", "info");
+  }, [requireLogin, resetImageSearchState, user?.id]);
+
   const runImageSearch = useCallback(
     async (file: File) => {
       if (!file.type.startsWith("image/")) {
@@ -1385,15 +1399,44 @@ function MarketPageContent() {
         </main>
       </div>
 
-      <button
-        type="button"
-        onClick={scrollToMarketTop}
-        aria-label="回到图市顶部"
-        title="回到顶部"
-        className={`group fixed bottom-24 right-4 z-[80] grid h-11 w-11 place-items-center rounded-[1.05rem] border border-white/12 bg-black/68 text-white/78 shadow-[0_18px_48px_rgba(0,0,0,0.34)] backdrop-blur-2xl transition-all duration-300 hover:-translate-y-0.5 hover:border-[#31a8ff]/42 hover:bg-white/[0.12] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#31a8ff]/55 sm:bottom-6 sm:right-6 ${showMarketBackToTop ? "translate-y-0 scale-100 opacity-100" : "pointer-events-none translate-y-3 scale-95 opacity-0"}`}
-      >
-        <span className="absolute inset-0 rounded-[inherit] bg-[radial-gradient(circle_at_35%_20%,rgba(49,168,255,0.22),transparent_58%)] opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-        <span className="relative grid h-8 w-8 place-items-center rounded-full border border-white/12 bg-white/[0.065] transition-all duration-300 group-hover:border-[#31a8ff]/35 group-hover:bg-[#31a8ff]/12">
+      <div className="fixed bottom-24 right-4 z-[80] flex flex-col items-center gap-2 sm:bottom-6 sm:right-6">
+        <button
+          type="button"
+          onClick={openMarketListingEntry}
+          aria-label="上架卖图"
+          title="上架卖图"
+          className="group grid h-11 w-11 place-items-center rounded-[1.05rem] border border-emerald-200/18 bg-emerald-300/[0.12] text-emerald-50 shadow-[0_18px_48px_rgba(0,0,0,0.28)] backdrop-blur-2xl transition-all duration-300 hover:-translate-y-0.5 hover:border-emerald-100/42 hover:bg-emerald-300/[0.18] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200/50"
+        >
+          <svg
+            className="h-4.5 w-4.5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.8}
+              d="M12 5v14m7-7H5"
+            />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.8}
+              d="M6.5 19.5h11"
+            />
+          </svg>
+          <span className="sr-only">上架卖图</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={scrollToMarketTop}
+          aria-label="回到图市顶部"
+          title="回到顶部"
+          className={`group grid h-11 w-11 place-items-center rounded-[1.05rem] border border-white/12 bg-black/68 text-white/78 shadow-[0_18px_48px_rgba(0,0,0,0.34)] backdrop-blur-2xl transition-all duration-300 hover:-translate-y-0.5 hover:border-[#31a8ff]/42 hover:bg-white/[0.12] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#31a8ff]/55 ${showMarketBackToTop ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0"}`}
+        >
           <svg
             className="h-4 w-4"
             fill="none"
@@ -1408,11 +1451,9 @@ function MarketPageContent() {
               d="M12 19V5m0 0 6 6M12 5l-6 6"
             />
           </svg>
-        </span>
-        <span className="sr-only">
-          回到顶部
-        </span>
-      </button>
+          <span className="sr-only">回到顶部</span>
+        </button>
+      </div>
 
       {selectedItem ? (
         <div
