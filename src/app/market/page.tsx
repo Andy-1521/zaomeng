@@ -213,9 +213,6 @@ function MarketPageContent() {
   const [imageSearchPreviewUrl, setImageSearchPreviewUrl] = useState("");
   const [imageSearchFileName, setImageSearchFileName] = useState("");
   const [isImageSearchDragging, setIsImageSearchDragging] = useState(false);
-  const [heroActionMode, setHeroActionMode] = useState<"search" | "browse">(
-    "search",
-  );
   const [directListingDraft, setDirectListingDraft] =
     useState<DirectMarketListingDraft | null>(null);
   const [isSubmittingDirectListing, setIsSubmittingDirectListing] =
@@ -1173,50 +1170,28 @@ function MarketPageContent() {
                         </p>
                       </div>
 
-                      <div
-                        className="relative mx-auto mt-7 grid w-full max-w-[26rem] grid-cols-2 rounded-full border border-white/12 bg-black/42 p-1 shadow-[0_18px_54px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-2xl"
-                        role="group"
-                        aria-label="图市入口方式"
-                      >
-                        <span
-                          className={`pointer-events-none absolute bottom-1 top-1 w-[calc(50%-0.25rem)] rounded-full shadow-[0_14px_34px_rgba(255,255,255,0.12)] transition-transform duration-300 ease-out ${
-                            heroActionMode === "browse"
-                              ? "translate-x-[calc(100%+0.5rem)] bg-white/[0.11] ring-1 ring-white/12"
-                              : "translate-x-0 bg-white"
-                          }`}
-                        />
-                        <button
-                          type="button"
-                          onMouseEnter={() => setHeroActionMode("search")}
-                          onFocus={() => setHeroActionMode("search")}
-                          onClick={() => {
-                            setHeroActionMode("search");
-                            imageSearchInputRef.current?.click();
-                          }}
-                          className={`relative z-10 rounded-full px-5 py-2.5 text-sm font-semibold transition ${
-                            heroActionMode === "search"
-                              ? "text-black"
-                              : "text-white/54 hover:text-white"
-                          }`}
-                        >
-                          以图搜图
-                        </button>
-                        <button
-                          type="button"
-                          onMouseEnter={() => setHeroActionMode("browse")}
-                          onFocus={() => setHeroActionMode("browse")}
-                          onClick={() => {
-                            setHeroActionMode("browse");
-                            scrollToBrowseMarket();
-                          }}
-                          className={`relative z-10 rounded-full px-5 py-2.5 text-sm font-semibold transition ${
-                            heroActionMode === "browse"
-                              ? "text-white"
-                              : "text-white/54 hover:text-white"
-                          }`}
-                        >
-                          向下逛图市
-                        </button>
+                      <div className="pointer-events-none mx-auto mt-7 flex w-full max-w-[26rem] items-center justify-start gap-3 text-left">
+                        <span className="h-px w-10 bg-gradient-to-r from-transparent via-cyan-100/35 to-cyan-100/10" />
+                        <span className="text-sm font-medium tracking-wide text-white/56">
+                          下滑浏览热门素材
+                        </span>
+                        <span className="relative grid h-8 w-8 place-items-center rounded-full border border-white/10 bg-white/[0.045] text-cyan-100/78 shadow-[0_12px_32px_rgba(0,0,0,0.28)]">
+                          <span className="absolute inset-0 rounded-full bg-cyan-200/10 blur-md" />
+                          <svg
+                            className="relative h-4 w-4 motion-safe:animate-bounce"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                            aria-hidden="true"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={1.8}
+                              d="M12 5v14m0 0 5-5m-5 5-5-5"
+                            />
+                          </svg>
+                        </span>
                       </div>
                     </div>
                   </div>
