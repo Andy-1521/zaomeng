@@ -37,7 +37,7 @@ interface UserInfo {
   createdAt: string;
 }
 
-type TabType = 'generations' | 'users' | 'recharge-codes';
+type TabType = 'generations' | 'market-stats' | 'users' | 'recharge-codes';
 
 type RequestParamsValue = Record<string, unknown> | null;
 
@@ -116,6 +116,21 @@ type StatsState = {
   };
 };
 
+type MarketStatsState = {
+  totalItems: number;
+  pendingItems: number;
+  approvedItems: number;
+  rejectedItems: number;
+  delistedItems: number;
+  psdItems: number;
+  totalPurchases: number;
+  totalSalesPoints: number;
+  totalSellerPoints: number;
+  totalPlatformFeePoints: number;
+  todayPurchases: number;
+  todaySalesPoints: number;
+};
+
 type ToolOption = {
   label: string;
   value: string;
@@ -155,6 +170,21 @@ type FilterDropdownOption = {
 type AdminDropdownId = 'tool-page' | 'status' | 'diagnostic' | 'time-range';
 
 type RechargeCodeStatusFilter = 'all' | 'unused' | 'redeemed' | 'voided';
+
+const EMPTY_MARKET_STATS: MarketStatsState = {
+  totalItems: 0,
+  pendingItems: 0,
+  approvedItems: 0,
+  rejectedItems: 0,
+  delistedItems: 0,
+  psdItems: 0,
+  totalPurchases: 0,
+  totalSalesPoints: 0,
+  totalSellerPoints: 0,
+  totalPlatformFeePoints: 0,
+  todayPurchases: 0,
+  todaySalesPoints: 0,
+};
 
 const adminToolOptions: ToolOption[] = [
   { label: '彩绘提取', value: '彩绘提取' },
@@ -590,6 +620,7 @@ export default function AdminGenerationsPage() {
     open: false,
     record: null,
   });
+  const [showGenerationFilters, setShowGenerationFilters] = useState(false);
 
   // 搜索和筛选参数
   const [searchKeyword, setSearchKeyword] = useState('');
@@ -615,6 +646,7 @@ export default function AdminGenerationsPage() {
       otherFailureCount: 0,
     },
   });
+  const [marketStats, setMarketStats] = useState<MarketStatsState>(EMPTY_MARKET_STATS);
 
   // 全局统计（不受筛选影响，首次加载时固定）
   const [globalStats, setGlobalStats] = useState({
@@ -648,6 +680,15 @@ export default function AdminGenerationsPage() {
   const activeToolSummary = adminToolOptions
     .map((option) => ({ ...option, count: derivedToolStats[option.label] || 0 }))
     .filter((option) => option.count > 0 || option.value === filterToolPage);
+  const activeGenerationFilterCount = [
+    searchKeyword,
+    filterToolPage,
+    filterStatus,
+    filterDiagnostic,
+    filterTimeRange,
+    filterStartDate,
+    filterEndDate,
+  ].filter(Boolean).length;
 
   const rechargeCodeCounts = useMemo(() => {
     return rechargeCodes.reduce(
@@ -744,6 +785,10 @@ export default function AdminGenerationsPage() {
             },
           };
           setTotalStats(newStats);
+          setMarketStats({
+            ...EMPTY_MARKET_STATS,
+            ...(data.data.marketStats || {}),
+          });
           // 无筛选条件时缓存全局统计
           const hasFilter = keyword || toolPage || status || diagnostic || startDate || endDate;
           if (!hasFilter) {
@@ -903,6 +948,25 @@ export default function AdminGenerationsPage() {
       diagnostic.errorMessage && diagnostic.errorMessage !== '未知错误' ? `原因: ${diagnostic.errorMessage}` : `摘要: ${diagnostic.summary}`,
     ].join('\n');
   }, []);
+
+  const copyVisibleIssueSummaries = useCallback(async () => {
+    const issueRecords = records
+      .filter((record) => {
+        const diagnostic = getRecordDiagnostic(record);
+        return record.status === '失败' || record.status === '处理中' || diagnostic.key !== 'healthy';
+      })
+      .slice(0, 20);
+
+    if (issueRecords.length === 0) {
+      showToast('本页没有可复制的异常订单', 'info');
+      return;
+    }
+
+    await copyText(
+      issueRecords.map((record) => getCustomerSummary(record)).join('\n\n---\n\n'),
+      `已复制 ${issueRecords.length} 条异常摘要`
+    );
+  }, [copyText, getCustomerSummary, records]);
 
   const downloadRecordResults = useCallback(async (record: GenerationRecord) => {
     const resultImages = getResultImageUrls(record.resultData);
@@ -1159,13 +1223,13 @@ export default function AdminGenerationsPage() {
   useEffect(() => {
     if (sessionRefreshed && currentAdminId) {
       const timeoutId = window.setTimeout(() => {
-        if (activeTab === 'generations') {
-          void loadRecords(0);
-        } else if (activeTab === 'users') {
-          void loadUsers();
-        } else {
-          void loadRechargeCodes();
-        }
+	        if (activeTab === 'generations') {
+	          void loadRecords(0);
+	        } else if (activeTab === 'users') {
+	          void loadUsers();
+	        } else if (activeTab === 'recharge-codes') {
+	          void loadRechargeCodes();
+	        }
       }, 0);
 
       return () => window.clearTimeout(timeoutId);
@@ -1398,7 +1462,9 @@ export default function AdminGenerationsPage() {
       ? records.length === 0
       : activeTab === 'users'
         ? users.length === 0
-        : rechargeCodes.length === 0;
+        : activeTab === 'recharge-codes'
+          ? rechargeCodes.length === 0
+          : false;
 
   if (loading && activeTabHasNoData) {
     return (
@@ -1441,16 +1507,18 @@ export default function AdminGenerationsPage() {
           <div className="mb-3 flex flex-shrink-0 rounded-lg border border-white/20 bg-white/10 p-1">
             {[
               { key: 'generations' as TabType, label: '生图记录' },
+              { key: 'market-stats' as TabType, label: '图市统计' },
               { key: 'users' as TabType, label: '用户管理' },
               { key: 'recharge-codes' as TabType, label: '兑换码' },
             ].map((tab) => (
               <button
                 key={tab.key}
-                onClick={() => {
-                  closeDropdowns();
-                  setActiveTab(tab.key);
-                  setPage(0);
-                }}
+	                onClick={() => {
+	                  closeDropdowns();
+	                  setError(null);
+	                  setActiveTab(tab.key);
+	                  setPage(0);
+	                }}
                 className={`flex-1 rounded-md py-2 text-sm font-medium transition-all ${
                   activeTab === tab.key
                     ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-lg shadow-purple-500/30'
@@ -1465,6 +1533,80 @@ export default function AdminGenerationsPage() {
           {error && (
             <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 mb-6">
               <p className="text-red-600 text-sm">{error}</p>
+            </div>
+          )}
+
+          {/* ===== Market Stats Tab ===== */}
+          {activeTab === 'market-stats' && (
+            <div className="flex-1 min-h-0 flex flex-col gap-3">
+              <section className="rounded-xl border border-white/10 bg-white/[0.04] p-4 flex-shrink-0">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold text-white">图市统计</h2>
+                    <p className="mt-1 text-sm text-white/42">统计上架审核、PSD 素材、成交积分、卖家收益和平台收益。</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => router.push(marketStats.pendingItems > 0 ? '/market?tab=pending' : '/market')}
+                    className="rounded-full border border-white/10 bg-white/[0.055] px-4 py-2 text-sm text-white/68 transition hover:bg-white/[0.1] hover:text-white"
+                  >
+                    {marketStats.pendingItems > 0 ? '处理待审核' : '查看图市'}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <div className="rounded-xl border border-purple-300/16 bg-purple-500/[0.08] p-4">
+                    <div className="text-xs text-purple-100/60">总上架</div>
+                    <div className="mt-1 text-3xl font-semibold tabular-nums text-purple-100">{marketStats.totalItems}</div>
+                    <div className="mt-1 text-xs text-purple-100/42">PSD {marketStats.psdItems} 个</div>
+                  </div>
+                  <div className="rounded-xl border border-amber-300/16 bg-amber-500/[0.08] p-4">
+                    <div className="text-xs text-amber-100/60">待审核</div>
+                    <div className="mt-1 text-3xl font-semibold tabular-nums text-amber-200">{marketStats.pendingItems}</div>
+                    <div className="mt-1 text-xs text-amber-100/42">已上架 {marketStats.approvedItems} 个</div>
+                  </div>
+                  <div className="rounded-xl border border-emerald-300/16 bg-emerald-500/[0.08] p-4">
+                    <div className="text-xs text-emerald-100/60">成交</div>
+                    <div className="mt-1 text-3xl font-semibold tabular-nums text-emerald-200">{marketStats.totalPurchases}</div>
+                    <div className="mt-1 text-xs text-emerald-100/42">今日 {marketStats.todayPurchases} 单</div>
+                  </div>
+                  <div className="rounded-xl border border-cyan-300/16 bg-cyan-500/[0.08] p-4">
+                    <div className="text-xs text-cyan-100/60">平台收益</div>
+                    <div className="mt-1 text-3xl font-semibold tabular-nums text-cyan-200">{marketStats.totalPlatformFeePoints}</div>
+                    <div className="mt-1 text-xs text-cyan-100/42">成交 {marketStats.totalSalesPoints} / 卖家 {marketStats.totalSellerPoints}</div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-xl border border-white/10 bg-white/[0.04] p-4">
+                  <div className="text-sm font-semibold text-white/82">素材状态</div>
+                  <div className="mt-4 space-y-3 text-sm">
+                    <div className="flex items-center justify-between text-white/58"><span>已上架</span><span className="tabular-nums text-white/88">{marketStats.approvedItems}</span></div>
+                    <div className="flex items-center justify-between text-white/58"><span>待审核</span><span className="tabular-nums text-amber-200">{marketStats.pendingItems}</span></div>
+                    <div className="flex items-center justify-between text-white/58"><span>已驳回</span><span className="tabular-nums text-red-200">{marketStats.rejectedItems}</span></div>
+                    <div className="flex items-center justify-between text-white/58"><span>已下架</span><span className="tabular-nums text-white/70">{marketStats.delistedItems}</span></div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-white/[0.04] p-4">
+                  <div className="text-sm font-semibold text-white/82">交易积分</div>
+                  <div className="mt-4 space-y-3 text-sm">
+                    <div className="flex items-center justify-between text-white/58"><span>总成交积分</span><span className="tabular-nums text-white/88">{marketStats.totalSalesPoints}</span></div>
+                    <div className="flex items-center justify-between text-white/58"><span>卖家收益</span><span className="tabular-nums text-emerald-200">{marketStats.totalSellerPoints}</span></div>
+                    <div className="flex items-center justify-between text-white/58"><span>平台收益</span><span className="tabular-nums text-cyan-200">{marketStats.totalPlatformFeePoints}</span></div>
+                    <div className="flex items-center justify-between text-white/58"><span>今日成交积分</span><span className="tabular-nums text-white/70">{marketStats.todaySalesPoints}</span></div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-white/[0.04] p-4">
+                  <div className="text-sm font-semibold text-white/82">运营提示</div>
+                  <div className="mt-4 space-y-3 text-sm text-white/52">
+                    <p>待审核大于 0 时，优先进入图市待审核处理，避免用户上架素材长时间不展示。</p>
+                    <p>PSD 数量可以反映高价值素材占比，后续可以按 PSD 素材做单独筛选和推荐。</p>
+                  </div>
+                </div>
+              </section>
             </div>
           )}
 
@@ -1890,13 +2032,29 @@ export default function AdminGenerationsPage() {
                   <div className="mt-1 text-2xl font-semibold tabular-nums text-amber-300">{totalPointsConsumed}</div>
                   <div className="mt-1 text-[11px] text-white/35">当前列表</div>
                 </div>
-              </div>
+	              </div>
 
-              <div className="rounded-xl border border-white/10 bg-white/[0.04] p-2.5 flex-shrink-0">
-                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-                  <div className="w-full sm:max-w-sm sm:min-w-[220px] sm:flex-1">
-                    <input
-                      type="text"
+	              <div className="rounded-xl border border-white/10 bg-white/[0.04] p-2.5 flex-shrink-0">
+	                <div className="mb-2 flex items-center justify-between gap-2 sm:hidden">
+	                  <div>
+	                    <div className="text-sm font-medium text-white/78">筛选</div>
+	                    <div className="mt-0.5 text-xs text-white/38">
+	                      {activeGenerationFilterCount > 0 ? `已启用 ${activeGenerationFilterCount} 项筛选` : '默认显示全部生图记录'}
+	                    </div>
+	                  </div>
+	                  <button
+	                    type="button"
+	                    onClick={() => setShowGenerationFilters((current) => !current)}
+	                    className="rounded-full border border-white/12 bg-white/[0.055] px-3 py-1.5 text-xs text-white/68 transition hover:bg-white/[0.1] hover:text-white"
+	                  >
+	                    {showGenerationFilters ? '收起' : '展开'}
+	                  </button>
+	                </div>
+
+	                <div className={`${showGenerationFilters ? 'flex' : 'hidden'} flex-col gap-2 sm:flex sm:flex-row sm:flex-wrap sm:items-center`}>
+	                  <div className="w-full sm:max-w-sm sm:min-w-[220px] sm:flex-1">
+	                    <input
+	                      type="text"
                       value={searchKeyword}
                       onChange={(e) => handleSearchInput(e.target.value)}
                       placeholder="搜索用户名、订单号或异常信息..."
@@ -1985,15 +2143,15 @@ export default function AdminGenerationsPage() {
                     onClick={handleResetFilters}
                     className="w-full rounded-xl border border-white/12 px-3 py-2 text-sm text-white/65 hover:text-white hover:bg-white/10 transition-colors sm:w-auto"
                   >
-                    重置
-                  </button>
-                </div>
+	                    重置
+	                  </button>
+	                </div>
 
-                {activeToolSummary.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {activeToolSummary.map((option) => {
-                      const active = filterToolPage === option.value;
-                      return (
+	                {activeToolSummary.length > 0 && (
+	                  <div className={`${showGenerationFilters ? 'flex' : 'hidden'} mt-2 flex-wrap gap-2 sm:flex`}>
+	                    {activeToolSummary.map((option) => {
+	                      const active = filterToolPage === option.value;
+	                      return (
                         <button
                           key={option.value}
                           onClick={() => handleQuickFilter(option.value)}
@@ -2004,11 +2162,11 @@ export default function AdminGenerationsPage() {
                         </button>
                       );
                     })}
-                  </div>
-                )}
+	                  </div>
+	                )}
 
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {diagnosticOptions.map((option) => {
+	                <div className={`${showGenerationFilters ? 'flex' : 'hidden'} mt-2 flex-wrap gap-2 sm:flex`}>
+	                  {diagnosticOptions.map((option) => {
                     const active = filterDiagnostic === option.value;
                     return (
                       <button
@@ -2033,13 +2191,22 @@ export default function AdminGenerationsPage() {
                         <button type="button" onClick={() => handleQuickFilter(undefined, undefined, 'missing-result')} className="rounded-full border border-white/10 bg-black/18 px-2 py-1 hover:bg-white/10">无结果 {totalStats.failureBreakdown.missingResultCount}</button>
                         <button type="button" onClick={() => handleQuickFilter(undefined, '失败', 'other-failure')} className="rounded-full border border-white/10 bg-black/18 px-2 py-1 hover:bg-white/10">其他 {totalStats.failureBreakdown.otherFailureCount}</button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setShowDiagnosticBreakdown((current) => !current)}
-                        className="rounded-full border border-white/12 bg-black/20 px-3 py-1 text-xs text-white/70 transition hover:bg-white/10 hover:text-white"
-                      >
-                        {showDiagnosticBreakdown ? '收起诊断卡' : '展开诊断卡'}
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void copyVisibleIssueSummaries()}
+                          className="rounded-full border border-white/12 bg-black/20 px-3 py-1 text-xs text-white/70 transition hover:bg-white/10 hover:text-white"
+                        >
+                          复制异常摘要
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowDiagnosticBreakdown((current) => !current)}
+                          className="rounded-full border border-white/12 bg-black/20 px-3 py-1 text-xs text-white/70 transition hover:bg-white/10 hover:text-white"
+                        >
+                          {showDiagnosticBreakdown ? '收起诊断卡' : '展开诊断卡'}
+                        </button>
+                      </div>
                     </div>
 
                     {showDiagnosticBreakdown && (
@@ -2096,7 +2263,123 @@ export default function AdminGenerationsPage() {
                       <div className="h-full bg-gradient-to-r from-purple-500 to-blue-500 animate-[loading_1.5s_ease-in-out_infinite]" style={{ width: '40%' }} />
                     </div>
                   )}
-                  <div className="overflow-y-auto flex-1">
+                  <div className="flex-1 overflow-y-auto">
+                    <div className="space-y-3 p-3 md:hidden">
+                      {records.map((record) => {
+                        const imageUrl = extractImageUrl(record.resultData);
+                        const resultImages = getResultImageUrls(record.resultData);
+                        const requestImageUrls = getRequestImageUrls(record.requestParams, record.uploadedImage);
+                        const requestPreviewUrl = requestImageUrls[0] || null;
+                        const toolLabel = getNormalizedToolLabel(record.toolPage, record.description || '', record.orderNumber || '');
+                        const diagnostic = getRecordDiagnostic(record);
+                        const showError = record.status === '失败' || diagnostic.key !== 'healthy';
+
+                        return (
+                          <article
+                            key={`mobile-generation-${record.id}`}
+                            onClick={() => setDetailModal({ open: true, record })}
+                            className="rounded-2xl border border-white/10 bg-white/[0.045] p-3 transition-colors active:bg-white/[0.08]"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {renderToolBadge(record)}
+                                  {getStatusBadge(record.status)}
+                                </div>
+                                <p className="mt-2 truncate font-mono text-xs text-white/70">{record.orderNumber}</p>
+                                <p className="mt-1 truncate text-xs text-white/42">{record.username} / {formatTime(record.createdAt)}</p>
+                              </div>
+                              <div className="flex shrink-0 items-center gap-1.5">
+                                <span className="text-sm font-medium tabular-nums text-amber-200">{record.actualPoints > 0 ? record.actualPoints : 0}</span>
+                                <SafeImage src="/points-icon.png" alt="积分" width={14} height={14} className="h-3.5 w-3.5" />
+                              </div>
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                disabled={!requestPreviewUrl}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  if (!requestPreviewUrl) return;
+                                  setPreviewImages(requestImageUrls);
+                                  setPreviewIndex(0);
+                                }}
+                                className="relative h-24 overflow-hidden rounded-xl border border-white/10 bg-black/28 text-xs text-white/42 disabled:cursor-default"
+                              >
+                                {requestPreviewUrl ? (
+                                  <SafeImage src={requestPreviewUrl} alt="参考图" fill sizes="50vw" className="object-cover" />
+                                ) : (
+                                  <span className="flex h-full items-center justify-center">无参考图</span>
+                                )}
+                                {requestImageUrls.length > 1 ? (
+                                  <span className="absolute bottom-2 left-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] text-white/70">{requestImageUrls.length} 张参考</span>
+                                ) : null}
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={!imageUrl}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  if (!imageUrl) return;
+                                  setPreviewImages(resultImages);
+                                  setPreviewIndex(0);
+                                }}
+                                className="relative h-24 overflow-hidden rounded-xl border border-white/10 bg-black/28 text-xs text-white/42 disabled:cursor-default"
+                              >
+                                {imageUrl ? (
+                                  <SafeImage src={imageUrl} alt="结果图" fill sizes="50vw" className="object-cover" />
+                                ) : (
+                                  <span className="flex h-full items-center justify-center">{record.status === '处理中' ? '等待结果' : '无结果图'}</span>
+                                )}
+                                {resultImages.length > 1 ? (
+                                  <span className="absolute bottom-2 left-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] text-emerald-200">{resultImages.length} 张结果</span>
+                                ) : null}
+                              </button>
+                            </div>
+
+                            {showError ? (
+                              <div className="mt-3 rounded-xl border border-amber-300/16 bg-amber-500/[0.075] px-3 py-2 text-xs leading-5 text-amber-50/76">
+                                {diagnostic.errorMessage}
+                              </div>
+                            ) : null}
+
+                            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                              <div className="min-w-0 text-xs text-white/38">
+                                {record.toolPage && record.toolPage !== toolLabel ? `原始工具：${record.toolPage}` : `UID ${record.userId.slice(0, 8)}`}
+                              </div>
+                              <div className="flex items-center gap-1.5" onClick={(event) => event.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={() => setDetailModal({ open: true, record })}
+                                  className="rounded-full border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-white/70"
+                                >
+                                  详情
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void copyText(record.orderNumber, '订单号已复制')}
+                                  className="rounded-full border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-white/70"
+                                >
+                                  复制
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void downloadRecordResults(record)}
+                                  disabled={resultImages.length === 0}
+                                  className="rounded-full border border-emerald-300/16 bg-emerald-500/[0.08] px-3 py-1.5 text-xs text-emerald-100 disabled:opacity-40"
+                                >
+                                  下载
+                                </button>
+                              </div>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+
+                    <div className="hidden overflow-x-auto md:block">
                     <table className="w-full min-w-[1340px]">
                       <thead className="sticky top-0 z-[1]">
                         <tr className="border-b border-white/10 bg-neutral-900/95 backdrop-blur">
@@ -2356,6 +2639,7 @@ export default function AdminGenerationsPage() {
                         })}
                       </tbody>
                     </table>
+                    </div>
                   </div>
 
                   {hasMore && records.length > 0 && (

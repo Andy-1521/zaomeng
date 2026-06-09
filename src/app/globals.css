@@ -1,8 +1,15 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #05060b;
+  --foreground: #f7f7fb;
+  --zm-panel: rgba(9, 10, 16, 0.84);
+  --zm-panel-soft: rgba(255, 255, 255, 0.045);
+  --zm-border: rgba(255, 255, 255, 0.1);
+  --zm-border-strong: rgba(165, 180, 252, 0.22);
+  --zm-text-muted: rgba(255, 255, 255, 0.56);
+  --zm-cyan: rgba(103, 232, 249, 0.18);
+  --zm-violet: rgba(139, 92, 246, 0.18);
 }
 
 @theme inline {
@@ -23,6 +30,92 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+body::selection {
+  background: rgba(139, 92, 246, 0.42);
+  color: #fff;
+}
+
+.zaomeng-page-shell {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 52% -8%, rgba(95, 112, 255, 0.2), transparent 34rem),
+    radial-gradient(circle at 12% 28%, rgba(124, 58, 237, 0.16), transparent 28rem),
+    linear-gradient(180deg, #06070c 0%, #05060b 58%, #040409 100%);
+  color: #fff;
+}
+
+.zaomeng-page-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.1;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.12) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+
+.zaomeng-glass-panel {
+  border: 1px solid var(--zm-border);
+  background: var(--zm-panel);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(24px);
+}
+
+.zaomeng-soft-panel {
+  border: 1px solid var(--zm-border);
+  background: var(--zm-panel-soft);
+  backdrop-filter: blur(18px);
+}
+
+.zaomeng-input {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.24);
+  color: #fff;
+  outline: none;
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.zaomeng-input::placeholder {
+  color: rgba(255, 255, 255, 0.28);
+}
+
+.zaomeng-input:focus {
+  border-color: rgba(103, 232, 249, 0.38);
+  box-shadow: 0 0 0 3px rgba(103, 232, 249, 0.08);
+}
+
+.zaomeng-primary-button {
+  background: linear-gradient(135deg, #8b5cf6, #2563eb);
+  color: #fff;
+  box-shadow: 0 14px 34px rgba(37, 99, 235, 0.22);
+  transition: filter 160ms ease, transform 160ms ease;
+}
+
+.zaomeng-primary-button:hover {
+  filter: brightness(1.08);
+}
+
+.zaomeng-primary-button:active {
+  transform: translateY(1px);
+}
+
+.zaomeng-ghost-button {
+  border: 1px solid var(--zm-border);
+  background: rgba(255, 255, 255, 0.055);
+  color: rgba(255, 255, 255, 0.74);
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.zaomeng-ghost-button:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
 }
 
 /* 自定义滚轮样式 */

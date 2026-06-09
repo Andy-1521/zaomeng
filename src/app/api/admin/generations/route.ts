@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { readFile } from 'fs/promises';
+import { join } from 'path';
 import { transactionManager } from '@/storage/database';
 import { userManager } from '@/storage/database';
+import { marketManager } from '@/storage/database';
 import { RECHARGE_TOOL_PAGE } from '@/lib/recharge';
 import { getCookieUserId } from '@/lib/serverAuth';
+import { readDevPreviewUser } from '@/lib/devPreviewUser';
 
 type GenerationFilters = {
   toolPage?: string;
@@ -15,6 +19,51 @@ type GenerationFilters = {
   excludeToolPages?: string[];
   excludeSubOrders?: boolean;
 };
+
+type MarketPreviewItem = {
+  status?: string;
+  psdUrl?: string | null;
+};
+
+const EMPTY_MARKET_STATS = {
+  totalItems: 0,
+  pendingItems: 0,
+  approvedItems: 0,
+  rejectedItems: 0,
+  delistedItems: 0,
+  psdItems: 0,
+  totalPurchases: 0,
+  totalSalesPoints: 0,
+  totalSellerPoints: 0,
+  totalPlatformFeePoints: 0,
+  todayPurchases: 0,
+  todaySalesPoints: 0,
+};
+
+async function readLocalPreviewMarketStats() {
+  if (process.env.NODE_ENV === 'production') return EMPTY_MARKET_STATS;
+
+  try {
+    const filePath = join(process.cwd(), '.cache', 'market-preview.json');
+    const raw = await readFile(filePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return EMPTY_MARKET_STATS;
+    const items = parsed as MarketPreviewItem[];
+
+    return items.reduce((stats, item) => {
+      const status = item.status || 'approved';
+      stats.totalItems += 1;
+      if (status === 'pending') stats.pendingItems += 1;
+      if (status === 'approved') stats.approvedItems += 1;
+      if (status === 'rejected') stats.rejectedItems += 1;
+      if (status === 'delisted') stats.delistedItems += 1;
+      if (item.psdUrl) stats.psdItems += 1;
+      return stats;
+    }, { ...EMPTY_MARKET_STATS });
+  } catch {
+    return EMPTY_MARKET_STATS;
+  }
+}
 
 function mapToolFilter(toolFilter: string): string[] {
   if (toolFilter === '彩绘提取') return ['彩绘提取', '彩绘提取2'];
@@ -108,6 +157,13 @@ export async function GET(request: NextRequest) {
     const stats = keyword
       ? await transactionManager.getSearchStats(keyword, statsFilters)
       : await transactionManager.getStats(statsFilters);
+    let marketStats = EMPTY_MARKET_STATS;
+    try {
+      marketStats = await marketManager.getAdminStats();
+    } catch (marketStatsError) {
+      console.warn('[管理员后台] 图市统计加载失败，不影响生图记录:', marketStatsError);
+      marketStats = await readLocalPreviewMarketStats();
+    }
 
     // 【优化3】获取记录 - 在DB层面过滤子订单
     const listFilters = { ...baseFilters, excludeSubOrders: true };
@@ -176,10 +232,37 @@ export async function GET(request: NextRequest) {
         total: stats.total,
         records: finalRecords,
         stats,
+        marketStats,
       },
     });
   } catch (error: unknown) {
     console.error('获取生图记录失败:', error);
+    const currentUserId = getCookieUserId(request);
+    const previewUser = await readDevPreviewUser();
+
+    if (previewUser?.isAdmin && previewUser.id === currentUserId) {
+      const marketStats = await readLocalPreviewMarketStats();
+      return NextResponse.json({
+        success: true,
+        data: {
+          total: 0,
+          records: [],
+          stats: {
+            total: 0,
+            processing: 0,
+            failed: 0,
+            success: 0,
+            successRate: 0,
+            colorExtraction: 0,
+            currentPagePoints: 0,
+          },
+          marketStats,
+        },
+        preview: true,
+        message: '开发环境使用空生图记录预览',
+      });
+    }
+
     return NextResponse.json(
       {
         success: false,

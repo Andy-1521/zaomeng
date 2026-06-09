@@ -21,7 +21,7 @@ interface UserContextType {
   updatePoints: (delta: number) => void;
   setPoints: (absolutePoints: number) => void;
   refreshUser: () => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -37,26 +37,79 @@ async function parseJsonApiResponse<T>(response: Response): Promise<T | null> {
   }
 }
 
+function readCachedUser() {
+  const userData = localStorage.getItem('user');
+  if (!userData) return null;
+
+  try {
+    const parsed = JSON.parse(userData) as Partial<User>;
+    return typeof parsed.id === 'string' && parsed.id.trim() ? parsed : null;
+  } catch {
+    localStorage.removeItem('user');
+    return null;
+  }
+}
+
+function clearCachedUser() {
+  localStorage.removeItem('user');
+}
+
+function writeCachedUser(nextUser: User) {
+  localStorage.setItem('user', JSON.stringify(nextUser));
+}
+
+async function fetchCurrentUser() {
+  const response = await fetch('/api/user/profile', {
+    method: 'GET',
+    credentials: 'include',
+    cache: 'no-store',
+  });
+  const data = await parseJsonApiResponse<{ success?: boolean; data?: User }>(response);
+
+  return {
+    response,
+    user: response.ok && data?.success ? data.data || null : null,
+  };
+}
+
 export function UserProvider({ children }: { children: ReactNode }) {
   const [user, setUserState] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // 初始化：从 localStorage 读取
+  // 初始化必须以服务端签名 Cookie 为准；localStorage 只做展示缓存，不能作为登录凭据。
   useEffect(() => {
-    let nextUser: User | null = null;
-    const userData = localStorage.getItem('user');
-    if (userData) {
-      try {
-        nextUser = JSON.parse(userData) as User;
-      } catch {
-        localStorage.removeItem('user');
-      }
-    }
+    let cancelled = false;
 
-    queueMicrotask(() => {
-      setUserState(nextUser);
-      setIsLoading(false);
-    });
+    const validateStoredSession = async () => {
+      readCachedUser();
+
+      try {
+        const { user: verifiedUser } = await fetchCurrentUser();
+        if (cancelled) return;
+
+        if (verifiedUser?.id) {
+          setUserState(verifiedUser);
+          writeCachedUser(verifiedUser);
+        } else {
+          setUserState(null);
+          clearCachedUser();
+        }
+      } catch (error) {
+        console.error('[UserContext] 校验登录态失败:', error);
+        if (!cancelled) {
+          setUserState(null);
+          clearCachedUser();
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    };
+
+    void validateStoredSession();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // 监听 taskEventHandler 发出的积分变更事件
@@ -67,7 +120,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
         setUserState(prev => {
           if (!prev) return prev;
           const updated = { ...prev, points };
-          localStorage.setItem('user', JSON.stringify(updated));
+          writeCachedUser(updated);
           return updated;
         });
       }
@@ -79,9 +132,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const setUser = useCallback((newUser: User | null) => {
     setUserState(newUser);
     if (newUser) {
-      localStorage.setItem('user', JSON.stringify(newUser));
+      writeCachedUser(newUser);
     } else {
-      localStorage.removeItem('user');
+      clearCachedUser();
     }
   }, []);
 
@@ -89,7 +142,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     setUserState(prev => {
       if (!prev) return prev;
       const updated = { ...prev, points: (prev.points || 0) + delta };
-      localStorage.setItem('user', JSON.stringify(updated));
+      writeCachedUser(updated);
       return updated;
     });
   }, []);
@@ -98,35 +151,20 @@ export function UserProvider({ children }: { children: ReactNode }) {
     setUserState(prev => {
       if (!prev) return prev;
       const updated = { ...prev, points: absolutePoints };
-      localStorage.setItem('user', JSON.stringify(updated));
+      writeCachedUser(updated);
       return updated;
     });
   }, []);
 
   const refreshUser = useCallback(async () => {
-    // Read userId from localStorage to avoid stale closure
-    const userData = localStorage.getItem('user');
-    if (!userData) return;
-    let userId: string;
-    try {
-      userId = JSON.parse(userData).id;
-    } catch {
-      return;
-    }
-    if (!userId) return;
+    readCachedUser();
 
     try {
-      const response = await fetch(`/api/user/profile?userId=${encodeURIComponent(userId)}`, {
-        method: 'GET',
-        credentials: 'include',
-      });
-      const data = await parseJsonApiResponse<{ success?: boolean; data?: User }>(response);
-      const refreshedUser = data?.success ? data.data : null;
-      if (refreshedUser) {
+      const { response, user: refreshedUser } = await fetchCurrentUser();
+      if (refreshedUser?.id) {
         setUserState(prev => {
-          if (!prev) return refreshedUser;
-          const updated = { ...prev, ...refreshedUser };
-          const hasChanged =
+          const updated = prev ? { ...prev, ...refreshedUser } : refreshedUser;
+          const hasChanged = !prev ||
             updated.id !== prev.id ||
             updated.username !== prev.username ||
             updated.email !== prev.email ||
@@ -137,18 +175,33 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
           if (!hasChanged) return prev;
 
-          localStorage.setItem('user', JSON.stringify(updated));
+          writeCachedUser(updated);
           return updated;
         });
+        return;
+      }
+
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        setUserState(null);
+        clearCachedUser();
       }
     } catch (error) {
       console.error('[UserContext] 刷新用户信息失败:', error);
     }
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
     setUserState(null);
-    localStorage.removeItem('user');
+    clearCachedUser();
+
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch (error) {
+      console.error('[UserContext] 退出登录失败:', error);
+    }
   }, []);
 
   return (

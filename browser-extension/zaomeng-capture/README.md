@@ -19,9 +19,15 @@
 - Arc
 - 360 极速浏览器
 
-说明：以上浏览器都可以加载当前插件包。Firefox 和 Safari 暂未提供安装包。
+说明：Chrome 与 Edge 优先规划为商店安装；Brave、Arc、360 极速浏览器继续使用手动安装包。Firefox 和 Safari 暂未提供安装包。
 
 ## 安装方式
+
+### Chrome / Edge 商店安装
+
+插件上架 Chrome Web Store 和 Microsoft Edge Add-ons 后，从网站插件页点击对应商店入口，浏览器确认权限后即可安装。安装完成后刷新造梦AI页面，确认导航栏显示“插件已连接”。
+
+### 手动安装备用
 
 1. 下载 zip 后解压，得到 `zaomeng-capture` 目录
 2. 打开扩展管理页：Chrome / Brave / Arc 使用 `chrome://extensions/`，Edge 使用 `edge://extensions/`

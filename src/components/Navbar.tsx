@@ -37,6 +37,19 @@ function scheduleIdleTask(callback: () => void, timeout = 900) {
   };
 }
 
+async function readMarketPendingCount() {
+  const response = await fetch('/api/market/stats', { credentials: 'include' });
+  const text = await response.text().catch(() => '');
+  if (!response.ok || !text.trim()) return 0;
+
+  try {
+    const result = JSON.parse(text) as { success?: boolean; data?: { pendingCount?: number } };
+    return result.success ? Number(result.data?.pendingCount || 0) : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export default function Navbar({ showUserMenu = true }: NavbarProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -44,6 +57,7 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
   const [pluginReady, setPluginReady] = useState(false);
   const [pluginVersion, setPluginVersion] = useState<string | null>(null);
   const [latestPluginVersion, setLatestPluginVersion] = useState<string | null>(null);
+  const [marketPendingCount, setMarketPendingCount] = useState(0);
 
   const compareVersions = (left: string, right: string) => {
     const leftParts = left.split('.').map((part) => Number(part) || 0);
@@ -67,9 +81,10 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
     router.push('/home');
   };
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     router.push('/login');
+    router.refresh();
   };
 
   useEffect(() => {
@@ -78,6 +93,8 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
     router.prefetch('/profile');
     router.prefetch('/profile?tab=recharge');
     router.prefetch('/admin/generations');
+    router.prefetch('/market');
+    router.prefetch('/market?tab=pending');
 
     const handler = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
@@ -109,6 +126,35 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
     };
   }, [router]);
 
+  useEffect(() => {
+    if (!user?.isAdmin) {
+      setMarketPendingCount(0);
+      return;
+    }
+
+    let cancelled = false;
+    const refreshPendingCount = () => {
+      void readMarketPendingCount()
+        .then((count) => {
+          if (!cancelled) setMarketPendingCount(count);
+        })
+        .catch(() => {
+          if (!cancelled) setMarketPendingCount(0);
+        });
+    };
+
+    const cancelInitialLoad = scheduleIdleTask(refreshPendingCount, 700);
+    const intervalId = globalThis.setInterval(refreshPendingCount, 60_000);
+    window.addEventListener('marketPendingChanged', refreshPendingCount);
+
+    return () => {
+      cancelled = true;
+      cancelInitialLoad();
+      globalThis.clearInterval(intervalId);
+      window.removeEventListener('marketPendingChanged', refreshPendingCount);
+    };
+  }, [user?.isAdmin]);
+
   return (
     <nav className="sticky top-0 z-[80] border-b border-white/[0.08] bg-black/72 px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.22)] backdrop-blur-2xl sm:px-6 sm:py-3">
       <div className="mx-auto flex max-w-[92vw] items-center justify-between gap-2 2xl:max-w-[1780px]">
@@ -132,6 +178,18 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
         {/* 右侧用户菜单 */}
         {showUserMenu && user && (
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
+            {user.isAdmin && marketPendingCount > 0 ? (
+              <Link
+                href="/market?tab=pending"
+                prefetch
+                className="hidden items-center gap-2 rounded-full border border-amber-300/30 bg-amber-400/14 px-3 py-1.5 text-xs font-medium text-amber-100 transition-colors hover:bg-amber-400/20 sm:flex"
+                title="前往图市待审核"
+              >
+                <span className="h-2 w-2 rounded-full bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.55)]" />
+                图市待审 {marketPendingCount}
+              </Link>
+            ) : null}
+
             <div className="group relative hidden sm:block">
               <Link
                 href="/plugin"

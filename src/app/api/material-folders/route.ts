@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCookieUserId } from '@/lib/serverAuth';
+import { readDevPreviewUser } from '@/lib/devPreviewUser';
 import { capturedImageManager, materialFolderManager } from '@/storage/database'
 
 function normalizeFolderName(name: unknown) {
@@ -18,6 +19,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: true, data: folders })
   } catch (error) {
     console.error('[素材文件夹] 加载失败:', error)
+    const previewUser = await readDevPreviewUser()
+    if (previewUser?.id === userId) {
+      return NextResponse.json({
+        success: true,
+        data: [],
+        preview: true,
+        message: '开发环境使用空文件夹列表预览',
+      })
+    }
+
     return NextResponse.json({ success: false, error: '文件夹加载失败，请稍后重试' }, { status: 500 })
   }
 }

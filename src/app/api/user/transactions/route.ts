@@ -3,6 +3,7 @@ import { transactionManager } from '@/storage/database';
 import { reconcileProcessingTransactions } from '@/lib/reconcileProcessingTransactions';
 import { getAliyunOSSThumbnailUrlFromUrl } from '@/lib/aliyunOSS';
 import { getCookieUserId } from '@/lib/serverAuth';
+import { readDevPreviewUser } from '@/lib/devPreviewUser';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误';
@@ -207,6 +208,19 @@ export async function GET(request: NextRequest) {
   } catch (error: unknown) {
     const errorMessage = getErrorMessage(error);
     console.error('[API/Transactions] 请求失败:', errorMessage);
+    const cookieUserId = getCookieUserId(request);
+    const previewUser = await readDevPreviewUser();
+
+    if (previewUser?.id === cookieUserId) {
+      return NextResponse.json({
+        success: true,
+        data: [],
+        nextCursor: null,
+        preview: true,
+        message: '开发环境使用空订单记录预览',
+      });
+    }
+
     return NextResponse.json(
       { success: false, message: `获取消费记录失败: ${errorMessage}` },
       { status: 500 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { userManager } from '@/storage/database';
 import { getCookieUserId } from '@/lib/serverAuth';
+import { readDevPreviewUser } from '@/lib/devPreviewUser';
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误';
@@ -14,12 +15,14 @@ function getErrorMessage(error: unknown) {
  * - 包括用户ID、用户名、邮箱、头像、剩余积分等
  */
 export async function GET(request: NextRequest) {
+  let userId: string | null = null;
+
   try {
     const { searchParams } = new URL(request.url);
     const requestedUserId = searchParams.get('userId');
     const cookieUserId = getCookieUserId(request);
 
-    const userId = requestedUserId || cookieUserId;
+    userId = requestedUserId || cookieUserId;
 
     if (!userId) {
       return NextResponse.json(
@@ -65,6 +68,24 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: unknown) {
     console.error('获取用户信息失败:', error);
+    const previewUser = await readDevPreviewUser();
+
+    if (previewUser && userId === previewUser.id) {
+      return NextResponse.json({
+        success: true,
+        data: {
+          id: previewUser.id,
+          username: previewUser.username,
+          email: previewUser.email,
+          avatar: '/images/avatar.png',
+          points: previewUser.points,
+          isAdmin: previewUser.isAdmin,
+          createTime: previewUser.createdAt,
+        },
+        preview: true,
+      });
+    }
+
     return NextResponse.json(
       { success: false, message: `获取用户信息失败: ${getErrorMessage(error)}` },
       { status: 500 }

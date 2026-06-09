@@ -499,7 +499,7 @@ export const forceRefreshCache = (userId?: string) => {
 
     // 映射数据库数据到 TaskRecord 格式
     const tasks: TaskRecord[] = data
-      .filter((item) => item.orderNumber && (item.prompt || item.description) && item.toolPage !== '积分充值') // 过滤没有订单号、提示词或描述的记录，以及充值记录
+      .filter((item) => item.orderNumber && (item.prompt || item.description) && item.toolPage !== '积分充值' && item.toolPage !== '图市收益') // 过滤没有订单号、提示词或描述的记录，以及充值和图市收益记录
       .map((item) => {
       // 【调试】打印订单的原始数据
       debugTaskHistory('[TaskHistory] 解析订单:', {
@@ -738,6 +738,9 @@ export const forceRefreshCache = (userId?: string) => {
         // Keep legacy history visible without restoring the old page mode.
         tab = 'custom';
         tabName = '历史工具记录';
+      } else if (item.toolPage === '图市购买') {
+        tab = 'custom';
+        tabName = '图市购买';
       }
 
       // 调试日志：记录toolPage映射
@@ -1660,20 +1663,25 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
 
   return (
     <div
-      className="fixed bottom-3 right-3 top-24 z-[70] flex items-center sm:bottom-4 sm:right-5 sm:top-[5.5rem]"
+      className={`fixed z-[70] flex ${
+        isCollapsed
+          ? 'bottom-4 right-4 top-auto items-end sm:bottom-4 sm:right-5 sm:top-[5.5rem] sm:items-center'
+          : 'bottom-3 left-3 right-3 top-auto items-end sm:bottom-4 sm:left-auto sm:right-5 sm:top-[5.5rem] sm:items-center'
+      }`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
       <div
         className={`
-          flex max-h-full overflow-hidden border border-white/15 bg-[#050509]/82 shadow-[0_24px_80px_rgba(0,0,0,0.42)] backdrop-blur-2xl transition-all duration-300
-          ${isCollapsed ? 'w-[58px] rounded-[1.35rem]' : 'w-[min(390px,calc(100vw-1.5rem))] flex-col rounded-[1.7rem]'}
+          flex max-h-[min(76vh,620px)] overflow-hidden border border-white/15 bg-[#050509]/82 shadow-[0_24px_80px_rgba(0,0,0,0.42)] backdrop-blur-2xl transition-all duration-300 sm:max-h-full
+          ${isCollapsed ? 'h-14 w-14 rounded-full sm:h-auto sm:w-[58px] sm:rounded-[1.35rem]' : 'w-full flex-col rounded-[1.45rem] sm:w-[min(390px,calc(100vw-1.5rem))] sm:rounded-[1.7rem]'}
         `}
       >
         <button
           type="button"
-          className={`relative w-full transition-colors hover:bg-white/[0.06] ${isCollapsed ? 'flex min-h-[170px] flex-col items-center justify-center gap-3 px-2 py-4' : 'border-b border-white/10 px-4 py-4 text-left'}`}
+          className={`relative w-full transition-colors hover:bg-white/[0.06] ${isCollapsed ? 'flex h-14 items-center justify-center p-0 sm:min-h-[170px] sm:flex-col sm:gap-3 sm:px-2 sm:py-4' : 'border-b border-white/10 px-4 py-4 text-left'}`}
           onClick={() => setIsCollapsed(!isCollapsed)}
+          aria-label={isCollapsed ? '展开订单记录' : '收起订单记录'}
         >
           {isCollapsed ? (
             <>
@@ -1688,7 +1696,7 @@ export default function TaskHistory({ activeTab, onTaskClick, userId }: TaskHist
                   </span>
                 )}
               </div>
-              <div className="flex flex-col items-center gap-2">
+              <div className="hidden flex-col items-center gap-2 sm:flex">
                 <span className="[writing-mode:vertical-rl] text-xs font-medium tracking-[0.22em] text-white/78">订单记录</span>
                 {processingCount > 0 ? (
                   <span className="rounded-full bg-blue-500/20 px-1.5 py-1 text-[10px] text-blue-200 [writing-mode:vertical-rl]">处理中{processingCount}</span>

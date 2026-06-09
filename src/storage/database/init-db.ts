@@ -162,6 +162,59 @@ export async function initializeDatabase() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS market_items (
+      id VARCHAR(36) PRIMARY KEY NOT NULL,
+      seller_id VARCHAR(36) NOT NULL,
+      source_order_number VARCHAR(50) NULL,
+      source_image_url TEXT NOT NULL,
+      preview_image_url TEXT NOT NULL,
+      thumbnail_url TEXT NULL,
+      title VARCHAR(120) NOT NULL,
+      description TEXT NULL,
+      category VARCHAR(50) NOT NULL DEFAULT '手机壳图案',
+      tags JSON NULL,
+      price_points INT NOT NULL,
+      platform_fee_rate DECIMAL(5, 2) NOT NULL DEFAULT 20.00,
+      status VARCHAR(20) NOT NULL DEFAULT 'pending',
+      license_type VARCHAR(30) NOT NULL DEFAULT 'standard',
+      allow_commercial_use BOOLEAN NOT NULL DEFAULT TRUE,
+      psd_url TEXT NULL,
+      psd_file_name VARCHAR(255) NULL,
+      psd_file_size INT NULL,
+      psd_layer_count INT NOT NULL DEFAULT 0,
+      psd_layers JSON NULL,
+      rejection_reason TEXT NULL,
+      approved_at TIMESTAMP NULL DEFAULT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NULL DEFAULT NULL,
+      KEY market_items_status_created_idx (status, created_at),
+      KEY market_items_seller_created_idx (seller_id, created_at),
+      KEY market_items_source_order_idx (source_order_number)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS market_purchases (
+      id VARCHAR(36) PRIMARY KEY NOT NULL,
+      item_id VARCHAR(36) NOT NULL,
+      buyer_id VARCHAR(36) NOT NULL,
+      seller_id VARCHAR(36) NOT NULL,
+      order_number VARCHAR(50) NOT NULL,
+      price_points INT NOT NULL,
+      seller_points INT NOT NULL,
+      platform_fee_points INT NOT NULL,
+      buyer_remaining_points INT NOT NULL,
+      seller_remaining_points INT NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY market_purchases_buyer_item_unique (buyer_id, item_id),
+      UNIQUE KEY market_purchases_order_unique (order_number),
+      KEY market_purchases_buyer_created_idx (buyer_id, created_at),
+      KEY market_purchases_seller_created_idx (seller_id, created_at),
+      KEY market_purchases_item_idx (item_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
   await ensureColumn('captured_images', 'folder_id', 'ALTER TABLE captured_images ADD COLUMN folder_id VARCHAR(36) NULL');
   await ensureColumn('captured_images', 'is_favorite', 'ALTER TABLE captured_images ADD COLUMN is_favorite BOOLEAN NOT NULL DEFAULT FALSE');
   await ensureIndex('captured_images', 'captured_images_user_folder_idx', 'CREATE INDEX captured_images_user_folder_idx ON captured_images (user_id, folder_id)');

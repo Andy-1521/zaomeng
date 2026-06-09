@@ -364,8 +364,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="relative min-h-screen bg-[#08080a] text-white">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(124,58,237,0.12),transparent_36%),linear-gradient(180deg,#0b0b10_0%,#050507_58%,#050507_100%)]" />
+    <div className="zaomeng-page-shell">
 
       <div className="relative z-10">
         <Navbar />
@@ -379,7 +378,7 @@ export default function ProfilePage() {
             <button
               type="button"
               onClick={() => handleTabChange('recharge')}
-              className="rounded-full border border-violet-300/18 bg-violet-500/[0.08] px-3 py-2 text-sm text-violet-100 transition hover:bg-violet-500/[0.14] hover:text-white"
+              className="zaomeng-ghost-button rounded-full px-3 py-2 text-sm"
             >
               <PointsIconLabel points={user.points || 0} className="font-semibold text-yellow-200" iconClassName="h-4 w-4" />
             </button>
@@ -387,19 +386,19 @@ export default function ProfilePage() {
 
           {/* 消息提示 */}
           {message && (
-            <div className={`mb-6 rounded-lg p-4 ${message.type === 'success' ? 'border border-emerald-400/24 bg-emerald-500/12 text-emerald-200' : 'border border-rose-400/24 bg-rose-500/12 text-rose-200'}`}>
+            <div className={`mb-6 rounded-2xl p-4 backdrop-blur-xl ${message.type === 'success' ? 'border border-emerald-400/24 bg-emerald-500/12 text-emerald-200' : 'border border-rose-400/24 bg-rose-500/12 text-rose-200'}`}>
               {message.text}
             </div>
           )}
 
           {/* 复制成功提示 */}
           {showCopySuccess && (
-            <div className="fixed top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-violet-300/16 bg-[#111019]/90 px-6 py-3 text-sm text-white shadow-2xl shadow-violet-950/35 backdrop-blur-md">
+            <div className="zaomeng-glass-panel fixed top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2 rounded-2xl px-6 py-3 text-sm text-white">
               ✓ 编号已复制
             </div>
           )}
 
-          <div className="mb-5 rounded-full border border-violet-300/15 bg-violet-500/[0.06] p-1 backdrop-blur-xl">
+          <div className="zaomeng-soft-panel mb-5 rounded-full p-1">
             <div className="grid grid-cols-4 gap-1">
               {PROFILE_TABS.map((tab) => (
                 <button
@@ -408,8 +407,8 @@ export default function ProfilePage() {
                   onClick={() => handleTabChange(tab.key)}
                   className={`rounded-full px-3 py-2 text-center text-sm font-medium transition ${
                     activeTab === tab.key
-                      ? 'bg-violet-400 text-white shadow-sm shadow-violet-500/20'
-                      : 'text-white/48 hover:bg-violet-500/[0.09] hover:text-white/85'
+                      ? 'bg-white/16 text-white shadow-sm shadow-black/20'
+                      : 'text-white/48 hover:bg-white/[0.08] hover:text-white/85'
                   }`}
                 >
                   {tab.label}
@@ -420,8 +419,8 @@ export default function ProfilePage() {
 
           {activeTab === 'info' && (
             <div className="space-y-5">
-              <section className="overflow-hidden rounded-[1.4rem] border border-violet-300/14 bg-violet-500/[0.05] backdrop-blur-xl">
-                <label className="flex cursor-pointer items-center gap-3 px-4 py-3.5 transition hover:bg-violet-500/[0.05]">
+              <section className="zaomeng-glass-panel overflow-hidden rounded-[1.4rem]">
+                <label className="flex cursor-pointer items-center gap-3 px-4 py-3.5 transition hover:bg-white/[0.05]">
                   <div className="relative h-12 w-12 shrink-0">
                     <SafeImage src={user.avatar || '/images/avatar.png'} alt="用户头像" fill sizes="48px" className="rounded-2xl object-cover" />
                   </div>
@@ -433,7 +432,7 @@ export default function ProfilePage() {
                   <input type="file" className="hidden" accept="image/*" onChange={handleAvatarChange} />
                 </label>
 
-                <div className="mx-4 h-px bg-violet-300/10" />
+                <div className="mx-4 h-px bg-white/10" />
 
                 <div className="px-4 py-3.5">
                   <p className="text-xs text-white/34">用户名</p>
@@ -443,9 +442,9 @@ export default function ProfilePage() {
                         type="text"
                         value={editUsername}
                         onChange={(e) => setEditUsername(e.target.value)}
-                        className="min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-black/25 px-3 py-2 text-sm text-white outline-none transition focus:border-white/25"
+                        className="zaomeng-input min-w-0 flex-1 rounded-xl px-3 py-2 text-sm"
                       />
-                        <button type="button" onClick={handleUpdateUsername} className="rounded-xl bg-violet-400 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-300">
+                        <button type="button" onClick={handleUpdateUsername} className="zaomeng-primary-button rounded-xl px-4 py-2 text-sm font-medium">
                           保存
                         </button>
                       <button
@@ -454,7 +453,7 @@ export default function ProfilePage() {
                           setEditUsername(user.username);
                           setShowEditUsername(false);
                         }}
-                        className="rounded-xl bg-violet-500/[0.1] px-4 py-2 text-sm text-violet-100 transition hover:bg-violet-500/[0.16] hover:text-white"
+                        className="zaomeng-ghost-button rounded-xl px-4 py-2 text-sm"
                       >
                         取消
                       </button>
@@ -462,24 +461,24 @@ export default function ProfilePage() {
                   ) : (
                     <div className="mt-1 flex items-center justify-between gap-3">
                       <p className="min-w-0 truncate text-base text-white">{user.username}</p>
-                      <button type="button" onClick={() => setShowEditUsername(true)} className="text-sm text-violet-200 transition hover:text-violet-100">
+                      <button type="button" onClick={() => setShowEditUsername(true)} className="text-sm text-cyan-100/72 transition hover:text-cyan-50">
                         修改
                       </button>
                     </div>
                   )}
                 </div>
 
-                <div className="mx-4 h-px bg-violet-300/10" />
+                <div className="mx-4 h-px bg-white/10" />
                 <div className="flex items-center justify-between gap-4 px-4 py-3.5">
                   <span className="text-sm text-white/44">邮箱</span>
                   <span className="min-w-0 truncate text-right text-sm text-white/82">{user.email}</span>
                 </div>
-                <div className="mx-4 h-px bg-violet-300/10" />
+                <div className="mx-4 h-px bg-white/10" />
                 <div className="flex items-center justify-between gap-4 px-4 py-3.5">
                   <span className="text-sm text-white/44">用户 ID</span>
                   <span className="min-w-0 truncate text-right font-mono text-xs text-white/55">{user.id}</span>
                 </div>
-                <div className="mx-4 h-px bg-violet-300/10" />
+                <div className="mx-4 h-px bg-white/10" />
                 <div className="flex items-center justify-between gap-4 px-4 py-3.5">
                   <span className="text-sm text-white/44">注册时间</span>
                   <span className="text-right text-sm text-white/70">{formatTime(user.createTime ?? user.createdAt ?? '')}</span>
@@ -490,7 +489,7 @@ export default function ProfilePage() {
                 <Link
                   href="/admin/generations"
                   prefetch
-                  className="flex w-full items-center justify-between rounded-[1.4rem] border border-violet-300/14 bg-violet-500/[0.05] px-4 py-3.5 text-sm text-white transition hover:bg-violet-500/[0.09]"
+                  className="zaomeng-glass-panel flex w-full items-center justify-between rounded-[1.4rem] px-4 py-3.5 text-sm text-white transition hover:bg-white/[0.06]"
                 >
                   <span>进入管理员后台</span>
                   <span className="text-white/28">›</span>
@@ -501,13 +500,13 @@ export default function ProfilePage() {
 
           {activeTab === 'security' && (
             <div className="space-y-4">
-              <section className="overflow-hidden rounded-[1.4rem] border border-violet-300/14 bg-violet-500/[0.05] backdrop-blur-xl">
+              <section className="zaomeng-glass-panel overflow-hidden rounded-[1.4rem]">
                 <div className="px-4 py-4">
                   <h3 className="text-base font-semibold text-white">修改密码</h3>
                   <p className="mt-1 text-sm text-white/38">新密码至少 6 位，建议不要与邮箱或旧密码相同。</p>
                 </div>
 
-                <div className="mx-4 h-px bg-violet-300/10" />
+                <div className="mx-4 h-px bg-white/10" />
 
                 <label className="block px-4 py-3.5">
                   <span className="block text-sm text-white/44">当前密码</span>
@@ -516,11 +515,11 @@ export default function ProfilePage() {
                     value={oldPassword}
                     onChange={(e) => setOldPassword(e.target.value)}
                     placeholder="请输入当前密码"
-                    className="mt-2 w-full rounded-xl border border-white/[0.1] bg-black/25 px-3 py-2.5 text-sm text-white placeholder-white/25 outline-none transition focus:border-white/25"
+                    className="zaomeng-input mt-2 w-full rounded-xl px-3 py-2.5 text-sm"
                   />
                 </label>
 
-                <div className="mx-4 h-px bg-violet-300/10" />
+                <div className="mx-4 h-px bg-white/10" />
 
                 <label className="block px-4 py-3.5">
                   <span className="block text-sm text-white/44">新密码</span>
@@ -529,11 +528,11 @@ export default function ProfilePage() {
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="至少 6 位"
-                    className="mt-2 w-full rounded-xl border border-white/[0.1] bg-black/25 px-3 py-2.5 text-sm text-white placeholder-white/25 outline-none transition focus:border-white/25"
+                    className="zaomeng-input mt-2 w-full rounded-xl px-3 py-2.5 text-sm"
                   />
                 </label>
 
-                <div className="mx-4 h-px bg-violet-300/10" />
+                <div className="mx-4 h-px bg-white/10" />
 
                 <label className="block px-4 py-3.5">
                   <span className="block text-sm text-white/44">确认新密码</span>
@@ -542,7 +541,7 @@ export default function ProfilePage() {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="再次输入新密码"
-                    className="mt-2 w-full rounded-xl border border-white/[0.1] bg-black/25 px-3 py-2.5 text-sm text-white placeholder-white/25 outline-none transition focus:border-white/25"
+                    className="zaomeng-input mt-2 w-full rounded-xl px-3 py-2.5 text-sm"
                   />
                 </label>
               </section>
@@ -550,7 +549,7 @@ export default function ProfilePage() {
               <button
                 type="button"
                 onClick={handleUpdatePassword}
-                className="w-full rounded-[1.15rem] bg-gradient-to-r from-violet-500 to-blue-500 py-3 text-sm font-semibold text-white transition hover:brightness-110"
+                className="zaomeng-primary-button w-full rounded-[1.15rem] py-3 text-sm font-semibold"
               >
                 保存新密码
               </button>
@@ -577,7 +576,7 @@ export default function ProfilePage() {
                 <Link
                   href="/home"
                   prefetch
-                  className="shrink-0 rounded-full border border-violet-300/14 bg-violet-500/[0.06] px-4 py-2 text-sm text-violet-100 transition hover:bg-violet-500/[0.12] hover:text-white"
+                  className="zaomeng-ghost-button shrink-0 rounded-full px-4 py-2 text-sm"
                 >
                   订单记录
                 </Link>
@@ -594,8 +593,8 @@ export default function ProfilePage() {
                       onClick={() => setTransactionFilter(filter.key)}
                       className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
                         active
-                          ? 'border-violet-300/35 bg-violet-400 text-white shadow-sm shadow-violet-500/20'
-                          : 'border-violet-300/12 bg-violet-500/[0.05] text-white/58 hover:bg-violet-500/[0.1] hover:text-white'
+                          ? 'border-cyan-200/28 bg-cyan-300/[0.14] text-cyan-50 shadow-sm shadow-cyan-500/10'
+                          : 'border-white/10 bg-white/[0.045] text-white/58 hover:bg-white/[0.08] hover:text-white'
                       }`}
                     >
                       {filter.label}
@@ -605,18 +604,18 @@ export default function ProfilePage() {
               </div>
 
               {filteredTransactions.length === 0 ? (
-                <section className="rounded-[1.4rem] border border-dashed border-violet-300/18 bg-violet-500/[0.03] px-4 py-10 text-center">
+                <section className="rounded-[1.4rem] border border-dashed border-white/14 bg-white/[0.035] px-4 py-10 text-center">
                   <p className="text-sm text-white/48">暂无积分明细</p>
                   <button
                     type="button"
                     onClick={() => handleTabChange('recharge')}
-                    className="mt-4 rounded-full bg-violet-400 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-300"
+                    className="zaomeng-primary-button mt-4 rounded-full px-4 py-2 text-sm font-medium"
                   >
                     去兑换
                   </button>
                 </section>
               ) : (
-                <section className="max-h-[620px] overflow-y-auto overflow-x-hidden rounded-[1.4rem] border border-violet-300/14 bg-violet-500/[0.05] backdrop-blur-xl history-scrollbar">
+                <section className="zaomeng-glass-panel max-h-[620px] overflow-y-auto overflow-x-hidden rounded-[1.4rem] history-scrollbar">
                   {filteredTransactions.map((trans, index) => {
                     const isRecharge = isRechargeTransaction(trans.toolPage);
                     const pointValue = isRecharge ? (trans.actualPoints || trans.points) : trans.points;
@@ -624,8 +623,8 @@ export default function ProfilePage() {
 
                     return (
                       <div key={trans.id}>
-                        {index > 0 && <div className="mx-4 h-px bg-violet-300/10" />}
-                        <div className="px-4 py-3.5 transition hover:bg-violet-500/[0.06]">
+                        {index > 0 && <div className="mx-4 h-px bg-white/10" />}
+                        <div className="px-4 py-3.5 transition hover:bg-white/[0.05]">
                           <div className="flex items-start gap-3">
                             <div className="min-w-0 flex-1">
                               <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -648,12 +647,12 @@ export default function ProfilePage() {
                                       });
                                     }
                                   }}
-                                  className="min-w-0 max-w-full truncate rounded-full border border-violet-300/14 bg-violet-500/[0.06] px-2.5 py-1 text-left transition hover:bg-violet-500/[0.12] disabled:cursor-default disabled:opacity-50"
+                                  className="min-w-0 max-w-full truncate rounded-full border border-white/10 bg-white/[0.045] px-2.5 py-1 text-left transition hover:bg-white/[0.08] disabled:cursor-default disabled:opacity-50"
                                   title="复制编号"
                                 >
                                   编号 {trans.orderNumber || '-'}
                                 </button>
-                                <span className="inline-flex items-center gap-1 rounded-full border border-violet-300/14 bg-violet-500/[0.06] px-2.5 py-1">
+                                <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.045] px-2.5 py-1">
                                   <span>余额</span>
                                   <PointsIconLabel points={trans.remainingPoints} iconClassName="h-3.5 w-3.5" />
                                 </span>

@@ -70,23 +70,23 @@ const sections = [
 
 export default function PrivacyPage() {
   return (
-    <main className="min-h-screen bg-black text-white">
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-5 py-10 sm:px-8 sm:py-14">
+    <main className="zaomeng-page-shell">
+      <div className="relative z-10 mx-auto flex w-full max-w-4xl flex-col gap-8 px-5 py-10 sm:px-8 sm:py-14">
         <header className="border-b border-white/10 pb-6">
-          <Link href="/login" className="text-sm text-violet-200/70 transition hover:text-violet-100">
+          <Link href="/login" className="text-sm text-cyan-100/70 transition hover:text-cyan-50">
             返回造梦AI
           </Link>
           <h1 className="mt-5 text-3xl font-semibold tracking-tight sm:text-4xl">隐私政策</h1>
           <p className="mt-3 text-sm leading-6 text-white/46">最后更新：2026年5月27日</p>
         </header>
 
-        <section className="rounded-2xl border border-violet-300/14 bg-violet-500/[0.04] px-5 py-5 text-sm leading-7 text-white/58">
+        <section className="zaomeng-glass-panel rounded-2xl px-5 py-5 text-sm leading-7 text-white/62">
           本政策说明造梦AI在提供图片素材管理和 AI 图片处理服务时，如何收集、使用、存储和保护相关信息。
         </section>
 
         <div className="space-y-7">
           {sections.map((section) => (
-            <section key={section.title} className="rounded-2xl border border-white/10 bg-white/[0.035] px-5 py-5">
+            <section key={section.title} className="zaomeng-soft-panel rounded-2xl px-5 py-5">
               <h2 className="text-lg font-semibold text-white">{section.title}</h2>
               <div className="mt-3 space-y-3 text-sm leading-7 text-white/58">
                 {section.paragraphs.map((paragraph) => (

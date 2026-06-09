@@ -176,6 +176,15 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error('[订单查询] 查询失败:', error);
+    if (process.env.NODE_ENV !== 'production') {
+      return NextResponse.json({
+        success: true,
+        data: [],
+        preview: true,
+        message: '本地数据库暂不可用，已返回空订单预览',
+      });
+    }
+
     return NextResponse.json(
       {
         success: false,

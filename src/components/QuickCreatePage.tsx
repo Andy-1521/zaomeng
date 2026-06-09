@@ -47,6 +47,7 @@ type RawOrderRecord = {
   requestParams?: unknown;
   uploadedImage?: string | null;
   thumbnailUrls?: string[] | null;
+  psdUrl?: string | null;
   remainingPoints?: number | null;
   createdAt?: string | number | Date | null;
   time?: string | number | Date | null;
@@ -63,8 +64,20 @@ type OrderResultCard = {
   description: string;
   orderNumber: string;
   sourceImageUrl: string | null;
+  psdUrl?: string | null;
   isResultImage: boolean;
   downloadFileName: string;
+};
+
+type MarketListingDraft = {
+  order: OrderResultCard;
+  title: string;
+  description: string;
+  category: string;
+  tags: string;
+  pricePoints: number;
+  psdMode: 'none' | 'order' | 'upload';
+  psdFile: File | null;
 };
 
 type MaterialFilter = 'all' | 'today' | 'yesterday' | 'earlier';
@@ -97,6 +110,7 @@ type CapturedImagesResponse = {
   data?: CapturedImageRecord[];
   error?: string;
   message?: string;
+  preview?: boolean;
   pagination?: Partial<CapturedImagesPagination>;
 };
 
@@ -1147,6 +1161,40 @@ function getMaterialDateGroup(value: string | number | Date): 'today' | 'yesterd
   return 'earlier';
 }
 
+function buildOrderResultCardsFromRecord(item: RawOrderRecord): OrderResultCard[] {
+  const resultImages = extractImageUrls(item.resultData);
+  const sourceImages = dedupeUrls([
+    ...extractImageUrls(item.requestParams),
+    ...extractImageUrls(item.uploadedImage),
+  ]);
+  const toolLabel = getOrderToolLabel(item.toolPage, item.description, item.orderNumber);
+  const statusLabel = getOrderStatusLabel(item.status);
+  const createdAt = item.createdAt || item.time || new Date().toISOString();
+  const orderNumber = item.orderNumber || item.id;
+
+  if ((statusLabel !== '成功' && statusLabel !== '部分成功') || resultImages.length === 0) {
+    return [];
+  }
+
+  const description = `${toolLabel}结果`;
+
+  return resultImages.map((imageUrl, index) => ({
+    id: `${item.id}-${index}`,
+    orderId: orderNumber,
+    imageUrl,
+    thumbnailUrl: Array.isArray(item.thumbnailUrls) ? item.thumbnailUrls[index] || null : null,
+    createdAt,
+    toolLabel,
+    statusLabel,
+    description,
+    orderNumber,
+    sourceImageUrl: sourceImages[0] || null,
+    psdUrl: item.psdUrl || null,
+    isResultImage: true,
+    downloadFileName: getOrderDownloadFileName(orderNumber, toolLabel, imageUrl, index),
+  }));
+}
+
 export default function QuickCreatePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const aiReferenceInputRef = useRef<HTMLInputElement>(null);
@@ -1183,6 +1231,7 @@ export default function QuickCreatePage() {
   const [hasProcessingOrders, setHasProcessingOrders] = useState(false);
   const [isLoadingMaterials, setIsLoadingMaterials] = useState(false);
   const [isLoadingMoreMaterials, setIsLoadingMoreMaterials] = useState(false);
+  const [materialsUnavailableMessage, setMaterialsUnavailableMessage] = useState('');
   const [materialsPagination, setMaterialsPagination] = useState<CapturedImagesPagination>(EMPTY_CAPTURED_IMAGES_PAGINATION);
   const [isAiReferenceUploading, setIsAiReferenceUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -1199,6 +1248,9 @@ export default function QuickCreatePage() {
   const [showAiPromptPanel, setShowAiPromptPanel] = useState(false);
   const [isTaskHistoryExpanded, setIsTaskHistoryExpanded] = useState(false);
   const [previewImage, setPreviewImage] = useState<PreviewImageState | null>(null);
+  const [marketListingDraft, setMarketListingDraft] = useState<MarketListingDraft | null>(null);
+  const [isSubmittingMarketListing, setIsSubmittingMarketListing] = useState(false);
+  const [openingMarketListingOrderId, setOpeningMarketListingOrderId] = useState('');
   const [deletingOrderNumber, setDeletingOrderNumber] = useState<string | null>(null);
   const [deletingMaterialIds, setDeletingMaterialIds] = useState<Set<string>>(new Set());
   const [favoritingMaterialIds, setFavoritingMaterialIds] = useState<Set<string>>(new Set());
@@ -1518,7 +1570,6 @@ export default function QuickCreatePage() {
       setIsLoadingMoreMaterials(true);
     } else if (!preserveCurrent) {
       setIsLoadingMaterials(true);
-      setCapturedImages([]);
       setMaterialsPagination(EMPTY_CAPTURED_IMAGES_PAGINATION);
     }
 
@@ -1538,6 +1589,9 @@ export default function QuickCreatePage() {
 
       if (requestId !== materialRequestIdRef.current) return;
 
+      const isLocalUnavailablePreview = data.preview === true && data.data.length === 0 && Boolean(data.message);
+      setMaterialsUnavailableMessage(isLocalUnavailablePreview ? data.message || '本地素材库数据源未连接' : '');
+
       const pagination = data.pagination;
       const nextPagination: CapturedImagesPagination = {
         limit: Number(pagination?.limit ?? pageSize),
@@ -1552,6 +1606,10 @@ export default function QuickCreatePage() {
       prefetchedMaterialPaginationRef.current.set(`${materialScope}:${materialFilter}`, nextPagination);
       setMaterialsPagination(nextPagination);
       setCapturedImages((prev) => {
+        if (isLocalUnavailablePreview && !append) {
+          return prev;
+        }
+
         const nextData = data.data || [];
         if (!append) {
           if (!preserveCurrent) {
@@ -1573,6 +1631,7 @@ export default function QuickCreatePage() {
       });
     } catch (error) {
       console.warn('[素材库] 加载失败:', error);
+      setMaterialsUnavailableMessage(toUserFacingErrorFromUnknown(error, '素材库加载失败，请稍后重试'));
       if (!append && !preserveCurrent) {
         showToast(toUserFacingErrorFromUnknown(error, '素材库加载失败，请稍后重试'), 'error');
       }
@@ -1771,38 +1830,7 @@ export default function QuickCreatePage() {
         syncPoints(latestSettledOrder.remainingPoints);
       }
 
-      const cards = data.data.flatMap((item) => {
-        const resultImages = extractImageUrls(item.resultData);
-        const sourceImages = dedupeUrls([
-          ...extractImageUrls(item.requestParams),
-          ...extractImageUrls(item.uploadedImage),
-        ]);
-        const toolLabel = getOrderToolLabel(item.toolPage, item.description, item.orderNumber);
-        const statusLabel = getOrderStatusLabel(item.status);
-        const createdAt = item.createdAt || item.time || new Date().toISOString();
-        const orderNumber = item.orderNumber || item.id;
-
-        if ((statusLabel !== '成功' && statusLabel !== '部分成功') || resultImages.length === 0) {
-          return [];
-        }
-
-        const description = `${toolLabel}结果`;
-
-        return resultImages.map((imageUrl, index) => ({
-          id: `${item.id}-${index}`,
-          orderId: orderNumber,
-          imageUrl,
-          thumbnailUrl: Array.isArray(item.thumbnailUrls) ? item.thumbnailUrls[index] || null : null,
-          createdAt,
-          toolLabel,
-          statusLabel,
-          description,
-          orderNumber,
-          sourceImageUrl: sourceImages[0] || null,
-          isResultImage: true,
-          downloadFileName: getOrderDownloadFileName(orderNumber, toolLabel, imageUrl, index),
-        }));
-      });
+      const cards = data.data.flatMap(buildOrderResultCardsFromRecord);
 
       cards.sort((left, right) => parseMaterialDate(right.createdAt).getTime() - parseMaterialDate(left.createdAt).getTime());
 
@@ -2543,6 +2571,94 @@ export default function QuickCreatePage() {
   const downloadOrderImage = useCallback(async (image: OrderResultCard) => {
     await downloadImageByUrl(image.imageUrl, image.downloadFileName);
   }, [downloadImageByUrl]);
+
+  const openMarketListingDialog = useCallback(async (order: OrderResultCard) => {
+    setOpeningMarketListingOrderId(order.orderNumber);
+    let latestOrder = order;
+
+    try {
+      const response = await fetch('/api/task/orders?limit=200', { credentials: 'include' });
+      const data = await parseJsonApiResponse<{ success?: boolean; message?: string; data?: RawOrderRecord[] }>(response, '刷新订单记录失败，请重试');
+      if (response.ok && data.success && Array.isArray(data.data)) {
+        const latestCards = data.data.flatMap(buildOrderResultCardsFromRecord);
+        const matchedOrder = latestCards.find((card) => card.orderNumber === order.orderNumber && card.imageUrl === order.imageUrl)
+          || latestCards.find((card) => card.orderNumber === order.orderNumber);
+
+        if (matchedOrder) {
+          latestOrder = matchedOrder;
+          setOrderResults((current) => current.map((card) => {
+            if (card.orderNumber !== order.orderNumber) return card;
+            return latestCards.find((latestCard) => latestCard.imageUrl === card.imageUrl) || card;
+          }));
+        }
+      }
+    } catch (error) {
+      console.warn('[图市] 打开上架弹窗前刷新订单失败，使用当前订单信息:', error);
+    } finally {
+      setOpeningMarketListingOrderId('');
+    }
+
+    setMarketListingDraft({
+      order: latestOrder,
+      title: `${latestOrder.toolLabel}手机壳图案`,
+      description: '适合手机壳铺货、商品展示和二次编辑使用。购买后可用于商品铺货，不可二次转售素材文件。',
+      category: '手机壳图案',
+      tags: '手机壳 彩绘 铺货',
+      pricePoints: latestOrder.psdUrl ? 80 : 50,
+      psdMode: latestOrder.psdUrl ? 'order' : 'none',
+      psdFile: null,
+    });
+  }, []);
+
+  const updateMarketListingDraft = useCallback((updates: Partial<Omit<MarketListingDraft, 'order'>>) => {
+    setMarketListingDraft((current) => current ? { ...current, ...updates } : current);
+  }, []);
+
+  const submitMarketListing = useCallback(async () => {
+    if (!marketListingDraft) return;
+    if (!marketListingDraft.title.trim()) {
+      showToast('请填写素材标题', 'error');
+      return;
+    }
+    if (!Number.isFinite(marketListingDraft.pricePoints) || marketListingDraft.pricePoints <= 0) {
+      showToast('请设置有效售价', 'error');
+      return;
+    }
+
+    setIsSubmittingMarketListing(true);
+    try {
+      const formData = new FormData();
+      formData.append('sourceOrderNumber', marketListingDraft.order.orderNumber);
+      formData.append('sourceImageUrl', marketListingDraft.order.imageUrl);
+      formData.append('title', marketListingDraft.title.trim());
+      formData.append('description', marketListingDraft.description.trim());
+      formData.append('category', marketListingDraft.category.trim() || '手机壳图案');
+      formData.append('tags', marketListingDraft.tags.trim());
+      formData.append('pricePoints', String(Math.max(1, Math.floor(marketListingDraft.pricePoints))));
+      formData.append('psdMode', marketListingDraft.psdMode);
+      if (marketListingDraft.psdMode === 'upload' && marketListingDraft.psdFile) {
+        formData.append('psdFile', marketListingDraft.psdFile);
+      }
+
+      const response = await fetch('/api/market/listings', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      const data = await parseJsonApiResponse<{ success?: boolean; message?: string }>(response, '上架失败，请重试');
+      if (!response.ok || !data.success) {
+        throw new Error(toUserFacingErrorMessage(data.message, '上架失败，请重试'));
+      }
+
+      showToast(data.message || '已提交审核', 'success');
+      window.dispatchEvent(new CustomEvent('marketPendingChanged'));
+      setMarketListingDraft(null);
+    } catch (error) {
+      showToast(toUserFacingErrorFromUnknown(error, '上架失败，请重试'), 'error');
+    } finally {
+      setIsSubmittingMarketListing(false);
+    }
+  }, [marketListingDraft]);
 
   const deleteOrderRecord = useCallback(async (image: OrderResultCard) => {
     if (image.statusLabel === '处理中') {
@@ -4132,12 +4248,16 @@ export default function QuickCreatePage() {
               </svg>
             </div>
             <p className="text-base font-medium text-white/70">
-              {libraryView === 'gallery'
+              {libraryView === 'gallery' && materialsUnavailableMessage
+                ? '素材库数据源未连接'
+                : libraryView === 'gallery'
                 ? (galleryTotalCount === 0 && materialScope === 'all' && materialFilter === 'all' ? '素材库还是空的' : '当前视图没有素材')
                 : '当前筛选下没有订单记录'}
             </p>
             <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-white/40">
-              {libraryView === 'gallery'
+              {libraryView === 'gallery' && materialsUnavailableMessage
+                ? materialsUnavailableMessage
+                : libraryView === 'gallery'
                 ? (galleryTotalCount === 0 && materialScope === 'all' && materialFilter === 'all'
                   ? '可以通过浏览器插件采集图片，也可以上传本地图片开始整理。'
                   : '试试切换文件夹、收藏或日期筛选，或者清空当前筛选条件。')
@@ -4294,6 +4414,7 @@ export default function QuickCreatePage() {
                           const isDeletingMaterial = !isOrderCard && deletingMaterialIds.has(image.id);
                           const isFavoritingMaterial = !isOrderCard && favoritingMaterialIds.has(image.id);
                           const isDownloadingImage = downloadingImageUrls.has(image.imageUrl);
+                          const isOpeningMarketListing = isOrderCard && openingMarketListingOrderId === image.orderNumber;
                           const previewDownloadFileName = isOrderCard ? image.downloadFileName : getDownloadFileName(image);
                           const compactCardControls = thumbnailSize < 240 || thumbnailSize * imageRatio < 180;
                           const cardControlSizeClass = compactCardControls ? 'h-7 w-7' : 'h-8 w-8';
@@ -4436,6 +4557,26 @@ export default function QuickCreatePage() {
                                       )}
                                     </button>
                                   </>
+                                )}
+                                {isOrderCard && image.isResultImage && (
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void openMarketListingDialog(image);
+                                    }}
+                                    disabled={isOpeningMarketListing}
+                                    className={`inline-flex ${cardControlSizeClass} items-center justify-center rounded-full border border-emerald-200/25 bg-emerald-500/18 text-emerald-50/85 shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-emerald-500/34 hover:text-white`}
+                                    title={isOpeningMarketListing ? '读取订单信息' : '上架到图市'}
+                                  >
+                                    {isOpeningMarketListing ? (
+                                      <span className={`${compactCardControls ? 'h-3.5 w-3.5' : 'h-4 w-4'} animate-spin rounded-full border-2 border-current/25 border-t-current`} />
+                                    ) : (
+                                      <svg className={cardControlIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h16M6 7v12a1 1 0 001 1h10a1 1 0 001-1V7M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2M8 12h8m-8 4h5" />
+                                      </svg>
+                                    )}
+                                  </button>
                                 )}
                                 {(!isOrderCard || image.isResultImage) && (
                                   <button
@@ -4792,6 +4933,186 @@ export default function QuickCreatePage() {
           </div>
         )}
       </div>
+
+      {marketListingDraft && createPortal(
+        <div
+          className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/72 px-4 py-6 backdrop-blur-sm"
+          onClick={() => {
+            if (!isSubmittingMarketListing) setMarketListingDraft(null);
+          }}
+        >
+          <div
+            className="grid max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-[1.7rem] border border-white/12 bg-[#07070b]/96 shadow-[0_28px_90px_rgba(0,0,0,0.55)] lg:grid-cols-[minmax(300px,420px)_minmax(0,1fr)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex min-h-0 flex-col border-b border-white/10 bg-[radial-gradient(circle_at_45%_12%,rgba(125,80,255,0.14),transparent_38%),rgba(255,255,255,0.035)] p-4 lg:border-b-0 lg:border-r">
+              <div className="relative flex h-[38vh] min-h-[240px] max-h-[360px] items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-black/35 p-3 lg:h-auto lg:min-h-[520px] lg:max-h-none lg:flex-1">
+                <SafeImage
+                  src={getDisplayImageUrl(marketListingDraft.order.thumbnailUrl || marketListingDraft.order.imageUrl)}
+                  alt="上架预览"
+                  width={900}
+                  height={900}
+                  sizes="(min-width: 1024px) 390px, 88vw"
+                  className="max-h-[32vh] w-auto max-w-full rounded-xl object-contain lg:max-h-[68vh]"
+                />
+                <span className="absolute left-3 top-3 rounded-full border border-white/10 bg-black/55 px-2.5 py-1 text-xs font-medium text-white/70 backdrop-blur">
+                  市场封面
+                </span>
+                {marketListingDraft.order.psdUrl ? (
+                  <span className="absolute right-3 top-3 rounded-full border border-[#31a8ff]/25 bg-[#001e36]/85 px-2.5 py-1 text-xs font-semibold text-[#31a8ff] backdrop-blur">
+                    带PSD
+                  </span>
+                ) : null}
+              </div>
+              <div className="mt-3 grid gap-2 text-xs leading-5 text-white/45 sm:grid-cols-2 lg:grid-cols-1">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.045] px-3 py-2">
+                  展示当前结果图，购买后下载原图。
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/[0.045] px-3 py-2">
+                  可绑定订单 PSD 或单独上传 PSD。
+                </div>
+              </div>
+            </div>
+
+            <div className="flex min-h-0 flex-col">
+              <div className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
+                <div>
+                  <h3 className="text-xl font-semibold text-white">上架到图市</h3>
+                  <p className="mt-1 text-sm text-white/45">填写展示信息，审核通过后展示给其他用户购买。</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMarketListingDraft(null)}
+                  disabled={isSubmittingMarketListing}
+                  className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-sm text-white/58 transition-colors hover:bg-white/[0.12] hover:text-white disabled:opacity-50"
+                >
+                  关闭
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                <div className="space-y-4">
+                  <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium text-white/82">基础信息</p>
+                      <span className="rounded-full border border-white/10 bg-white/[0.06] px-2.5 py-1 text-[11px] text-white/45">
+                        待审核
+                      </span>
+                    </div>
+                <label className="block">
+                  <span className="mb-1.5 block text-xs text-white/45">标题</span>
+                  <input
+                    value={marketListingDraft.title}
+                    onChange={(event) => updateMarketListingDraft({ title: event.target.value })}
+                    className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none transition focus:border-purple-300/35 focus:bg-white/[0.08]"
+                    placeholder="例如：卡通手机壳彩绘图案"
+                  />
+                </label>
+
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs text-white/45">售价积分</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={9999}
+                      value={marketListingDraft.pricePoints}
+                      onChange={(event) => updateMarketListingDraft({ pricePoints: Number(event.target.value) })}
+                      className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none transition focus:border-purple-300/35 focus:bg-white/[0.08]"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs text-white/45">分类</span>
+                    <input
+                      value={marketListingDraft.category}
+                      onChange={(event) => updateMarketListingDraft({ category: event.target.value })}
+                      className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none transition focus:border-purple-300/35 focus:bg-white/[0.08]"
+                    />
+                  </label>
+                </div>
+
+                <label className="mt-4 block">
+                  <span className="mb-1.5 block text-xs text-white/45">标签</span>
+                  <input
+                    value={marketListingDraft.tags}
+                    onChange={(event) => updateMarketListingDraft({ tags: event.target.value })}
+                    className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none transition focus:border-purple-300/35 focus:bg-white/[0.08]"
+                    placeholder="用空格或逗号分隔"
+                  />
+                </label>
+
+                <label className="mt-4 block">
+                  <span className="mb-1.5 block text-xs text-white/45">描述与授权说明</span>
+                  <textarea
+                    value={marketListingDraft.description}
+                    onChange={(event) => updateMarketListingDraft({ description: event.target.value })}
+                    className="min-h-24 w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm leading-6 text-white outline-none transition focus:border-purple-300/35 focus:bg-white/[0.08]"
+                  />
+                </label>
+                  </section>
+
+                <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium text-white/82">PSD 文件</p>
+                    <span className="text-xs text-white/35">可选</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {marketListingDraft.order.psdUrl ? (
+                      <button
+                        type="button"
+                        onClick={() => updateMarketListingDraft({ psdMode: 'order', psdFile: null })}
+                        className={`rounded-full border px-3 py-2 text-xs transition ${marketListingDraft.psdMode === 'order' ? 'border-[#31a8ff]/35 bg-[#001e36] text-[#31a8ff]' : 'border-white/10 bg-white/[0.05] text-white/55 hover:bg-white/[0.09] hover:text-white'}`}
+                      >
+                        使用订单PSD
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => updateMarketListingDraft({ psdMode: 'upload' })}
+                      className={`rounded-full border px-3 py-2 text-xs transition ${marketListingDraft.psdMode === 'upload' ? 'border-purple-300/35 bg-purple-500/18 text-purple-100' : 'border-white/10 bg-white/[0.05] text-white/55 hover:bg-white/[0.09] hover:text-white'}`}
+                    >
+                      上传PSD
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateMarketListingDraft({ psdMode: 'none', psdFile: null })}
+                      className={`rounded-full border px-3 py-2 text-xs transition ${marketListingDraft.psdMode === 'none' ? 'border-white/22 bg-white/14 text-white' : 'border-white/10 bg-white/[0.05] text-white/55 hover:bg-white/[0.09] hover:text-white'}`}
+                    >
+                      不带PSD
+                    </button>
+                  </div>
+                  {marketListingDraft.psdMode === 'upload' ? (
+                    <input
+                      type="file"
+                      accept=".psd,application/octet-stream,image/vnd.adobe.photoshop"
+                      onChange={(event) => updateMarketListingDraft({ psdFile: event.target.files?.[0] || null })}
+                      className="mt-3 block w-full rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-xs text-white/58 file:mr-3 file:rounded-full file:border-0 file:bg-white/12 file:px-3 file:py-1.5 file:text-xs file:text-white"
+                    />
+                  ) : null}
+                  {marketListingDraft.psdFile ? (
+                    <p className="mt-2 text-xs text-white/42">已选择：{marketListingDraft.psdFile.name}</p>
+                  ) : null}
+                  <p className="mt-3 text-xs leading-5 text-white/35">带 PSD 的素材会在详情里显示 PSD 标识，购买后可一起下载。</p>
+                </section>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 bg-black/20 px-5 py-4">
+                <p className="text-xs text-white/36">购买后可用于商品铺货，不可二次转售素材包。</p>
+                <button
+                  type="button"
+                  onClick={() => void submitMarketListing()}
+                  disabled={isSubmittingMarketListing}
+                  className="rounded-full bg-gradient-to-r from-purple-600 to-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition-all hover:-translate-y-0.5 hover:from-purple-500 hover:to-blue-500 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {isSubmittingMarketListing ? '提交中...' : '提交审核'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {previewImage && createPortal(
         <div

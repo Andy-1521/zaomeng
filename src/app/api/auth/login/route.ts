@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { userManager } from '@/storage/database';
 import { AUTH_COOKIE_NAME, buildAuthCookieUser, createAuthCookieValue, getAuthCookieOptions } from '@/lib/serverAuth';
+import { readDevPreviewUserByEmail } from '@/lib/devPreviewUser';
 
 /**
  * 用户登录接口（使用本地 MySQL 数据库验证）
@@ -11,9 +12,12 @@ import { AUTH_COOKIE_NAME, buildAuthCookieUser, createAuthCookieValue, getAuthCo
  * - 返回用户信息并设置cookie
  */
 export async function POST(request: NextRequest) {
+  let body: { email?: unknown; password?: unknown } | null = null;
+
   try {
-    const body = await request.json();
-    const { email, password } = body;
+    body = await request.json() as { email?: unknown; password?: unknown };
+    const email = typeof body.email === 'string' ? body.email.trim() : '';
+    const password = typeof body.password === 'string' ? body.password : '';
 
     // 验证数据
     if (!email || !password) {
@@ -61,6 +65,25 @@ export async function POST(request: NextRequest) {
     return response;
   } catch (error: unknown) {
     console.error('登录失败:', error);
+
+    const email = typeof body?.email === 'string' ? body.email : '';
+    const previewUser = email ? await readDevPreviewUserByEmail(email) : null;
+
+    if (previewUser) {
+      const authUser = buildAuthCookieUser(previewUser);
+      const userData = createAuthCookieValue(authUser);
+      const response = NextResponse.json({
+        success: true,
+        message: '本地预览登录成功',
+        data: authUser,
+        preview: true,
+      });
+
+      response.cookies.set(AUTH_COOKIE_NAME, userData, getAuthCookieOptions(request));
+      console.log('[API] 本地预览登录成功，已设置安全登录态 Cookie，userId:', authUser.id);
+      return response;
+    }
+
     // 不暴露数据库内部错误信息，只返回友好的错误提示
     return NextResponse.json(
       { success: false, message: '登录失败，请检查邮箱和密码是否正确' },

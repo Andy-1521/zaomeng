@@ -1,6 +1,6 @@
 # AI 运维交接与高危操作清单
 
-最后更新：2026-06-04 17:44 CST
+最后更新：2026-06-08 10:55 CST
 维护人：Codex AI 运维会话
 
 本文档给后续开发 AI / 运维 AI 每次接手前阅读。目标是避免误动生产、误回退主链路、误覆盖 GitHub 主分支、误泄露密钥或误写生产数据。
@@ -31,6 +31,19 @@
 ```text
 https://zaomengai.icu
 ```
+
+
+## 2026-06-08 认证 / 图库访问加固
+
+本次针对“未登录似乎还能进入图库”的问题做了确认和修复：
+
+- 结论：生产后端图库数据接口没有确认到未登录泄露；但前端曾信任 `localStorage.user`，如果浏览器残留旧缓存、Cookie 已失效，可能短暂渲染 `/home` 图库工作台外壳。
+- 已修复：`src/contexts/UserContext.tsx` 初始化时不再把 `localStorage.user` 当登录态，只调用 `/api/user/profile` 用服务端签名 Cookie 校验；401/403/404 会清空本地用户缓存并回到登录页。
+- 已新增：`src/app/api/auth/logout/route.ts`，退出登录时清除 httpOnly `user` Cookie。`src/components/Navbar.tsx` 的退出按钮现在会等待服务端 logout 后跳转登录页。
+- 已收紧：`src/app/api/plugin/captured-images/route.ts` 未登录一律 401；开发环境的 `.cache/material-preview.json` 只允许在已有有效签名 Cookie 但本地数据库不可用时作为只读预览，不能再给未登录用户返回图库数据。
+- 本地验证：`pnpm exec tsc --noEmit --pretty false --incremental false`、`git diff --check`、`pnpm build` 通过；`next start -p 5001` 下无 Cookie 访问 `/api/plugin/captured-images`、`/api/material-folders`、`/api/task/orders`、`/api/user/transactions` 均为 401；浏览器注入伪造 `localStorage.user` 且无 Cookie 打开 `/home`，最终跳转 `/login` 并清空 localStorage。
+
+后续注意：不要恢复“前端 localStorage 即登录”的写法；登录态必须以 `src/lib/serverAuth.ts` 解析出的签名 Cookie 为准。
 
 ## 2026-06-04 已完成的运维修复
 

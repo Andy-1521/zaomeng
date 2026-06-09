@@ -4,6 +4,7 @@ export { transactionManager } from "./transactionManager";
 export { capturedImageManager } from "./capturedImageManager";
 export { materialFolderManager } from "./materialFolderManager";
 export { rechargeCodeManager } from "./rechargeCodeManager";
+export { marketManager } from "./marketManager";
 export { getDb, getMysqlPool } from "./client";
 
 // 导出类型和schema（从schema.ts）
