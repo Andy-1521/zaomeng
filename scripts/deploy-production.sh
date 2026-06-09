@@ -93,7 +93,8 @@ ssh_cmd "set -Eeuo pipefail
   cd '${REMOTE_RELEASE}'
   pnpm install --frozen-lockfile
   pnpm exec tsc --noEmit --pretty false --incremental false
-  pnpm build"
+  pnpm build
+  pnpm exec tsx scripts/verification/init-production-database.ts"
 
 echo "[deploy] switch production"
 ssh_cmd "set -Eeuo pipefail

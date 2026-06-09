@@ -4,6 +4,7 @@
  */
 
 import sharp from 'sharp';
+import { buildBrowserImageHeaders } from './browserFetch';
 
 /**
  * 压缩选项
@@ -12,6 +13,70 @@ export interface CompressionOptions {
   maxWidthSize?: number; // 最大文件大小（字节），默认5MB
   initialQuality?: number; // 初始质量，默认95
   minQuality?: number; // 最小质量，默认70
+}
+
+const URL_DOWNLOAD_RETRY_DELAYS_MS = [0, 2000, 5000, 10000];
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : '下载图片失败';
+}
+
+function isRetryableDownloadError(error: unknown) {
+  const message = getErrorMessage(error);
+  return /fetch failed|network|timeout|aborted|AbortError|TimeoutError|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|UND_ERR/i.test(message);
+}
+
+function isRetryableHttpStatus(status: number) {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+async function fetchImageArrayBufferWithRetry(url: string) {
+  let lastError: unknown = null;
+
+  for (let attemptIndex = 0; attemptIndex < URL_DOWNLOAD_RETRY_DELAYS_MS.length; attemptIndex += 1) {
+    const delayMs = URL_DOWNLOAD_RETRY_DELAYS_MS[attemptIndex];
+    if (delayMs > 0) {
+      await sleep(delayMs);
+    }
+
+    try {
+      const response = await fetch(url, {
+        headers: buildBrowserImageHeaders(url, {
+          accept: 'image/avif,image/webp,image/apng,image/png,image/jpeg,image/*,*/*;q=0.8',
+        }),
+        signal: AbortSignal.timeout(60000), // 单次请求60秒超时
+      });
+
+      if (!response.ok) {
+        const error = new Error(`下载图片失败: ${response.status} ${response.statusText}`);
+        if (
+          attemptIndex < URL_DOWNLOAD_RETRY_DELAYS_MS.length - 1
+          && isRetryableHttpStatus(response.status)
+        ) {
+          lastError = error;
+          console.warn(`[图片压缩] 下载图片返回临时状态，准备重试第 ${attemptIndex + 2} 次: ${getErrorMessage(error)}`);
+          continue;
+        }
+        throw error;
+      }
+
+      return response.arrayBuffer();
+    } catch (error) {
+      lastError = error;
+      const canRetry = attemptIndex < URL_DOWNLOAD_RETRY_DELAYS_MS.length - 1
+        && isRetryableDownloadError(error);
+      console.warn(`[图片压缩] 下载图片失败${canRetry ? `，准备重试第 ${attemptIndex + 2} 次` : ''}: ${getErrorMessage(error)}`);
+      if (!canRetry) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('下载图片失败');
 }
 
 /**
@@ -128,16 +193,7 @@ export async function compressImageFromUrl(
 ): Promise<Buffer> {
   console.log(`[图片压缩] 开始从URL下载并压缩: ${url.substring(0, 80)}...`);
 
-  // 下载图片
-  const response = await fetch(url, {
-    signal: AbortSignal.timeout(60000), // 60秒超时
-  });
-
-  if (!response.ok) {
-    throw new Error(`下载图片失败: ${response.status} ${response.statusText}`);
-  }
-
-  const buffer = await response.arrayBuffer();
+  const buffer = await fetchImageArrayBufferWithRetry(url);
   const imageBuffer = Buffer.from(buffer);
 
   console.log(`[图片压缩] 下载完成，大小: ${imageBuffer.length} bytes (${(imageBuffer.length / 1024 / 1024).toFixed(2)} MB)`);

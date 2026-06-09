@@ -123,10 +123,10 @@ async function uploadTestImage(cookie: string) {
   };
 }
 
-async function runAiGenerate(userId: string, imageUrl: string, sourceSize: { width: number; height: number }) {
+async function runAiGenerate(cookie: string, userId: string, imageUrl: string, sourceSize: { width: number; height: number }) {
   const result = await fetchJson('/api/image-to-image/run', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
     body: JSON.stringify({
       userId,
       imageUrl,
@@ -222,7 +222,7 @@ async function main() {
   const upload = await uploadTestImage(cookie);
   const sourceSize = { width: upload.width, height: upload.height };
 
-  const aiGenerate = await runAiGenerate(user.id, upload.imageUrl, sourceSize);
+  const aiGenerate = await runAiGenerate(cookie, user.id, upload.imageUrl, sourceSize);
   const smartEdit = await runSmartEdit(cookie, upload.imageUrl, sourceSize);
   const finalUser = await userManager.getUserById(user.id);
 
