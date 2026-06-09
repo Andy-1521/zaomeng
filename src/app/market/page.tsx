@@ -271,7 +271,7 @@ function MarketPageContent() {
   useEffect(() => {
     if (isLoading) return;
     if (!user?.id) {
-      router.replace("/login");
+      router.replace("/login?next=/market");
       return;
     }
     void refreshUser();
