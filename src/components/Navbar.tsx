@@ -5,6 +5,7 @@ import Image, { type ImageLoaderProps, type ImageProps } from "next/image";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { useUser } from "@/contexts/UserContext";
+import { showToast } from "@/lib/toast";
 
 interface NavbarProps {
   showUserMenu?: boolean;
@@ -94,7 +95,8 @@ export default function Navbar({ showUserMenu = true }: NavbarProps) {
 
   const handleLogout = async () => {
     await logout();
-    router.push("/login");
+    showToast("已退出登录，当前为游客模式", "info");
+    router.replace("/market");
     router.refresh();
   };
 
