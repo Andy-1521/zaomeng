@@ -1057,12 +1057,12 @@ function MarketPageContent() {
                                 className="aspect-[9/16] overflow-hidden rounded-[1.05rem] border border-white/10 bg-black/20 shadow-[0_10px_28px_rgba(0,0,0,0.22)] sm:rounded-[1.18rem]"
                               >
                                 {image.url ? (
-                                  <img
-                                    src={getDisplayImageUrl(image.url)}
-                                    alt={image.title}
-                                    loading="eager"
-                                    decoding="async"
-                                    className="market-still-image h-full w-full object-cover"
+                                  <div
+                                    aria-hidden="true"
+                                    className="market-still-image h-full w-full bg-cover bg-center"
+                                    style={{
+                                      backgroundImage: `url("${getDisplayImageUrl(image.url)}")`,
+                                    }}
                                   />
                                 ) : (
                                   <div
