@@ -1,6 +1,6 @@
 # AI 运维交接与高危操作清单
 
-最后更新：2026-06-10 09:58 CST
+最后更新：2026-06-10 10:48 CST
 维护人：Codex AI 运维会话
 
 本文档给后续开发 AI / 运维 AI 每次接手前阅读。目标是避免误动生产、误回退主链路、误覆盖 GitHub 主分支、误泄露密钥或误写生产数据。
@@ -43,7 +43,7 @@ https://zaomengai.icu
 - `localhost:5001` 只用于本地预览，`127.0.0.1:5000` 只用于生产服务器本机 Next.js 监听和本机 smoke，不是公网生产入口。
 - 浏览器插件模板默认站点已改为 `https://zaomengai.icu`；生产插件包只应从 `https://zaomengai.icu/plugin` 下载。
 - 生产数据库真实用户数据未做更新或删除。2026-06-09/10 的生产巡检只涉及：安全补齐 `market_items` / `market_purchases` 表、创建临时 `assistant-prod-smoke-*` / `assistant-real-smoke@example.test` 测试账号与测试订单/素材/市场记录、验证后硬清理这些测试数据；本轮测试账号残留为 0。2026-06-10 只读复查另发现一个 2026-05-27 的旧 `assistant-plugin-smoke@example.test` 测试账号仍有 3 条测试采集素材，本次未删除，需用户确认后再清理。
-- 当前生产服务确认：`zaomeng-web.service` 为 `active`，`/home/ubuntu/zaomeng/.deploy-sha` 为 `1cedb2c`。
+- 当前生产服务确认：`zaomeng-web.service` 为 `active`，`/home/ubuntu/zaomeng/.deploy-sha` 为 `ed682df`。
 
 后续注意：清理生产测试数据只能限定明确的 assistant 测试账号（例如 `assistant-prod-smoke-*`、`assistant-real-smoke@example.test`、经用户确认后的 `assistant-plugin-smoke@example.test`）及其关联测试记录；不得对真实用户做批量删除、积分重算或订单清理。
 
@@ -339,7 +339,7 @@ ls -dt /home/ubuntu/zaomeng-prev-* | head -1
 - 生产数据核对：只读确认本地 `.env.local` 指向 `127.0.0.1:3307/zaomeng_ai`，生产 `.env.local` 指向腾讯云服务器本机 `127.0.0.1:3306/zaomeng_ai`，连接指纹不同；生产 MySQL 主机为 `VM-0-15-ubuntu`。同库名不代表同一个数据库。
 - 注意：只读复查发现早期测试账号 `assistant-plugin-smoke@example.test` 仍有 3 条测试采集素材；本次未删除，真实用户数据未更新或删除。若用户确认清理测试数据，只能限定该测试账号及其关联测试素材。
 - 验证：`pnpm check` 通过；`pnpm build` 通过；本地 `next start -p 5001` 后浏览器打开 `http://127.0.0.1:5001/market`，首屏背景加载 `/assets/market-hero/dev-market-*.webp`，图片自然尺寸为 720×1280，视觉铺满卡片，console error 为 0。
-- 生产部署：未部署，等待用户确认本地预览。
+- 生产部署：已部署到 `https://zaomengai.icu`，生产 `.deploy-sha = ed682df`。公网验证：`/market` HTTP 200，`/api/plugin/version` 返回成功，`/assets/market-hero/dev-market-01.webp` HTTP 200，生产服务 `zaomeng-web.service` 为 `active`。
 
 ### 2026-06-04 19:01 CST
 
