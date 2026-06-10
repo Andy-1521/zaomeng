@@ -20,9 +20,11 @@
 
 ## 2026-06-10 图市首页背景固定
 
-- 2026-06-10 11:53 CST 修复 PC 宽屏首屏背景左右未铺满：hero 容器生产验证 `left=0/right=2048`，当前生产 `.deploy-sha` 为 `b0d8268`。
-- 2026-06-10 10:48 CST 初次部署到唯一生产域名 `https://zaomengai.icu`；随后经 PC 宽屏修复，当前服务器 `/home/ubuntu/zaomeng/.deploy-sha` 为 `b0d8268`。公网验证 `/market`、`/api/plugin/version` 和固定背景资源 `/assets/market-hero/dev-market-01.webp` 正常返回。
-- 图市首页 `/market` 的首屏瀑布背景已改为固定静态资源：`public/assets/market-hero/dev-market-01.webp` 到 `dev-market-18.webp`。这些资源从本地开发预览里的“彩绘图案”素材按 9:16 铺满导出并压缩成 WebP，后续有更好的素材时直接替换该目录即可。
+- 2026-06-10 18:23 CST 最终生产部署为 `d8ebd35`。图市首页背景继续保持开发确认过的固定素材风格，但首屏实际渲染改用轻量缩略图：`public/assets/market-hero/thumbs/dev-market-01.webp` 到 `dev-market-18.webp`，总大小约 309KB，避免生产端并发加载 720×1280 大图导致首屏长期黑框。
+- 2026-06-10 17:00-18:23 CST 调整 PC 图市背景密度：9 列、桌面 20px 横向间距、列内上下间距加大；背景图保持 `<img loading="eager">` 渲染并用 `ReactDOM.preload()` 预加载 18 张固定缩略图。卡片容器透明化，避免未绘制时出现大块黑框。
+- 2026-06-10 11:53 CST 修复 PC 宽屏首屏背景左右未铺满：hero 容器生产验证 `left=0/right=2048`。
+- 2026-06-10 10:48 CST 初次部署到唯一生产域名 `https://zaomengai.icu`；公网验证 `/market`、`/api/plugin/version` 和固定背景资源正常返回。
+- 图市首页 `/market` 的首屏瀑布背景已改为固定静态资源：`public/assets/market-hero/dev-market-01.webp` 到 `dev-market-18.webp` 为原始 720×1280 导出稿；生产首屏默认引用 `public/assets/market-hero/thumbs/` 下的轻量图。后续有更好的素材时优先替换原图并重新生成 thumbs。
 - 首屏背景不再根据当前 `/api/market/listings?mode=approved` 的返回动态变化；生产图市即使 `market_items` 暂无已审核素材，也不会再显示 `/assets/phone-case-demo.jpg`、`/assets/231.jpg`、`/assets/remove-watermark-demo.jpg` 这组旧演示图。
 - 本次只改前端静态资源和渲染逻辑，不向生产 `market_items` 灌数据，不改真实用户、积分、订单或图库记录。
 
@@ -46,6 +48,7 @@
 - 应用日志：`/home/ubuntu/zaomeng/.coze-logs/systemd-web.log`
 - 错误日志：`/home/ubuntu/zaomeng/.coze-logs/systemd-web-error.log`
 - 当前服务状态：已完成构建和重启验证，`zaomeng-web.service` 为 `active`
+- 当前生产部署 SHA：`d8ebd35`
 - 当前正式生产基线：公网入口只认 `https://zaomengai.icu`，服务器 `/home/ubuntu/zaomeng/.deploy-sha` 记录当前发布的 Git commit
 - 当前核心原则：只有主链路；没有备用、没有降级、没有失败后换路；失败要明确失败并按积分规则补偿
 - 当前发布原则：先本地预览给用户验收，再备份 GitHub，最后部署腾讯云香港生产服务器

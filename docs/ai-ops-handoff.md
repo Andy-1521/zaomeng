@@ -1,6 +1,6 @@
 # AI 运维交接与高危操作清单
 
-最后更新：2026-06-10 11:53 CST
+最后更新：2026-06-10 18:23 CST
 维护人：Codex AI 运维会话
 
 本文档给后续开发 AI / 运维 AI 每次接手前阅读。目标是避免误动生产、误回退主链路、误覆盖 GitHub 主分支、误泄露密钥或误写生产数据。
@@ -32,6 +32,32 @@
 https://zaomengai.icu
 ```
 
+
+
+## 2026-06-10 18:23 CST 图市首页背景缩略图优化并部署生产
+
+本次按用户反馈继续调整 `https://zaomengai.icu/market` 首屏图市背景：
+
+- 当前生产部署 SHA：`d8ebd35`。
+- 只改前端静态资源和图市首屏渲染，不写入或清理生产真实用户数据，不向 `market_items` 灌素材。
+- 原始固定背景图仍保留在 `public/assets/market-hero/dev-market-01.webp` 到 `dev-market-18.webp`。
+- 新增首屏轻量背景缩略图：`public/assets/market-hero/thumbs/dev-market-01.webp` 到 `dev-market-18.webp`，由原图生成 360×640 WebP，合计约 309KB。
+- `/market` 首屏背景改用 thumbs 路径，避免生产端并发加载 720×1280 大图时长时间出现黑框。
+- 背景布局保留开发确认风格并微调为：9 列、桌面 20px gap、列内上下间距加大、透明卡片容器、图片层 `opacity-[0.92]`、素材 `<img loading="eager">`，并通过 `ReactDOM.preload()` 预加载固定背景图。
+
+验证记录：
+
+- 本地：`pnpm check` 通过；`pnpm build` 通过。
+- 本地生产预览：`next start -p 5002`，3 秒后 PC 视口可见 32 张背景图全部加载，截图 `.cache/local-market-thumbs-3000ms.png`。
+- 生产部署：`pnpm deploy:production` 完成，远端 `/home/ubuntu/zaomeng/.deploy-sha` 为 `d8ebd35`，`zaomeng-web.service` 为 `active`。
+- 生产 smoke：`curl -4 https://zaomengai.icu/market` 返回 200；`/api/plugin/version` 返回成功；`/assets/market-hero/thumbs/dev-market-01.webp` 返回 200 且约 10KB。
+- 生产稳定截图：等待客户端水合后可见背景图正常展示；未登录游客态出现的 `/api/user/profile` 401 属预期，不代表页面错误。
+
+后续注意：
+
+- 若更换图市背景素材，先替换 `public/assets/market-hero/dev-market-*.webp` 原图，再重新生成 `public/assets/market-hero/thumbs/dev-market-*.webp`；不要直接让首屏使用 720×1280 原图。
+- 不要恢复 `/assets/phone-case-demo.jpg`、`/assets/231.jpg`、`/assets/remove-watermark-demo.jpg` 作为图市首页背景兜底。
+- 不要为了解决视觉问题向生产数据库灌图市素材；首屏背景应保持静态资源方案。
 
 
 ## 2026-06-10 生产入口清理与生产数据确认
