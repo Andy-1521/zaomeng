@@ -1021,7 +1021,7 @@ function MarketPageContent() {
             `}</style>
 
             {activeTab === "market" && !marketBrowseLocked ? (
-              <section className="relative -mx-3 mb-[-12vh] min-h-[calc(100svh-8rem)] overflow-hidden pb-[18vh] sm:-ml-24 sm:-mr-8 sm:mb-[-22vh] sm:min-h-[calc(100vh-5rem)] sm:pb-[28vh]">
+              <section className="relative left-1/2 mb-[-12vh] min-h-[calc(100svh-8rem)] w-screen -translate-x-1/2 overflow-hidden pb-[18vh] sm:-ml-8 sm:mb-[-22vh] sm:min-h-[calc(100vh-5rem)] sm:pb-[28vh]">
                 <div className="absolute inset-0">
                   <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(99,102,241,0.24),transparent_35%),radial-gradient(circle_at_52%_82%,rgba(168,85,247,0.18),transparent_36%)]" />
                   <div className="absolute inset-0 bg-black/24" />
@@ -1043,7 +1043,7 @@ function MarketPageContent() {
                                     alt={image.title}
                                     loading="lazy"
                                     decoding="async"
-                                    className="market-still-image h-full w-full object-contain"
+                                    className="market-still-image h-full w-full object-cover"
                                   />
                                 ) : (
                                   <div
