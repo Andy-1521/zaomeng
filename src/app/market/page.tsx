@@ -90,7 +90,7 @@ type DirectMarketListingDraft = {
   pricePoints: number;
 };
 
-const MARKET_HERO_COLUMN_COUNT = 8;
+const MARKET_HERO_COLUMN_COUNT = 9;
 const MARKET_HERO_ROWS_PER_COLUMN = 8;
 const MARKET_HERO_IMAGE_LIMIT = 24;
 const PUBLIC_MARKET_PREVIEW_LIMIT = 36;
@@ -1026,7 +1026,7 @@ function MarketPageContent() {
                   <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(99,102,241,0.24),transparent_35%),radial-gradient(circle_at_52%_82%,rgba(168,85,247,0.18),transparent_36%)]" />
                   <div className="absolute inset-0 bg-black/6" />
                   <div
-                    className="absolute inset-y-[-24%] left-[-2%] right-[-2%] grid gap-3 opacity-[0.92] blur-[0.2px] sm:gap-4"
+                    className="absolute inset-y-[-24%] left-[-2%] right-[-2%] grid gap-4 opacity-[0.92] blur-[0.2px] sm:gap-5"
                     style={{
                       gridTemplateColumns: `repeat(${MARKET_HERO_COLUMN_COUNT}, minmax(0, 1fr))`,
                     }}
@@ -1034,7 +1034,7 @@ function MarketPageContent() {
                     {heroImageColumns.map((column, columnIndex) => (
                       <div
                         key={`market-hero-flow-${columnIndex}`}
-                        className={`market-hero-flow flex flex-col gap-1 ${columnIndex % 2 === 1 ? "market-hero-flow-reverse pt-8" : ""}`}
+                        className={`market-hero-flow flex flex-col gap-3 sm:gap-4 ${columnIndex % 2 === 1 ? "market-hero-flow-reverse pt-8" : ""}`}
                       >
                         {column.length > 0
                           ? column.map((image, imageIndex) => (
