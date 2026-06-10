@@ -1024,9 +1024,9 @@ function MarketPageContent() {
               <section className="relative left-1/2 mb-[-12vh] min-h-[calc(100svh-8rem)] w-screen -translate-x-1/2 overflow-hidden pb-[18vh] sm:-ml-8 sm:mb-[-22vh] sm:min-h-[calc(100vh-5rem)] sm:pb-[28vh]">
                 <div className="absolute inset-0">
                   <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(99,102,241,0.24),transparent_35%),radial-gradient(circle_at_52%_82%,rgba(168,85,247,0.18),transparent_36%)]" />
-                  <div className="absolute inset-0 bg-black/14" />
+                  <div className="absolute inset-0 bg-black/6" />
                   <div
-                    className="absolute inset-y-[-24%] left-[-2%] right-[-2%] grid gap-3 opacity-[0.78] blur-[0.2px] sm:gap-4"
+                    className="absolute inset-y-[-24%] left-[-2%] right-[-2%] grid gap-3 opacity-[0.92] blur-[0.2px] sm:gap-4"
                     style={{
                       gridTemplateColumns: `repeat(${MARKET_HERO_COLUMN_COUNT}, minmax(0, 1fr))`,
                     }}
@@ -1046,7 +1046,7 @@ function MarketPageContent() {
                                   <img
                                     src={getDisplayImageUrl(image.url)}
                                     alt={image.title}
-                                    loading="lazy"
+                                    loading="eager"
                                     decoding="async"
                                     className="market-still-image h-full w-full object-cover"
                                   />
@@ -1078,9 +1078,9 @@ function MarketPageContent() {
                       </div>
                     ))}
                   </div>
-                  <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(0,0,0,0.58),rgba(0,0,0,0.18)_28%,rgba(0,0,0,0.18)_72%,rgba(0,0,0,0.58))]" />
-                  <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.5),rgba(0,0,0,0.08)_42%,rgba(0,0,0,0.58)_78%,rgba(0,0,0,0.9))]" />
-                  <div className="absolute inset-x-0 bottom-0 h-[46vh] bg-[linear-gradient(180deg,transparent,rgba(0,0,0,0.12)_18%,rgba(0,0,0,0.42)_58%,rgba(0,0,0,0.9))]" />
+                  <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(0,0,0,0.38),rgba(0,0,0,0.08)_28%,rgba(0,0,0,0.08)_72%,rgba(0,0,0,0.38))]" />
+                  <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.28),rgba(0,0,0,0.04)_42%,rgba(0,0,0,0.46)_78%,rgba(0,0,0,0.82))]" />
+                  <div className="absolute inset-x-0 bottom-0 h-[46vh] bg-[linear-gradient(180deg,transparent,rgba(0,0,0,0.08)_18%,rgba(0,0,0,0.32)_58%,rgba(0,0,0,0.82))]" />
                 </div>
 
                 <div className="relative z-10 flex min-h-[calc(100svh-8rem)] flex-col px-5 py-5 sm:min-h-[calc(100vh-5rem)] sm:pl-[8rem] sm:pr-8">
