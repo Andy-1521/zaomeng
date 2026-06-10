@@ -1026,6 +1026,20 @@ function MarketPageContent() {
                   <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(99,102,241,0.24),transparent_35%),radial-gradient(circle_at_52%_82%,rgba(168,85,247,0.18),transparent_36%)]" />
                   <div className="absolute inset-0 bg-black/6" />
                   <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute h-px w-px overflow-hidden opacity-0"
+                  >
+                    {MARKET_HERO_FALLBACK_IMAGES.map((image) => (
+                      <img
+                        key={`market-hero-preload-${image.id}`}
+                        src={getDisplayImageUrl(image.url)}
+                        alt=""
+                        loading="eager"
+                        decoding="async"
+                      />
+                    ))}
+                  </div>
+                  <div
                     className="absolute inset-y-[-24%] left-[-2%] right-[-2%] grid gap-4 opacity-[0.92] blur-[0.2px] sm:gap-5"
                     style={{
                       gridTemplateColumns: `repeat(${MARKET_HERO_COLUMN_COUNT}, minmax(0, 1fr))`,
