@@ -1047,7 +1047,7 @@ function MarketPageContent() {
                           ? column.map((image, imageIndex) => (
                               <div
                                 key={`${image.id}-${imageIndex}`}
-                                className="aspect-[9/16] overflow-hidden rounded-[1.05rem] border border-white/10 bg-black/20 shadow-[0_10px_28px_rgba(0,0,0,0.22)] sm:rounded-[1.18rem]"
+                                className="aspect-[9/16] overflow-hidden rounded-[1.05rem] bg-transparent shadow-[0_10px_24px_rgba(0,0,0,0.16)] sm:rounded-[1.18rem]"
                               >
                                 {image.url ? (
                                   <div
