@@ -90,7 +90,7 @@ type DirectMarketListingDraft = {
   pricePoints: number;
 };
 
-const MARKET_HERO_COLUMN_COUNT = 6;
+const MARKET_HERO_COLUMN_COUNT = 8;
 const MARKET_HERO_ROWS_PER_COLUMN = 8;
 const MARKET_HERO_IMAGE_LIMIT = 24;
 const PUBLIC_MARKET_PREVIEW_LIMIT = 36;
@@ -1025,7 +1025,12 @@ function MarketPageContent() {
                 <div className="absolute inset-0">
                   <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(99,102,241,0.24),transparent_35%),radial-gradient(circle_at_52%_82%,rgba(168,85,247,0.18),transparent_36%)]" />
                   <div className="absolute inset-0 bg-black/24" />
-                  <div className="absolute inset-y-[-24%] left-[-3%] right-[-3%] grid grid-cols-6 gap-1 opacity-70 blur-[0.2px]">
+                  <div
+                    className="absolute inset-y-[-24%] left-[-2%] right-[-2%] grid gap-3 opacity-62 blur-[0.2px] sm:gap-4"
+                    style={{
+                      gridTemplateColumns: `repeat(${MARKET_HERO_COLUMN_COUNT}, minmax(0, 1fr))`,
+                    }}
+                  >
                     {heroImageColumns.map((column, columnIndex) => (
                       <div
                         key={`market-hero-flow-${columnIndex}`}
@@ -1035,7 +1040,7 @@ function MarketPageContent() {
                           ? column.map((image, imageIndex) => (
                               <div
                                 key={`${image.id}-${imageIndex}`}
-                                className="aspect-[9/16] overflow-hidden rounded-[1.18rem] border border-white/10 bg-black/20 shadow-[0_12px_34px_rgba(0,0,0,0.24)]"
+                                className="aspect-[9/16] overflow-hidden rounded-[1.05rem] border border-white/10 bg-black/20 shadow-[0_10px_28px_rgba(0,0,0,0.22)] sm:rounded-[1.18rem]"
                               >
                                 {image.url ? (
                                   <img
