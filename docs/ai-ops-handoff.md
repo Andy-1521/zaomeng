@@ -1,6 +1,6 @@
 # AI 运维交接与高危操作清单
 
-最后更新：2026-06-10 00:55 CST
+最后更新：2026-06-10 09:58 CST
 维护人：Codex AI 运维会话
 
 本文档给后续开发 AI / 运维 AI 每次接手前阅读。目标是避免误动生产、误回退主链路、误覆盖 GitHub 主分支、误泄露密钥或误写生产数据。
@@ -42,10 +42,10 @@ https://zaomengai.icu
 - Vercel 发布脚本和配置已从项目移除；不要再使用 Vercel Preview / Production 或其它域名作为生产入口。
 - `localhost:5001` 只用于本地预览，`127.0.0.1:5000` 只用于生产服务器本机 Next.js 监听和本机 smoke，不是公网生产入口。
 - 浏览器插件模板默认站点已改为 `https://zaomengai.icu`；生产插件包只应从 `https://zaomengai.icu/plugin` 下载。
-- 生产数据库真实用户数据未做更新或删除。2026-06-09/10 的生产巡检只涉及：安全补齐 `market_items` / `market_purchases` 表、创建临时 `assistant-prod-smoke-*` / `assistant-real-smoke@example.test` 测试账号与测试订单/素材/市场记录、验证后硬清理这些测试数据。最终检查：`smoke_users = 0`。
+- 生产数据库真实用户数据未做更新或删除。2026-06-09/10 的生产巡检只涉及：安全补齐 `market_items` / `market_purchases` 表、创建临时 `assistant-prod-smoke-*` / `assistant-real-smoke@example.test` 测试账号与测试订单/素材/市场记录、验证后硬清理这些测试数据；本轮测试账号残留为 0。2026-06-10 只读复查另发现一个 2026-05-27 的旧 `assistant-plugin-smoke@example.test` 测试账号仍有 3 条测试采集素材，本次未删除，需用户确认后再清理。
 - 当前生产服务确认：`zaomeng-web.service` 为 `active`，`/home/ubuntu/zaomeng/.deploy-sha` 为 `1cedb2c`。
 
-后续注意：清理生产测试数据只能限定 `assistant-prod-smoke-*` / `assistant-real-smoke@example.test` 这类隔离账号；不得对真实用户做批量删除、积分重算或订单清理。
+后续注意：清理生产测试数据只能限定明确的 assistant 测试账号（例如 `assistant-prod-smoke-*`、`assistant-real-smoke@example.test`、经用户确认后的 `assistant-plugin-smoke@example.test`）及其关联测试记录；不得对真实用户做批量删除、积分重算或订单清理。
 
 ## 2026-06-09 公开首页 / 游客图市改造
 
@@ -327,6 +327,19 @@ ls -dt /home/ubuntu/zaomeng-prev-* | head -1
 - 是否需要后续注意
 
 ## 变更记录
+
+### 2026-06-10 09:58 CST
+
+- 操作：修复生产图市首页背景与本地开发预览不一致的问题，当前已本地验证，待用户确认后再部署生产。
+- 根因：生产 `/api/market/listings?mode=approved` 当前已审核图市素材为 0，旧前端会回落到 `phone-case-demo.jpg` / `231.jpg` / `remove-watermark-demo.jpg` 三张旧演示图；本地开发预览因 `.cache/market-preview.json` 有预览素材，所以视觉不同。
+- 改动文件：
+  - `src/app/market/page.tsx`：图市首屏背景固定使用静态资源，不再由当前图市列表动态决定。
+  - `public/assets/market-hero/dev-market-01.webp` 至 `dev-market-18.webp`：固定背景素材。
+  - `docs/project-memory.md`、`docs/ai-ops-handoff.md`、顶层 `HANDOFF.md`：补充交接说明。
+- 生产数据核对：只读确认本地 `.env.local` 指向 `127.0.0.1:3307/zaomeng_ai`，生产 `.env.local` 指向腾讯云服务器本机 `127.0.0.1:3306/zaomeng_ai`，连接指纹不同；生产 MySQL 主机为 `VM-0-15-ubuntu`。同库名不代表同一个数据库。
+- 注意：只读复查发现早期测试账号 `assistant-plugin-smoke@example.test` 仍有 3 条测试采集素材；本次未删除，真实用户数据未更新或删除。若用户确认清理测试数据，只能限定该测试账号及其关联测试素材。
+- 验证：`pnpm check` 通过；`pnpm build` 通过；本地 `next start -p 5001` 后浏览器打开 `http://127.0.0.1:5001/market`，首屏背景加载 `/assets/market-hero/dev-market-*.webp`，console error 为 0。
+- 生产部署：未部署，等待用户确认本地预览。
 
 ### 2026-06-04 19:01 CST
 

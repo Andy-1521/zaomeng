@@ -109,23 +109,17 @@ const DEFAULT_DIRECT_LISTING_DRAFT: DirectMarketListingDraft = {
   pricePoints: 50,
 };
 
-const MARKET_HERO_FALLBACK_IMAGES: HeroMarketImage[] = [
-  {
-    id: "fallback-phone-case-demo",
-    title: "手机壳彩绘示例",
-    url: "/assets/phone-case-demo.jpg",
+const MARKET_HERO_FALLBACK_IMAGES: HeroMarketImage[] = Array.from(
+  { length: 18 },
+  (_, index) => {
+    const fileIndex = String(index + 1).padStart(2, "0");
+    return {
+      id: `fallback-market-hero-${fileIndex}`,
+      title: `图市固定背景素材 ${index + 1}`,
+      url: `/assets/market-hero/dev-market-${fileIndex}.webp`,
+    };
   },
-  {
-    id: "fallback-phone-case-pattern",
-    title: "手机壳图案示例",
-    url: "/assets/231.jpg",
-  },
-  {
-    id: "fallback-design-demo",
-    title: "图案素材示例",
-    url: "/assets/remove-watermark-demo.jpg",
-  },
-];
+);
 
 const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
 
@@ -272,17 +266,10 @@ function MarketPageContent() {
   }, [visibleItems, marketColumnCount]);
 
   const heroImageColumns = useMemo(() => {
-    const heroImages = items
-      .map((item) => ({
-        id: item.id,
-        title: item.title,
-        url: item.thumbnailUrl || item.previewImageUrl,
-      }))
-      .filter((item): item is HeroMarketImage => Boolean(item.url))
-      .slice(0, MARKET_HERO_IMAGE_LIMIT);
-
-    const displayImages =
-      heroImages.length > 0 ? heroImages : MARKET_HERO_FALLBACK_IMAGES;
+    const displayImages = MARKET_HERO_FALLBACK_IMAGES.slice(
+      0,
+      MARKET_HERO_IMAGE_LIMIT,
+    );
 
     return Array.from(
       { length: MARKET_HERO_COLUMN_COUNT },
@@ -320,7 +307,7 @@ function MarketPageContent() {
         );
       },
     );
-  }, [items]);
+  }, []);
 
   useEffect(() => {
     if (isLoading || !user?.id) return;

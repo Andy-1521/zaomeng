@@ -18,13 +18,19 @@
 2026-06-04 已完成 Git 基线修复：本地 `main`、GitHub `origin/main` 和生产 `/home/ubuntu/zaomeng/.deploy-sha` 均对齐到 `8aa7a1f`；旧 `origin/main` 已备份到 `backup/2026-06-04-old-origin-main-before-prod-sync`。
 
 
+## 2026-06-10 图市首页背景固定
+
+- 图市首页 `/market` 的首屏瀑布背景已改为固定静态资源：`public/assets/market-hero/dev-market-01.webp` 到 `dev-market-18.webp`。这些资源从本地开发预览里的“彩绘图案”素材导出并压缩成 WebP，后续有更好的素材时直接替换该目录即可。
+- 首屏背景不再根据当前 `/api/market/listings?mode=approved` 的返回动态变化；生产图市即使 `market_items` 暂无已审核素材，也不会再显示 `/assets/phone-case-demo.jpg`、`/assets/231.jpg`、`/assets/remove-watermark-demo.jpg` 这组旧演示图。
+- 本次只改前端静态资源和渲染逻辑，不向生产 `market_items` 灌数据，不改真实用户、积分、订单或图库记录。
+
 ## 2026-06-10 生产入口和生产数据确认
 
 - 生产公网入口唯一为 `https://zaomengai.icu`。不要再把 Vercel、其它域名或 localhost 作为生产入口。
 - `localhost:5001` 仅用于本地预览和用户验收；生产服务器内部 `127.0.0.1:5000` 仅供 Nginx 反代和服务器本机 smoke。
 - 已移除 Vercel 发布脚本和配置，发布只走 `scripts/deploy-production.sh` / `pnpm deploy:production`。
 - 浏览器插件模板默认站点改为 `https://zaomengai.icu`，生产插件包只应从 `https://zaomengai.icu/plugin` 下载。
-- 2026-06-09/10 生产全链路 smoke 期间，生产数据库真实用户数据未做更新或删除；只执行了安全建表初始化（补齐 `market_items` / `market_purchases`）以及 `assistant-prod-smoke-*` / `assistant-real-smoke@example.test` 测试账号和关联测试记录的创建、验证、清理。最终确认 smoke 测试账号残留为 0。
+- 2026-06-09/10 生产全链路 smoke 期间，生产数据库真实用户数据未做更新或删除；只执行了安全建表初始化（补齐 `market_items` / `market_purchases`）以及 `assistant-prod-smoke-*` / `assistant-real-smoke@example.test` 测试账号和关联测试记录的创建、验证、清理。最终确认本轮 `assistant-prod-smoke-*` / `assistant-real-smoke@example.test` 测试账号残留为 0；2026-06-10 只读复查另发现一个 2026-05-27 的旧 `assistant-plugin-smoke@example.test` 测试账号仍有 3 条测试采集素材，本次未删除，需用户确认后再清理。
 
 ## 当前结论
 
