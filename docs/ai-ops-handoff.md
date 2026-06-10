@@ -334,11 +334,11 @@ ls -dt /home/ubuntu/zaomeng-prev-* | head -1
 - 根因：生产 `/api/market/listings?mode=approved` 当前已审核图市素材为 0，旧前端会回落到 `phone-case-demo.jpg` / `231.jpg` / `remove-watermark-demo.jpg` 三张旧演示图；本地开发预览因 `.cache/market-preview.json` 有预览素材，所以视觉不同。
 - 改动文件：
   - `src/app/market/page.tsx`：图市首屏背景固定使用静态资源，不再由当前图市列表动态决定。
-  - `public/assets/market-hero/dev-market-01.webp` 至 `dev-market-18.webp`：固定背景素材。
+  - `public/assets/market-hero/dev-market-01.webp` 至 `dev-market-18.webp`：固定背景素材，按 9:16 铺满，不使用“大底+小图”合成。
   - `docs/project-memory.md`、`docs/ai-ops-handoff.md`、顶层 `HANDOFF.md`：补充交接说明。
 - 生产数据核对：只读确认本地 `.env.local` 指向 `127.0.0.1:3307/zaomeng_ai`，生产 `.env.local` 指向腾讯云服务器本机 `127.0.0.1:3306/zaomeng_ai`，连接指纹不同；生产 MySQL 主机为 `VM-0-15-ubuntu`。同库名不代表同一个数据库。
 - 注意：只读复查发现早期测试账号 `assistant-plugin-smoke@example.test` 仍有 3 条测试采集素材；本次未删除，真实用户数据未更新或删除。若用户确认清理测试数据，只能限定该测试账号及其关联测试素材。
-- 验证：`pnpm check` 通过；`pnpm build` 通过；本地 `next start -p 5001` 后浏览器打开 `http://127.0.0.1:5001/market`，首屏背景加载 `/assets/market-hero/dev-market-*.webp`，console error 为 0。
+- 验证：`pnpm check` 通过；`pnpm build` 通过；本地 `next start -p 5001` 后浏览器打开 `http://127.0.0.1:5001/market`，首屏背景加载 `/assets/market-hero/dev-market-*.webp`，图片自然尺寸为 720×1280，视觉铺满卡片，console error 为 0。
 - 生产部署：未部署，等待用户确认本地预览。
 
 ### 2026-06-04 19:01 CST

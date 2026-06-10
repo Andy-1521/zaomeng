@@ -20,7 +20,7 @@
 
 ## 2026-06-10 图市首页背景固定
 
-- 图市首页 `/market` 的首屏瀑布背景已改为固定静态资源：`public/assets/market-hero/dev-market-01.webp` 到 `dev-market-18.webp`。这些资源从本地开发预览里的“彩绘图案”素材导出并压缩成 WebP，后续有更好的素材时直接替换该目录即可。
+- 图市首页 `/market` 的首屏瀑布背景已改为固定静态资源：`public/assets/market-hero/dev-market-01.webp` 到 `dev-market-18.webp`。这些资源从本地开发预览里的“彩绘图案”素材按 9:16 铺满导出并压缩成 WebP，后续有更好的素材时直接替换该目录即可。
 - 首屏背景不再根据当前 `/api/market/listings?mode=approved` 的返回动态变化；生产图市即使 `market_items` 暂无已审核素材，也不会再显示 `/assets/phone-case-demo.jpg`、`/assets/231.jpg`、`/assets/remove-watermark-demo.jpg` 这组旧演示图。
 - 本次只改前端静态资源和渲染逻辑，不向生产 `market_items` 灌数据，不改真实用户、积分、订单或图库记录。
 
