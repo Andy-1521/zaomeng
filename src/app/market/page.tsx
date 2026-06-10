@@ -117,7 +117,7 @@ const MARKET_HERO_FALLBACK_IMAGES: HeroMarketImage[] = Array.from(
     return {
       id: `fallback-market-hero-${fileIndex}`,
       title: `图市固定背景素材 ${index + 1}`,
-      url: `/assets/market-hero/dev-market-${fileIndex}.webp`,
+      url: `/assets/market-hero/thumbs/dev-market-${fileIndex}.webp`,
     };
   },
 );
