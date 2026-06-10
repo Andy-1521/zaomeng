@@ -1,6 +1,6 @@
 # AI 运维交接与高危操作清单
 
-最后更新：2026-06-10 10:48 CST
+最后更新：2026-06-10 11:53 CST
 维护人：Codex AI 运维会话
 
 本文档给后续开发 AI / 运维 AI 每次接手前阅读。目标是避免误动生产、误回退主链路、误覆盖 GitHub 主分支、误泄露密钥或误写生产数据。
@@ -43,7 +43,7 @@ https://zaomengai.icu
 - `localhost:5001` 只用于本地预览，`127.0.0.1:5000` 只用于生产服务器本机 Next.js 监听和本机 smoke，不是公网生产入口。
 - 浏览器插件模板默认站点已改为 `https://zaomengai.icu`；生产插件包只应从 `https://zaomengai.icu/plugin` 下载。
 - 生产数据库真实用户数据未做更新或删除。2026-06-09/10 的生产巡检只涉及：安全补齐 `market_items` / `market_purchases` 表、创建临时 `assistant-prod-smoke-*` / `assistant-real-smoke@example.test` 测试账号与测试订单/素材/市场记录、验证后硬清理这些测试数据；本轮测试账号残留为 0。2026-06-10 只读复查另发现一个 2026-05-27 的旧 `assistant-plugin-smoke@example.test` 测试账号仍有 3 条测试采集素材，本次未删除，需用户确认后再清理。
-- 当前生产服务确认：`zaomeng-web.service` 为 `active`，`/home/ubuntu/zaomeng/.deploy-sha` 为 `ed682df`。
+- 当前生产服务确认：`zaomeng-web.service` 为 `active`，`/home/ubuntu/zaomeng/.deploy-sha` 为 `b0d8268`。
 
 后续注意：清理生产测试数据只能限定明确的 assistant 测试账号（例如 `assistant-prod-smoke-*`、`assistant-real-smoke@example.test`、经用户确认后的 `assistant-plugin-smoke@example.test`）及其关联测试记录；不得对真实用户做批量删除、积分重算或订单清理。
 
@@ -327,6 +327,16 @@ ls -dt /home/ubuntu/zaomeng-prev-* | head -1
 - 是否需要后续注意
 
 ## 变更记录
+
+### 2026-06-10 11:53 CST
+
+- 操作：修复 PC 宽屏下图市首页首屏背景左右没有铺满的问题，并已部署生产。
+- 根因：`/market` 外层主内容区有 `sm:pl-24 sm:pr-8` 非对称留白，首屏 hero 虽然改为 `w-screen`，但仍以外层内容中心为基准，导致宽屏下整体向右偏移约 32px。
+- 改动文件：`src/app/market/page.tsx`。
+- 改动摘要：hero 首屏 section 保持 `w-screen`，并在 `sm` 以上补 `sm:-ml-8`；hero 背景图改为 `object-cover`，保证卡片内铺满。
+- 验证：`pnpm check` 通过；`pnpm build` 通过；本地 2048×1000 Playwright 验证 hero rect 为 `left=0/right=2048`；生产 2048×1000 验证 hero rect 为 `left=0/right=2048`，背景资源为 `/assets/market-hero/dev-market-*.webp`。
+- 生产部署：已部署到 `https://zaomengai.icu`，生产 `.deploy-sha = b0d8268`；`zaomeng-web.service` 为 `active`，公网 `/market` 和 `/api/plugin/version` 正常。
+- 数据影响：无生产数据库写入；部署脚本只做表存在性检查。
 
 ### 2026-06-10 09:58 CST
 
